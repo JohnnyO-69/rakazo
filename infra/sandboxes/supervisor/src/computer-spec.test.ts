@@ -446,6 +446,79 @@ describe("graphical computer spec", () => {
     },
   );
 
+  it.skipIf(process.platform !== "linux")(
+    "does not rewrite a live profile when SingletonLock misses that browser",
+    () => {
+      const root = path.resolve(import.meta.dirname, "../../computer");
+      const temp = mkdtempSync(path.join(tmpdir(), "rakazo-browser-live-"));
+      const bin = path.join(temp, "bin");
+      const home = path.join(temp, "home");
+      const capture = path.join(temp, "args");
+      mkdirSync(bin);
+      writeFileSync(path.join(bin, "chromium"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$RAKAZO_TEST_ARGS"\n');
+      chmodSync(path.join(bin, "chromium"), 0o755);
+      const sleeper = path.join(bin, "sleeper");
+      writeFileSync(sleeper, "#!/bin/sh\nsleep 120\n");
+      chmodSync(sleeper, 0o755);
+
+      const profile = path.join(home, ".browser-profiles/chromium-bot-live");
+      const prefsPath = path.join(profile, "Default", "Preferences");
+      const cookiesPath = path.join(profile, "Default", "Network", "Cookies");
+      mkdirSync(path.dirname(cookiesPath), { recursive: true });
+      const prefs = '{\n  "profile": {\n    "exit_type": "Crashed"\n  }\n}\n';
+      writeFileSync(prefsPath, prefs);
+      writeFileSync(cookiesPath, "session=kept");
+      const browser = spawn(
+        sleeper,
+        [`--user-data-dir=${profile}`, "--remote-debugging-port=45933"],
+        { stdio: "ignore", detached: true },
+      );
+      const renderer = spawn(sleeper, ["--type=renderer", `--user-data-dir=${profile}`], {
+        stdio: "ignore",
+        detached: true,
+      });
+      const liveLock = path.join(profile, "SingletonLock");
+      const launch = (args: string[] = []) =>
+        spawnSync("bash", [path.join(root, "rakazo-browser"), ...args], {
+          env: {
+            ...process.env,
+            DISPLAY: ":1",
+            HOME: home,
+            PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+            RAKAZO_BROWSER_PROFILE: profile,
+            RAKAZO_TEST_ARGS: capture,
+          },
+          encoding: "utf8",
+        });
+      try {
+        symlinkSync(`testhost-${renderer.pid}`, liveLock);
+        const kept = launch();
+        expect(kept.status, kept.error?.message ?? kept.stderr).toBe(0);
+        expect(readFileSync(prefsPath, "utf8")).toBe(prefs);
+        expect(readFileSync(cookiesPath, "utf8")).toBe("session=kept");
+        expect(readlinkSync(liveLock)).toBe(`testhost-${renderer.pid}`);
+        expect(() => readFileSync(capture, "utf8")).toThrow();
+
+        const opened = launch(["https://example.com"]);
+        expect(opened.status).not.toBe(0);
+        expect(readFileSync(prefsPath, "utf8")).toBe(prefs);
+        expect(readFileSync(cookiesPath, "utf8")).toBe("session=kept");
+        expect(readlinkSync(liveLock)).toBe(`testhost-${renderer.pid}`);
+        expect(() => readFileSync(capture, "utf8")).toThrow();
+      } finally {
+        for (const child of [browser, renderer]) {
+          if (!child.pid) continue;
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch {
+            child.kill("SIGKILL");
+          }
+        }
+        rmSync(temp, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("keeps container names stable so a bot can resume", () => {
     expect(containerNameFor("bot_1")).toBe("rakazo-bot-bot_1");
     expect(containerNameFor("bot_1")).toBe(containerNameFor("bot_1"));

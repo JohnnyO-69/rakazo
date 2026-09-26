@@ -92,12 +92,90 @@ profile_lock_is_live() {
   return 0
 }
 
-if [ -d "$ACTUAL_PROFILE" ] && ! profile_lock_is_live "$ACTUAL_PROFILE"; then
-  rm -f "$ACTUAL_PROFILE/SingletonLock" "$ACTUAL_PROFILE/SingletonCookie" "$ACTUAL_PROFILE/SingletonSocket" 2>/dev/null || true
-  find "$ACTUAL_PROFILE" \( -name Preferences -o -name 'Local State' \) -type f 2>/dev/null |
-    while IFS= read -r f; do
-      clear_crash_state "$f" 2>/dev/null || rm -f "${f}.tmp"
-    done || true
+# The lock often points at a wrapper, a renderer, or a reused PID while the
+# debugger-owning browser is still running. Rewriting that profile or starting
+# another Chromium drops the live session.
+profile_browser_pid() {
+  profile="$1"
+  [ -d /proc ] || return 1
+  for proc_dir in /proc/[0-9]*; do
+    pid="${proc_dir#/proc/}"
+    case "$pid" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    kill -0 "$pid" 2>/dev/null || continue
+    has_arg "$pid" "--user-data-dir=$profile" || continue
+    has_prefix "$pid" "--remote-debugging-port=" "--user-data-dir=$profile" || continue
+    if has_prefix "$pid" "--type=" "--user-data-dir=$profile"; then
+      continue
+    fi
+    printf '%s\n' "$pid"
+    return 0
+  done
+  return 1
+}
+
+open_live_browser_url() {
+  python3 -c 'import sys, urllib.parse, urllib.request
+pid, profile, url = sys.argv[1:]
+data = open("/proc/" + pid + "/cmdline", "rb").read().replace(b"\0", b" ")
+if profile:
+    data = data.replace(b"--user-data-dir=" + profile.encode(), b" ", 1)
+key = b"--remote-debugging-port="
+start = len(data)
+port = None
+while True:
+    start = data.rfind(key, 0, start)
+    if start < 0:
+        break
+    if start == 0 or data[start - 1:start] == b" ":
+        digits = bytearray()
+        index = start + len(key)
+        while index < len(data) and 48 <= data[index] <= 57:
+            digits.append(data[index])
+            index += 1
+        if digits:
+            port = int(digits)
+            break
+if port is None:
+    raise SystemExit(1)
+target = "http://127.0.0.1:" + str(port) + "/json/new?" + urllib.parse.quote(url, safe="")
+for method in ("PUT", "GET"):
+    try:
+        req = urllib.request.Request(target, method=method)
+        with urllib.request.urlopen(req, timeout=2):
+            raise SystemExit(0)
+    except SystemExit:
+        raise
+    except Exception:
+        pass
+raise SystemExit(1)
+' "$@"
+}
+
+live_pid=""
+if [ -d "$ACTUAL_PROFILE" ]; then
+  live_pid=$(profile_browser_pid "$ACTUAL_PROFILE" || true)
+  if ! profile_lock_is_live "$ACTUAL_PROFILE" && [ -z "$live_pid" ]; then
+    rm -f "$ACTUAL_PROFILE/SingletonLock" "$ACTUAL_PROFILE/SingletonCookie" "$ACTUAL_PROFILE/SingletonSocket" 2>/dev/null || true
+    find "$ACTUAL_PROFILE" \( -name Preferences -o -name 'Local State' \) -type f 2>/dev/null |
+      while IFS= read -r f; do
+        clear_crash_state "$f" 2>/dev/null || rm -f "${f}.tmp"
+      done || true
+  fi
+  if [ -n "$live_pid" ] && ! profile_lock_is_live "$ACTUAL_PROFILE"; then
+    target_url=""
+    for arg in "$@"; do
+      case "$arg" in
+        --*) ;;
+        about:*|*://*) target_url=$arg ;;
+      esac
+    done
+    if [ -n "$target_url" ]; then
+      open_live_browser_url "$live_pid" "$ACTUAL_PROFILE" "$target_url"
+    fi
+    exit 0
+  fi
 fi
 
 FLAGS="--test-type --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-software-rasterizer --no-first-run --no-default-browser-check --disable-session-crashed-bubble --hide-crash-restore-bubble --password-store=basic --restore-last-session --start-maximized --remote-debugging-address=127.0.0.1 --remote-debugging-port=$DEBUG_PORT"
