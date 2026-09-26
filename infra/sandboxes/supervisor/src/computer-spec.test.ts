@@ -455,7 +455,10 @@ describe("graphical computer spec", () => {
       const home = path.join(temp, "home");
       const capture = path.join(temp, "args");
       mkdirSync(bin);
-      writeFileSync(path.join(bin, "chromium"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$RAKAZO_TEST_ARGS"\n');
+      writeFileSync(
+        path.join(bin, "chromium"),
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$RAKAZO_TEST_ARGS"\n',
+      );
       chmodSync(path.join(bin, "chromium"), 0o755);
       const sleeper = path.join(bin, "sleeper");
       writeFileSync(sleeper, "#!/bin/sh\nsleep 120\n");
