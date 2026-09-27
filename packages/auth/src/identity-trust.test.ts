@@ -20,14 +20,14 @@ function fixture({
   baseURL = "http://auth.example.test",
   webOrigin = "http://web.example.test",
   requestOrigin,
-  expireAdmissionGate = false,
+  expireAdmissionGate,
 }: {
   allowlist?: string;
   delivery?: boolean;
   baseURL?: string;
   webOrigin?: string;
   requestOrigin?: string;
-  expireAdmissionGate?: boolean;
+  expireAdmissionGate?: "before" | "after";
 } = {}) {
   const data: Record<string, Record<string, unknown>[]> = {
     user: [],
@@ -54,6 +54,7 @@ function fixture({
     $transaction: vi.fn(
       async (run: (tx: typeof prisma) => Promise<unknown>, options?: { timeout?: number }) => {
         if (!expireAdmissionGate || options?.timeout === undefined) return run(prisma);
+        if (expireAdmissionGate === "before") throw new Error("admission gate timeout");
         const pending = run(prisma);
         void pending.catch(() => undefined);
         for (let step = 0; step < 5; step += 1) await Promise.resolve();
@@ -242,7 +243,7 @@ describe("identity trust through auth endpoints", () => {
     expect(f.policy.ownerUserId).toBe(f.data.user![0]!.id);
   });
 
-  it("fails the signup when the admission gate expires, without an unhandled rejection", async () => {
+  it("keeps a completed signup when the admission gate expires after admission", async () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => {
       unhandled.push(reason);
@@ -252,13 +253,40 @@ describe("identity trust through auth endpoints", () => {
       const f = fixture({
         allowlist: "@example.test",
         delivery: false,
-        expireAdmissionGate: true,
+        expireAdmissionGate: "after",
+      });
+      const response = await f.signup();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { token: string };
+      expect(body.token).toEqual(expect.any(String));
+      expect(f.data.user).toHaveLength(1);
+      expect(f.data.user![0]!.emailVerified).toBe(true);
+      expect(f.policy.ownerUserId).toBe(f.data.user![0]!.id);
+      expect((await f.signin()).status).toBe(200);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  it("fails signup when the admission gate expires before an account exists", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const f = fixture({
+        allowlist: "@example.test",
+        delivery: false,
+        expireAdmissionGate: "before",
       });
       const response = await f.signup();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(unhandled).toEqual([]);
       expect(response.status).toBe(500);
-      expect(await response.text()).not.toContain("token");
+      expect(f.data.user).toHaveLength(0);
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
