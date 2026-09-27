@@ -25,8 +25,9 @@ KNOWN_LAUNCH = frozenset(
 CONTROL_TIMEOUT_SEC = 10
 LAUNCH_SPAWN_POLL_SEC = 0.2
 # A live browser opens a URL in this process, then exits. The spawn poll has to
-# outlast that attempt or a port that never answers looks like a successful launch.
-BROWSER_OPEN_POLL_SEC = 0.5
+# outlast that forward (cold python, urllib, and /json/new, capped at 1.6s) plus
+# the profile scan, or a port that never answers looks like a successful launch.
+BROWSER_OPEN_POLL_SEC = 2.2
 NATIVE_CAPTURES = {}
 NATIVE_LOCK = threading.Lock()
 DISPLAY_LOCKS = {}

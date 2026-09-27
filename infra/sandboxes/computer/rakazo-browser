@@ -122,9 +122,11 @@ profile_browser_pid() {
 }
 
 # Computer control treats a launcher still running after its spawn poll as success.
-# Give up before that so a debugging port that never answers is a failed open.
+# 1.6s fits a cold python start and urllib import, then /json/new while the debugger
+# comes up. A socket that accepts and never answers fails on the 0.5s request cap.
+# The browser spawn poll is longer than this plus the profile scan.
 open_live_browser_url() {
-  timeout 0.15 python3 -c 'import sys, urllib.error, urllib.parse, urllib.request
+  timeout 1.6 python3 -c 'import sys, time, urllib.error, urllib.parse, urllib.request
 pid, profile, url = sys.argv[1:]
 data = open("/proc/" + pid + "/cmdline", "rb").read().replace(b"\0", b" ")
 if profile:
@@ -148,18 +150,28 @@ while True:
 if port is None:
     raise SystemExit(1)
 target = "http://127.0.0.1:" + str(port) + "/json/new?" + urllib.parse.quote(url, safe="")
-for method in ("PUT", "GET"):
-    try:
-        req = urllib.request.Request(target, method=method)
-        with urllib.request.urlopen(req, timeout=0.1):
-            raise SystemExit(0)
-    except SystemExit:
-        raise
-    except Exception as error:
-        reason = error.reason if isinstance(error, urllib.error.URLError) else error
-        if isinstance(reason, TimeoutError):
-            break
-raise SystemExit(1)
+deadline = time.monotonic() + 1.0
+while True:
+    remaining = deadline - time.monotonic()
+    if remaining < 0.05:
+        raise SystemExit(1)
+    retry = True
+    for method in ("PUT", "GET"):
+        try:
+            req = urllib.request.Request(target, method=method)
+            with urllib.request.urlopen(req, timeout=min(0.5, remaining)):
+                raise SystemExit(0)
+        except SystemExit:
+            raise
+        except Exception as error:
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
+            if isinstance(reason, TimeoutError):
+                raise SystemExit(1)
+            if not isinstance(reason, OSError):
+                retry = False
+    if not retry:
+        raise SystemExit(1)
+    time.sleep(0.05)
 ' "$@"
 }
 

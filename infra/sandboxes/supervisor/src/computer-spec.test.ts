@@ -542,34 +542,34 @@ describe("graphical computer spec", () => {
         }
         return readFileSync(file, "utf8").trim();
       };
-      const debugPort = publishedPort(portFile);
-      const browser = spawn(
-        sleeper,
-        [`--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`],
-        { stdio: "ignore", detached: true },
-      );
-      const renderer = spawn(sleeper, ["--type=renderer", `--user-data-dir=${profile}`], {
-        stdio: "ignore",
-        detached: true,
-      });
-      const wrapper = spawn(sleeper, [`--user-data-dir=${profile}`], {
-        stdio: "ignore",
-        detached: true,
-      });
-      children.push(browser, renderer, wrapper);
-      const liveLock = path.join(profile, "SingletonLock");
-      const launch = (args: string[] = []) =>
-        spawnSync("bash", [path.join(root, "rakazo-browser"), ...args], {
-          env: launchEnv,
-          encoding: "utf8",
-        });
-      const forwarded = (url: string) =>
-        readFileSync(urlsFile, "utf8").includes(`/json/new?${encodeURIComponent(url)}`);
-      const pointLock = (pid: number | undefined) => {
-        rmSync(liveLock, { force: true });
-        symlinkSync(`testhost-${pid}`, liveLock);
-      };
       try {
+        const debugPort = publishedPort(portFile);
+        const browser = spawn(
+          sleeper,
+          [`--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`],
+          { stdio: "ignore", detached: true },
+        );
+        const renderer = spawn(sleeper, ["--type=renderer", `--user-data-dir=${profile}`], {
+          stdio: "ignore",
+          detached: true,
+        });
+        const wrapper = spawn(sleeper, [`--user-data-dir=${profile}`], {
+          stdio: "ignore",
+          detached: true,
+        });
+        children.push(browser, renderer, wrapper);
+        const liveLock = path.join(profile, "SingletonLock");
+        const launch = (args: string[] = []) =>
+          spawnSync("bash", [path.join(root, "rakazo-browser"), ...args], {
+            env: launchEnv,
+            encoding: "utf8",
+          });
+        const forwarded = (url: string) =>
+          readFileSync(urlsFile, "utf8").includes(`/json/new?${encodeURIComponent(url)}`);
+        const pointLock = (pid: number | undefined) => {
+          rmSync(liveLock, { force: true });
+          symlinkSync(`testhost-${pid}`, liveLock);
+        };
         pointLock(renderer.pid);
         const kept = launch();
         expect(kept.status, kept.error?.message ?? kept.stderr).toBe(0);
