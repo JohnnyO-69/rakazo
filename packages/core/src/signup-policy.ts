@@ -42,3 +42,49 @@ export function signupPolicyFromEnv(input: {
     allowlist: parseAllowlist(input.signupAllowlist),
   };
 }
+
+/**
+ * Non-empty SIGNUP_ALLOWLIST replaces the stored list on each API start.
+ * A blank or unset value does not clear a stored list.
+ * Uninitialized rows are copied separately so an upgrade still seeds both flags once.
+ */
+export function signupAllowlistBootUpdate(
+  storedAllowlist: string,
+  envAllowlist: string | undefined,
+  policyInitialized: boolean,
+): string | null {
+  if (!policyInitialized) return null;
+  const next = parseAllowlist(envAllowlist).join(",");
+  if (!next) return null;
+  if (next === parseAllowlist(storedAllowlist).join(",")) return null;
+  return next;
+}
+
+/** How an allowlisted signup proceeds when delivery may be missing. */
+export function allowlistedSignupAdmission(input: {
+  allowlistSize: number;
+  hasEmailDelivery: boolean;
+  existingHumanCount: number;
+}): "open" | "verify" | "needs-delivery" {
+  if (input.allowlistSize === 0) return "open";
+  if (input.hasEmailDelivery) return "verify";
+  if (input.existingHumanCount === 0) return "open";
+  return "needs-delivery";
+}
+
+/**
+ * The first human account may be admitted without mailbox proof when no
+ * delivery provider is configured. A visible different human, or more than
+ * one, keeps the delivery requirement.
+ */
+export function admitUnverifiedAllowlistedUser(input: {
+  allowlistSize: number;
+  hasEmailDelivery: boolean;
+  humanUserIds: readonly string[];
+  userId: string;
+}): boolean {
+  if (input.allowlistSize === 0 || input.hasEmailDelivery) return false;
+  if (input.humanUserIds.length > 1) return false;
+  if (input.humanUserIds.length === 1) return input.humanUserIds[0] === input.userId;
+  return true;
+}

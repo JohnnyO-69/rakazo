@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  admitUnverifiedAllowlistedUser,
+  allowlistedSignupAdmission,
   emailAllowed,
   parseAllowlist,
+  signupAllowlistBootUpdate,
   signupPolicyFromEnv,
   signupRequiresEmailVerification,
   signupsOpen,
@@ -44,5 +47,96 @@ describe("signup policy", () => {
         signupAllowlist: " You@Example.com, @company.test ",
       }),
     ).toEqual({ enabled: false, allowlist: ["you@example.com", "@company.test"] });
+  });
+
+  it("reapplies a non-empty env allowlist and leaves a blank one stored", () => {
+    expect(signupAllowlistBootUpdate("old@example.test", " New@Example.test ", true)).toBe(
+      "new@example.test",
+    );
+    expect(
+      signupAllowlistBootUpdate(
+        "you@example.test,@company.test",
+        " you@example.test, @company.test ",
+        true,
+      ),
+    ).toBeNull();
+    expect(signupAllowlistBootUpdate("kept@example.test", "", true)).toBeNull();
+    expect(signupAllowlistBootUpdate("kept@example.test", "  ,  ", true)).toBeNull();
+    expect(signupAllowlistBootUpdate("kept@example.test", undefined, true)).toBeNull();
+    expect(signupAllowlistBootUpdate("", "owner@example.test", false)).toBeNull();
+  });
+
+  it("lets only the first allowlisted account skip delivery", () => {
+    expect(
+      allowlistedSignupAdmission({
+        allowlistSize: 0,
+        hasEmailDelivery: false,
+        existingHumanCount: 4,
+      }),
+    ).toBe("open");
+    expect(
+      allowlistedSignupAdmission({
+        allowlistSize: 1,
+        hasEmailDelivery: true,
+        existingHumanCount: 0,
+      }),
+    ).toBe("verify");
+    expect(
+      allowlistedSignupAdmission({
+        allowlistSize: 1,
+        hasEmailDelivery: false,
+        existingHumanCount: 0,
+      }),
+    ).toBe("open");
+    expect(
+      allowlistedSignupAdmission({
+        allowlistSize: 1,
+        hasEmailDelivery: false,
+        existingHumanCount: 1,
+      }),
+    ).toBe("needs-delivery");
+  });
+
+  it("admits an unverified allowlisted user only when they are the sole human and delivery is absent", () => {
+    expect(
+      admitUnverifiedAllowlistedUser({
+        allowlistSize: 1,
+        hasEmailDelivery: false,
+        humanUserIds: [],
+        userId: "user-1",
+      }),
+    ).toBe(true);
+    expect(
+      admitUnverifiedAllowlistedUser({
+        allowlistSize: 1,
+        hasEmailDelivery: false,
+        humanUserIds: ["user-1"],
+        userId: "user-1",
+      }),
+    ).toBe(true);
+    expect(
+      admitUnverifiedAllowlistedUser({
+        allowlistSize: 1,
+        hasEmailDelivery: false,
+        humanUserIds: ["user-2"],
+        userId: "user-1",
+      }),
+    ).toBe(false);
+    expect(
+      admitUnverifiedAllowlistedUser({
+        allowlistSize: 1,
+        hasEmailDelivery: true,
+        humanUserIds: ["user-1"],
+        userId: "user-1",
+      }),
+    ).toBe(false);
+    expect(
+      admitUnverifiedAllowlistedUser({
+        allowlistSize: 0,
+        hasEmailDelivery: false,
+        humanUserIds: [],
+        userId: "user-1",
+      }),
+    ).toBe(false);
   });
 });

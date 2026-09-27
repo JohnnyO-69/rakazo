@@ -43,6 +43,14 @@ function fixture({
   const prisma = {
     authData: data,
     deploymentSettings: { findUnique: vi.fn(async () => policy) },
+    user: {
+      findMany: vi.fn(async () =>
+        data
+          .user!.filter((user) => !String(user.email).toLowerCase().endsWith("@messaging.invalid"))
+          .slice(0, 2)
+          .map((user) => ({ id: String(user.id) })),
+      ),
+    },
     spaceMember: {
       findFirst: vi.fn(async ({ where }: { where: { userId: string } }) =>
         members.has(where.userId) ? { spaceId: "space-1" } : null,
@@ -146,10 +154,61 @@ describe("identity trust through auth endpoints", () => {
     expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed for a matching allowlisted address when email delivery is unavailable", async () => {
+  it("admits the first allowlisted account without email delivery and still blocks everyone else", async () => {
     const f = fixture({ allowlist: "@example.test", delivery: false });
-    expect((await f.signup()).status).toBe(400);
+    expect((await f.signup("outsider@other.test")).status).toBe(400);
     expect(f.data.user).toHaveLength(0);
+    const response = await f.signup();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { token: string; user: { emailVerified: boolean } };
+    expect(body.token).toEqual(expect.any(String));
+    expect(f.data.user).toHaveLength(1);
+    expect(f.data.user![0]!.emailVerified).toBe(true);
+    expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
+    expect(
+      await f.auth.api.getSession({
+        headers: new Headers({ authorization: `Bearer ${body.token}` }),
+      }),
+    ).toMatchObject({ user: { emailVerified: true } });
+    expect((await f.signin()).status).toBe(200);
+    const second = await f.signup("second@example.test");
+    expect(second.status).toBe(400);
+    expect(await second.text()).toContain("Registration requires email delivery");
+    expect(f.data.user).toHaveLength(1);
+    expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
+    expect(f.messages).toHaveLength(0);
+  });
+
+  it("does not treat a messaging identity as the first account", async () => {
+    const f = fixture({ allowlist: "approved@example.test", delivery: false });
+    f.data.user!.push({
+      id: "msg-1",
+      name: "Messaging",
+      email: "msg-sendblue15550001111@messaging.invalid",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const response = await f.signup();
+    expect(response.status).toBe(200);
+    expect(f.data.user!.filter((user) => user.email === "approved@example.test")).toHaveLength(1);
+    expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps allowlisted signup closed without delivery once a human account exists", async () => {
+    const f = fixture({ allowlist: "@example.test", delivery: false });
+    f.data.user!.push({
+      id: "human-1",
+      name: "Owner",
+      email: "owner@example.test",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const response = await f.signup("second@example.test");
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("Registration requires email delivery");
+    expect(f.data.user).toHaveLength(1);
     expect(bootstrapUserSpace).not.toHaveBeenCalled();
   });
 

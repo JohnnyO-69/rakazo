@@ -1,5 +1,12 @@
 import type { TransactionalEmail, TransactionalEmailProvider } from "@rakazo/adapter-kit";
-import { emailAllowed, isMessagingEmail, parseAllowlist, signupPolicyFromEnv } from "@rakazo/core";
+import {
+  admitUnverifiedAllowlistedUser,
+  allowlistedSignupAdmission,
+  emailAllowed,
+  isMessagingEmail,
+  parseAllowlist,
+  signupPolicyFromEnv,
+} from "@rakazo/core";
 import { bootstrapUserSpace, type PrismaClient } from "@rakazo/db";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
@@ -33,6 +40,20 @@ export async function resolveSignupPolicy(
     };
   }
   return signupPolicyFromEnv(env);
+}
+
+/** Humans only. Messaging identities must not consume the first-account exemption. */
+async function humanUserIds(prisma: Pick<PrismaClient, "user">): Promise<string[]> {
+  const users = await prisma.user.findMany({
+    where: {
+      NOT: {
+        email: { endsWith: "@messaging.invalid", mode: "insensitive" },
+      },
+    },
+    select: { id: true },
+    take: 2,
+  });
+  return users.map((user) => user.id);
 }
 
 export function createAuth(prisma: PrismaClient, env: AuthEnv) {
@@ -126,6 +147,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
           ctx.path === "/sign-up/email" || ctx.path === "/sign-in/email"
             ? await resolveSignupPolicy(prisma, env)
             : undefined;
+        let requireEmailVerification = false;
         if (ctx.path === "/sign-up/email") {
           if (!policy?.enabled) {
             throw new APIError("BAD_REQUEST", { message: "Registration is closed" });
@@ -133,9 +155,18 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
           if (!emailAllowed(String(ctx.body?.email ?? ""), policy.allowlist)) {
             throw new APIError("BAD_REQUEST", { message: "Email is not allowed to register" });
           }
-          if (policy.allowlist.length > 0 && !env.email) {
+          const admission = allowlistedSignupAdmission({
+            allowlistSize: policy.allowlist.length,
+            hasEmailDelivery: Boolean(env.email),
+            existingHumanCount:
+              policy.allowlist.length > 0 && !env.email ? (await humanUserIds(prisma)).length : 0,
+          });
+          if (admission === "needs-delivery") {
             throw new APIError("BAD_REQUEST", { message: "Registration requires email delivery" });
           }
+          requireEmailVerification = admission === "verify";
+        } else if (policy) {
+          requireEmailVerification = policy.allowlist.length > 0;
         }
         // Return a request-local override; mutating the shared auth options
         // would leak a concurrent request's policy into another signup.
@@ -145,7 +176,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
               ...(policy
                 ? {
                     options: {
-                      emailAndPassword: { requireEmailVerification: policy.allowlist.length > 0 },
+                      emailAndPassword: { requireEmailVerification },
                     },
                   }
                 : {}),
@@ -173,12 +204,30 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             // The auth adapter can still be inside the signup transaction.
             const user = await ctx?.context.internalAdapter.findUserById(session.userId);
             const policy = await resolveSignupPolicy(prisma, env);
-            if (
-              !user ||
-              isMessagingEmail(user.email) ||
-              (!user.emailVerified && policy.allowlist.length > 0)
-            ) {
+            if (!user || isMessagingEmail(user.email)) {
               throw new APIError("FORBIDDEN", { message: "Email verification required" });
+            }
+            if (!user.emailVerified && policy.allowlist.length > 0) {
+              const humanIds = env.email ? [] : await humanUserIds(prisma);
+              const admit =
+                !env.email &&
+                emailAllowed(user.email, policy.allowlist) &&
+                admitUnverifiedAllowlistedUser({
+                  allowlistSize: policy.allowlist.length,
+                  hasEmailDelivery: false,
+                  humanUserIds: humanIds,
+                  userId: user.id,
+                });
+              if (!admit) {
+                throw new APIError("FORBIDDEN", { message: "Email verification required" });
+              }
+              if (!ctx) {
+                throw new APIError("FORBIDDEN", { message: "Email verification required" });
+              }
+              // No delivery channel exists, and this is the only human account.
+              // Mark it admitted so later requests keep working. Mailbox ownership
+              // is not proven; further signups stay closed until delivery exists.
+              await ctx.context.internalAdapter.updateUser(user.id, { emailVerified: true });
             }
             // Unverified signup must not provision resources or claim the
             // deployment owner. Bootstrap only at the first admitted session.
