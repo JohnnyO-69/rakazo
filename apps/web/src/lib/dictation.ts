@@ -68,7 +68,8 @@ function startsWithWholePrefix(serverText: string, prefix: string): boolean {
   const tail = serverText.toLowerCase();
   if (!tail.startsWith(head)) return false;
   const boundary = tail[head.length];
-  return boundary === undefined || /\s/.test(boundary);
+  // Punctuation ends the retained word. Letters, numbers, and "_" continue it.
+  return boundary === undefined || !/[\p{L}\p{N}_]/u.test(boundary);
 }
 
 export function combineTranscript(prefix: string, serverText: string): string {

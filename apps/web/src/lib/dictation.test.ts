@@ -550,6 +550,39 @@ describe("combineTranscript", () => {
   it("joins a short prefix that is not a whole word in the server text", () => {
     expect(combineTranscript("we", "welcome")).toBe("we welcome");
   });
+
+  it("does not repeat a word when the server transcript adds a comma", () => {
+    expect(combineTranscript("hello", "hello, world")).toBe("hello, world");
+    expect(combineTranscript("hello", "Hello, world")).toBe("Hello, world");
+  });
+
+  it.each([
+    ["hello."],
+    ["hello!"],
+    ["hello?"],
+    ["hello; world"],
+    ["hello: world"],
+    ["hello's world"],
+    ["hello-world"],
+    ["hello)"],
+    ['hello"'],
+    ["hello，world"],
+  ])("treats punctuation after the retained word as a boundary (%s)", (serverText) => {
+    expect(combineTranscript("hello", serverText)).toBe(serverText);
+  });
+
+  it("keeps the server transcript when whitespace follows the retained words", () => {
+    expect(combineTranscript("call me later", "Call me later and goodbye")).toBe(
+      "Call me later and goodbye",
+    );
+  });
+
+  it("still joins when the server text continues the retained token", () => {
+    expect(combineTranscript("hello", "helloworld")).toBe("hello helloworld");
+    expect(combineTranscript("hello", "hello2")).toBe("hello hello2");
+    expect(combineTranscript("hello", "hello_world")).toBe("hello hello_world");
+    expect(combineTranscript("na", "naïve")).toBe("na naïve");
+  });
 });
 
 describe("dictation engine choice", () => {
