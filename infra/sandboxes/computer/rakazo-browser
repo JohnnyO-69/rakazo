@@ -76,13 +76,19 @@ has_prefix() {
 # A stale SingletonLock is not a live browser. Leaving exit_type=Crashed makes Chrome
 # drop session cookies (account sign-in) on the next start while persistent cookies remain.
 # kill -0 is not enough: the PID may have been reused by an unrelated process.
-profile_lock_is_live() {
+profile_lock_pid() {
   profile="$1"
   lock=$(readlink "$profile/SingletonLock" 2>/dev/null || true)
   pid=${lock##*-}
   case "$pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
+  printf '%s\n' "$pid"
+}
+
+profile_lock_is_live() {
+  profile="$1"
+  pid=$(profile_lock_pid "$profile") || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   [ -r "/proc/$pid/cmdline" ] || return 0
   has_arg "$pid" "--user-data-dir=$profile" || return 1
@@ -115,8 +121,10 @@ profile_browser_pid() {
   return 1
 }
 
+# Computer control treats a launcher still running after its spawn poll as success.
+# Give up before that so a debugging port that never answers is a failed open.
 open_live_browser_url() {
-  python3 -c 'import sys, urllib.parse, urllib.request
+  timeout 0.15 python3 -c 'import sys, urllib.error, urllib.parse, urllib.request
 pid, profile, url = sys.argv[1:]
 data = open("/proc/" + pid + "/cmdline", "rb").read().replace(b"\0", b" ")
 if profile:
@@ -143,19 +151,23 @@ target = "http://127.0.0.1:" + str(port) + "/json/new?" + urllib.parse.quote(url
 for method in ("PUT", "GET"):
     try:
         req = urllib.request.Request(target, method=method)
-        with urllib.request.urlopen(req, timeout=2):
+        with urllib.request.urlopen(req, timeout=0.1):
             raise SystemExit(0)
     except SystemExit:
         raise
-    except Exception:
-        pass
+    except Exception as error:
+        reason = error.reason if isinstance(error, urllib.error.URLError) else error
+        if isinstance(reason, TimeoutError):
+            break
 raise SystemExit(1)
 ' "$@"
 }
 
 live_pid=""
+lock_pid=""
 if [ -d "$ACTUAL_PROFILE" ]; then
   live_pid=$(profile_browser_pid "$ACTUAL_PROFILE" || true)
+  lock_pid=$(profile_lock_pid "$ACTUAL_PROFILE" || true)
   if ! profile_lock_is_live "$ACTUAL_PROFILE" && [ -z "$live_pid" ]; then
     rm -f "$ACTUAL_PROFILE/SingletonLock" "$ACTUAL_PROFILE/SingletonCookie" "$ACTUAL_PROFILE/SingletonSocket" 2>/dev/null || true
     find "$ACTUAL_PROFILE" \( -name Preferences -o -name 'Local State' \) -type f 2>/dev/null |
@@ -163,7 +175,9 @@ if [ -d "$ACTUAL_PROFILE" ]; then
         clear_crash_state "$f" 2>/dev/null || rm -f "${f}.tmp"
       done || true
   fi
-  if [ -n "$live_pid" ] && ! profile_lock_is_live "$ACTUAL_PROFILE"; then
+  # Reuse the debugger browser unless the lock names that same process.
+  # A live wrapper, renderer, or reused PID must not start another Chromium.
+  if [ -n "$live_pid" ] && [ "$lock_pid" != "$live_pid" ]; then
     target_url=""
     for arg in "$@"; do
       case "$arg" in
@@ -172,7 +186,7 @@ if [ -d "$ACTUAL_PROFILE" ]; then
       esac
     done
     if [ -n "$target_url" ]; then
-      open_live_browser_url "$live_pid" "$ACTUAL_PROFILE" "$target_url"
+      open_live_browser_url "$live_pid" "$ACTUAL_PROFILE" "$target_url" || exit 1
     fi
     exit 0
   fi

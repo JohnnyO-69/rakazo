@@ -24,6 +24,9 @@ KNOWN_LAUNCH = frozenset(
 )
 CONTROL_TIMEOUT_SEC = 10
 LAUNCH_SPAWN_POLL_SEC = 0.2
+# A live browser opens a URL in this process, then exits. The spawn poll has to
+# outlast that attempt or a port that never answers looks like a successful launch.
+BROWSER_OPEN_POLL_SEC = 0.5
 NATIVE_CAPTURES = {}
 NATIVE_LOCK = threading.Lock()
 DISPLAY_LOCKS = {}
@@ -188,13 +191,20 @@ def is_long_lived_control(argv):
     return command == "xdg-open" or command in KNOWN_LAUNCH
 
 
+def launch_spawn_poll_sec(argv):
+    command = argv[control_command_index(argv)]
+    if command == "rakazo-browser":
+        return BROWSER_OPEN_POLL_SEC
+    return LAUNCH_SPAWN_POLL_SEC
+
+
 def run_control_argv(argv, display):
     """Run a fallback control command without holding the lock forever."""
     env = {**os.environ, "DISPLAY": display}
     if is_long_lived_control(argv):
         child = subprocess.Popen(argv, env=env, start_new_session=True)
         try:
-            code = child.wait(timeout=LAUNCH_SPAWN_POLL_SEC)
+            code = child.wait(timeout=launch_spawn_poll_sec(argv))
         except subprocess.TimeoutExpired:
             threading.Thread(target=child.wait, daemon=True).start()
             return
