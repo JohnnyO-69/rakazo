@@ -3,6 +3,8 @@ import {
   Dictation,
   MAX_TRANSCRIPTION_RESPONSE_BYTES,
   TRANSCRIPTION_RESPONSE_TIMEOUT_MS,
+  webSpeechAvailable,
+  webSpeechNeedsServerFallback,
 } from "./dictation.js";
 
 afterEach(() => {
@@ -506,6 +508,36 @@ describe("Dictation recorder fallback", () => {
   });
 });
 
+describe("dictation engine choice", () => {
+  it("uses Web Speech when the browser implements it", () => {
+    vi.stubGlobal("window", { SpeechRecognition: class {} });
+    expect(webSpeechAvailable()).toBe(true);
+  });
+
+  it("treats Electron as having no usable Web Speech", () => {
+    vi.stubGlobal("window", {
+      webkitSpeechRecognition: class {},
+      rakazoDesktop: { platform: "darwin" },
+    });
+    expect(webSpeechAvailable()).toBe(false);
+  });
+
+  it("treats an Electron user agent as having no usable Web Speech", () => {
+    vi.stubGlobal("window", { webkitSpeechRecognition: class {} });
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 Electron/44.2.0" });
+    expect(webSpeechAvailable()).toBe(false);
+  });
+
+  it("falls back only for service failures when transcription is connected", () => {
+    expect(webSpeechNeedsServerFallback("network", true)).toBe(true);
+    expect(webSpeechNeedsServerFallback("service-not-allowed", true)).toBe(true);
+    expect(webSpeechNeedsServerFallback("network", false)).toBe(false);
+    expect(webSpeechNeedsServerFallback("not-allowed", true)).toBe(false);
+    expect(webSpeechNeedsServerFallback("aborted", true)).toBe(false);
+    expect(webSpeechNeedsServerFallback(undefined, true)).toBe(false);
+  });
+});
+
 describe("Dictation web speech", () => {
   it("restarts endpoint recognition after a quiet end", async () => {
     const instances: FakeRecognition[] = [];
@@ -533,5 +565,155 @@ describe("Dictation web speech", () => {
     rec?.onend?.();
     expect(rec?.start).toHaveBeenCalledTimes(2);
     expect(dictation.state.status).toBe("listening");
+  });
+
+  it("records through the connected voice provider in Electron", async () => {
+    const constructed = vi.fn();
+    class FakeRecognition {
+      start = vi.fn();
+      stop = vi.fn();
+      abort = vi.fn();
+      constructor() {
+        constructed();
+      }
+    }
+    vi.stubGlobal("window", {
+      webkitSpeechRecognition: FakeRecognition,
+      rakazoDesktop: { platform: "darwin" },
+    });
+    const fetchMock = vi.fn(async () => Response.json({ text: "from fish" }));
+    stubRecorderFallback(fetchMock);
+
+    const onFinal = vi.fn();
+    const dictation = new Dictation();
+    await dictation.listen({ mode: "hold", transcribe: true, onFinal });
+    expect(constructed).not.toHaveBeenCalled();
+    expect(dictation.state.error).toBeUndefined();
+    expect(dictation.state.status).toBe("listening");
+    dictation.submitHold();
+    await vi.waitFor(() => expect(onFinal).toHaveBeenCalledWith("from fish"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/voice/transcribe",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it.each(["network", "service-not-allowed"])(
+    "falls back to server transcription when Web Speech fails with %s",
+    async (error) => {
+      const instances: Array<{
+        onerror: ((event: { error?: string }) => void) | null;
+        onend: (() => void) | null;
+        start: ReturnType<typeof vi.fn>;
+        abort: ReturnType<typeof vi.fn>;
+      }> = [];
+      class FakeRecognition {
+        continuous = false;
+        interimResults = false;
+        lang = "";
+        onresult: ((event: unknown) => void) | null = null;
+        onerror: ((event: { error?: string }) => void) | null = null;
+        onend: (() => void) | null = null;
+        start = vi.fn();
+        stop = vi.fn();
+        abort = vi.fn(() => {
+          this.onerror?.({ error: "aborted" });
+          this.onend?.();
+        });
+        constructor() {
+          instances.push(this);
+        }
+      }
+      vi.stubGlobal("window", { SpeechRecognition: FakeRecognition });
+      const fetchMock = vi.fn(async () => Response.json({ text: "from server" }));
+      let markRecording: () => void = () => undefined;
+      const recording = new Promise<void>((resolve) => {
+        markRecording = resolve;
+      });
+      const track = { stop: vi.fn() };
+      vi.stubGlobal("navigator", {
+        mediaDevices: {
+          getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })),
+        },
+        language: "en-US",
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "MediaRecorder",
+        class {
+          state = "inactive";
+          ondataavailable: ((event: { data: Blob }) => void) | null = null;
+          onstop: (() => void) | null = null;
+          start() {
+            this.state = "recording";
+            markRecording();
+          }
+          stop() {
+            this.state = "inactive";
+            this.ondataavailable?.({ data: new Blob(["audio"], { type: "audio/webm" }) });
+            this.onstop?.();
+          }
+        },
+      );
+
+      const onFinal = vi.fn();
+      const dictation = new Dictation();
+      await dictation.listen({ mode: "hold", transcribe: true, onFinal });
+      const rec = instances[0];
+      expect(rec?.start).toHaveBeenCalledOnce();
+      const onend = rec?.onend;
+      rec?.onerror?.({ error });
+      onend?.();
+      await recording;
+      expect(dictation.state.error).toBeUndefined();
+      expect(dictation.state.status).toBe("listening");
+      expect(rec?.abort).toHaveBeenCalledOnce();
+      dictation.submitHold();
+      await vi.waitFor(() => expect(onFinal).toHaveBeenCalledWith("from server"));
+      expect(onFinal).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps a Web Speech permission error when no server fallback applies", async () => {
+    const instances: Array<{
+      onerror: ((event: { error?: string }) => void) | null;
+    }> = [];
+    class FakeRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      onresult: ((event: unknown) => void) | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      start = vi.fn();
+      stop = vi.fn();
+      abort = vi.fn();
+      constructor() {
+        instances.push(this);
+      }
+    }
+    vi.stubGlobal("window", { SpeechRecognition: FakeRecognition });
+    vi.stubGlobal("navigator", { language: "en-US" });
+    const started = vi.fn();
+    vi.stubGlobal(
+      "MediaRecorder",
+      class {
+        start() {
+          started();
+        }
+      },
+    );
+
+    const dictation = new Dictation();
+    await dictation.listen({ mode: "hold", transcribe: true, onFinal: () => undefined });
+    instances[0]?.onerror?.({ error: "not-allowed" });
+    expect(dictation.state.error).toBe("Dictation failed: not-allowed");
+    expect(started).not.toHaveBeenCalled();
+
+    const offline = new Dictation();
+    await offline.listen({ mode: "hold", onFinal: () => undefined });
+    instances[1]?.onerror?.({ error: "network" });
+    expect(offline.state.error).toBe("Dictation failed: network");
+    expect(started).not.toHaveBeenCalled();
   });
 });

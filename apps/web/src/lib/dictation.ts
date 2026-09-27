@@ -30,9 +30,33 @@ export const TRANSCRIPTION_RESPONSE_TIMEOUT_MS = 70_000;
 export const MAX_TRANSCRIPTION_RESPONSE_BYTES = 64 * 1024;
 const ENDPOINT_UNSUPPORTED =
   "This browser can't detect when you stop talking. Use Chrome, the desktop app, or hold-to-talk in the composer.";
+/** Web Speech codes that mean the cloud recognizer cannot be used. */
+const WEB_SPEECH_SERVICE_ERRORS = new Set(["network", "service-not-allowed"]);
 
 export function webSpeechAvailable(): boolean {
-  return Boolean(speechRecognitionCtor());
+  return Boolean(speechRecognitionCtor()) && !electronSpeechHost();
+}
+
+/**
+ * Electron exposes webkitSpeechRecognition without a speech-service key, so
+ * recognition fails with `network`. Don't treat that API as available there.
+ */
+function electronSpeechHost(): boolean {
+  if (typeof window !== "undefined") {
+    const host = window as Window & { rakazoDesktop?: unknown };
+    if (host.rakazoDesktop) return true;
+  }
+  if (typeof navigator === "undefined") return false;
+  const agent = navigator.userAgent;
+  return typeof agent === "string" && agent.includes("Electron");
+}
+
+/** Connected server transcription should take over after Web Speech cannot run. */
+export function webSpeechNeedsServerFallback(
+  error: string | undefined,
+  transcribe: boolean,
+): boolean {
+  return transcribe && typeof error === "string" && WEB_SPEECH_SERVICE_ERRORS.has(error);
 }
 
 function speechRecognitionCtor(): SpeechRecognitionCtor | undefined {
@@ -126,11 +150,12 @@ export class Dictation {
     const spaceId = selectedSpaceId();
     this.onFinal = opts.onFinal;
     this.set({ status: "listening", transcript: "" });
+    const transcribe = Boolean(opts.transcribe);
     if (webSpeechAvailable()) {
-      this.listenWebSpeech(opts.mode, opts.endpointMs ?? 850, mine);
+      this.listenWebSpeech(opts.mode, opts.endpointMs ?? 850, mine, transcribe, spaceId);
       return;
     }
-    if (opts.transcribe) {
+    if (transcribe) {
       await this.listenRecorder(mine, opts.mode, opts.endpointMs ?? 850, spaceId);
       return;
     }
@@ -141,15 +166,22 @@ export class Dictation {
     });
   }
 
-  private listenWebSpeech(mode: DictationMode, endpointMs: number, mine: number) {
+  private listenWebSpeech(
+    mode: DictationMode,
+    endpointMs: number,
+    mine: number,
+    transcribe: boolean,
+    spaceId: string | null,
+  ) {
     const Ctor = speechRecognitionCtor();
     if (!Ctor) return;
     const rec = new Ctor();
+    let live = true;
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = navigator.language || "en-US";
     rec.onresult = (event) => {
-      if (this.token !== mine) return;
+      if (!live || this.token !== mine) return;
       let transcript = "";
       for (let i = 0; i < event.results.length; i += 1) {
         transcript += event.results[i]?.[0]?.transcript ?? "";
@@ -158,21 +190,27 @@ export class Dictation {
       if (mode !== "endpoint") return;
       clearTimeout(this.silenceTimer);
       this.silenceTimer = setTimeout(() => {
-        if (this.token !== mine) return;
+        if (!live || this.token !== mine) return;
         const text = this.snapshot.transcript.trim();
         this.finish(text, mine);
       }, endpointMs);
     };
     rec.onerror = (event) => {
-      if (this.token !== mine) return;
+      if (!live || this.token !== mine) return;
       if (event.error === "aborted" || event.error === "no-speech") return;
+      if (webSpeechNeedsServerFallback(event.error, transcribe)) {
+        live = false;
+        this.fallbackToServer(rec, mine, mode, endpointMs, spaceId);
+        return;
+      }
+      live = false;
       this.set({
         ...IDLE,
         error: event.error ? `Dictation failed: ${event.error}` : "Dictation failed.",
       });
     };
     rec.onend = () => {
-      if (this.token !== mine) return;
+      if (!live || this.token !== mine) return;
       if (this.snapshot.status !== "listening") return;
       if (mode === "hold") {
         this.finish(this.snapshot.transcript, mine);
@@ -190,7 +228,46 @@ export class Dictation {
       }
     };
     this.recognition = rec;
-    rec.start();
+    try {
+      rec.start();
+    } catch {
+      if (!live || this.token !== mine) return;
+      if (transcribe) {
+        live = false;
+        this.fallbackToServer(rec, mine, mode, endpointMs, spaceId);
+        return;
+      }
+      live = false;
+      this.releaseRecognition(rec);
+      this.set({ ...IDLE, error: "Dictation failed." });
+    }
+  }
+
+  private fallbackToServer(
+    rec: SpeechRecognitionLike,
+    mine: number,
+    mode: DictationMode,
+    endpointMs: number,
+    spaceId: string | null,
+  ) {
+    this.releaseRecognition(rec);
+    clearTimeout(this.silenceTimer);
+    this.silenceTimer = undefined;
+    if (this.token !== mine) return;
+    this.set({ status: "listening", transcript: "" });
+    void this.listenRecorder(mine, mode, endpointMs, spaceId);
+  }
+
+  private releaseRecognition(rec: SpeechRecognitionLike) {
+    rec.onresult = null;
+    rec.onerror = null;
+    rec.onend = null;
+    if (this.recognition === rec) this.recognition = null;
+    try {
+      rec.abort();
+    } catch {
+      // already stopped
+    }
   }
 
   private async listenRecorder(
