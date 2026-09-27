@@ -699,8 +699,32 @@ describe("Dictation web speech", () => {
     },
   );
 
-  it("finishes the endpoint turn when speech arrived before Web Speech failed", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  it("continues an endpoint turn and joins speech heard before Web Speech failed", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const level = { current: 0.6 };
+    class FakeAnalyser {
+      fftSize = 2048;
+      getByteTimeDomainData(data: Uint8Array) {
+        data.fill(Math.round(128 + level.current * 127));
+      }
+    }
+    class FakeContext {
+      state = "running";
+      createMediaStreamSource() {
+        return { connect() {} };
+      }
+      createAnalyser() {
+        return new FakeAnalyser();
+      }
+      close() {
+        return Promise.resolve();
+      }
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    vi.stubGlobal("AudioContext", FakeContext);
+
     type ResultEvent = {
       resultIndex: number;
       results: ArrayLike<ArrayLike<{ transcript: string }>>;
@@ -721,7 +745,10 @@ describe("Dictation web speech", () => {
       }
     }
     vi.stubGlobal("window", { SpeechRecognition: FakeRecognition });
-    const started = vi.fn();
+    let markRecording: () => void = () => undefined;
+    const recording = new Promise<void>((resolve) => {
+      markRecording = resolve;
+    });
     const track = { stop: vi.fn() };
     vi.stubGlobal("navigator", {
       mediaDevices: {
@@ -729,11 +756,22 @@ describe("Dictation web speech", () => {
       },
       language: "en-US",
     });
+    const fetchMock = vi.fn(async () => Response.json({ text: "  from   server " }));
+    vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal(
       "MediaRecorder",
       class {
+        state = "inactive";
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
         start() {
-          started();
+          this.state = "recording";
+          markRecording();
+        }
+        stop() {
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob(["audio"], { type: "audio/webm" }) });
+          this.onstop?.();
         }
       },
     );
@@ -743,7 +781,7 @@ describe("Dictation web speech", () => {
     await dictation.listen({
       mode: "endpoint",
       transcribe: true,
-      endpointMs: 850,
+      endpointMs: 240,
       onFinal,
     });
     const rec = instances[0];
@@ -752,18 +790,21 @@ describe("Dictation web speech", () => {
       resultIndex: 0,
       results: [[{ transcript: "call me later" }]],
     });
-    expect(dictation.state.transcript).toBe("call me later");
     rec?.onerror?.({ error: "network" });
     onend?.();
+    await recording;
 
-    expect(onFinal).toHaveBeenCalledOnce();
-    expect(onFinal).toHaveBeenCalledWith("call me later");
-    expect(dictation.state.status).toBe("idle");
+    expect(onFinal).not.toHaveBeenCalled();
+    expect(dictation.state.status).toBe("listening");
+    expect(dictation.state.transcript).toBe("call me later");
     expect(dictation.state.error).toBeUndefined();
-    expect(started).not.toHaveBeenCalled();
     expect(rec?.abort).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(850);
+    await vi.advanceTimersByTimeAsync(80);
+    level.current = 0;
+    await vi.advanceTimersByTimeAsync(240);
+    await vi.waitFor(() => expect(onFinal).toHaveBeenCalledWith("call me later from server"));
     expect(onFinal).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("keeps a Web Speech permission error when no server fallback applies", async () => {

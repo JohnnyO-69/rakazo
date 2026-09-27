@@ -59,6 +59,18 @@ export function webSpeechNeedsServerFallback(
   return transcribe && typeof error === "string" && WEB_SPEECH_SERVICE_ERRORS.has(error);
 }
 
+function normalizedTranscript(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
+}
+
+function combineTranscript(prefix: string, serverText: string): string {
+  const head = normalizedTranscript(prefix);
+  const tail = normalizedTranscript(serverText);
+  if (!head) return tail;
+  if (!tail) return head;
+  return `${head} ${tail}`;
+}
+
 function speechRecognitionCtor(): SpeechRecognitionCtor | undefined {
   if (typeof window === "undefined") return undefined;
   const host = window as Window & {
@@ -250,16 +262,12 @@ export class Dictation {
     endpointMs: number,
     spaceId: string | null,
   ) {
-    const recognized = this.snapshot.transcript.trim();
+    const recognized = normalizedTranscript(this.snapshot.transcript);
     this.releaseRecognition(rec);
     clearTimeout(this.silenceTimer);
     this.silenceTimer = undefined;
     if (this.token !== mine) return;
-    if (recognized) {
-      this.finish(recognized, mine);
-      return;
-    }
-    this.set({ status: "listening", transcript: "" });
+    this.set({ status: "listening", transcript: recognized });
     void this.listenRecorder(mine, mode, endpointMs, spaceId);
   }
 
@@ -392,7 +400,12 @@ export class Dictation {
     const blob = new Blob(this.chunks, { type: this.chunks[0]?.type || "audio/webm" });
     this.chunks = [];
     if (!blob.size) {
-      this.set(IDLE);
+      const prefix = normalizedTranscript(this.snapshot.transcript);
+      if (!prefix) {
+        this.set(IDLE);
+        return;
+      }
+      this.finish(prefix, mine);
       return;
     }
     this.set({ status: "transcribing", transcript: this.snapshot.transcript });
@@ -425,7 +438,7 @@ export class Dictation {
         this.set({ ...IDLE, error: body.error ?? "Could not transcribe that recording." });
         return;
       }
-      this.finish(body.text ?? "", mine);
+      this.finish(combineTranscript(this.snapshot.transcript, body.text ?? ""), mine);
     } catch (error) {
       // User cancel bumps token in stop() before aborting, so a matching token
       // means the deadline timer fired. Browsers may reject fetch as AbortError
