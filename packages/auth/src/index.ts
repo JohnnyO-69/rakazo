@@ -100,6 +100,10 @@ async function holdFirstAccountGate(prisma: PrismaClient): Promise<{
   const released = new Promise<void>((resolve) => {
     releaseGate = resolve;
   });
+  let gateFailed = false;
+  // The catch must not rethrow. Admission can already have succeeded, and the
+  // signup's after hook is the first caller that waits on this promise. A
+  // later timeout would otherwise be an unhandled rejection.
   const finished = prisma
     .$transaction(
       async (tx) => {
@@ -116,8 +120,8 @@ async function holdFirstAccountGate(prisma: PrismaClient): Promise<{
       { timeout: 20_000, maxWait: 10_000 },
     )
     .catch((error: unknown) => {
+      gateFailed = true;
       rejectReady(error);
-      throw error;
     })
     .finally(() => {
       turn.done();
@@ -128,12 +132,14 @@ async function holdFirstAccountGate(prisma: PrismaClient): Promise<{
       admission,
       release: async () => {
         releaseGate();
-        await finished.catch(() => undefined);
+        await finished;
+        if (gateFailed) throw new APIError("INTERNAL_SERVER_ERROR");
       },
     };
   } catch (error) {
     turn.done();
-    throw error;
+    if (error instanceof APIError) throw error;
+    throw new APIError("INTERNAL_SERVER_ERROR");
   }
 }
 

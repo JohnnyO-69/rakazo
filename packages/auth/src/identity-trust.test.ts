@@ -20,12 +20,14 @@ function fixture({
   baseURL = "http://auth.example.test",
   webOrigin = "http://web.example.test",
   requestOrigin,
+  expireAdmissionGate = false,
 }: {
   allowlist?: string;
   delivery?: boolean;
   baseURL?: string;
   webOrigin?: string;
   requestOrigin?: string;
+  expireAdmissionGate?: boolean;
 } = {}) {
   const data: Record<string, Record<string, unknown>[]> = {
     user: [],
@@ -49,7 +51,15 @@ function fixture({
   const prisma = {
     authData: data,
     $executeRaw: vi.fn(async () => 0),
-    $transaction: vi.fn(async (run: (tx: typeof prisma) => Promise<boolean>) => run(prisma)),
+    $transaction: vi.fn(
+      async (run: (tx: typeof prisma) => Promise<unknown>, options?: { timeout?: number }) => {
+        if (!expireAdmissionGate || options?.timeout === undefined) return run(prisma);
+        const pending = run(prisma);
+        void pending.catch(() => undefined);
+        for (let step = 0; step < 5; step += 1) await Promise.resolve();
+        throw new Error("admission gate timeout");
+      },
+    ),
     deploymentSettings: {
       findUnique: vi.fn(async () => policy),
       updateMany: vi.fn(async ({ data: patch }: { data: { ownerUserId: string } }) => {
@@ -230,6 +240,28 @@ describe("identity trust through auth endpoints", () => {
     expect(await denied[0]!.text()).toContain("Registration requires email delivery");
     expect(f.data.user).toHaveLength(1);
     expect(f.policy.ownerUserId).toBe(f.data.user![0]!.id);
+  });
+
+  it("fails the signup when the admission gate expires, without an unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const f = fixture({
+        allowlist: "@example.test",
+        delivery: false,
+        expireAdmissionGate: true,
+      });
+      const response = await f.signup();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain("token");
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("does not let an unverified account claim the owner seat while another human exists", async () => {
