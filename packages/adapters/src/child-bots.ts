@@ -458,7 +458,7 @@ export async function destroyBot(
       force: true,
     }).catch(() => undefined);
   }
-  await removeTeamBrowserProfile(deps, bot.id, sharedComputer);
+  await removeTeamBrowserProfile(deps, bot.id, sharedComputer, context);
   const artifactStore = deps.artifacts;
   if (artifactStore) {
     await removeStoredArtifacts(artifactStore, deletion.artifactKeys, context);
@@ -593,14 +593,19 @@ async function releaseTeamComputerScreen(
   if (!computer?.providerRef) return computer;
   // archive_bot runs inside the parent bot, and hard delete can omit botId.
   // Release this bot's screen; the caller's lease must not veto or redirect it.
-  await deps.sandbox
-    .releaseScreen?.(toComputerRef(computer), {
+  // Profile removal waits on this stop. A timed-out release can return while
+  // Chromium is still exiting, and that process would recreate the profile.
+  try {
+    await deps.sandbox.releaseScreen?.(toComputerRef(computer), {
       ...context,
       botId: bot.id,
       screenLeaseId: undefined,
       ...(options?.cancelRunWork ? { cancelRunWork: true } : {}),
-    })
-    ?.catch(() => undefined);
+    });
+  } catch (error) {
+    getLogger().error("team screen release", error);
+    return null;
+  }
   return computer;
 }
 
@@ -615,33 +620,111 @@ async function sharedTeamComputer(
   return computer;
 }
 
+const REMOTE_TEAM_SANDBOX_KINDS = new Set(["e2b", "daytona", "box", "createos"]);
+
+const REMOVE_CONTAINED_BROWSER_PROFILE = [
+  'parent="$1"',
+  'name="$2"',
+  'if [ "$parent" != ".browser-profiles" ]; then echo "browser profile escapes the team home" >&2; exit 1; fi',
+  'if [[ ! "$name" =~ ^chromium-bot-[0-9a-f]{32}$ ]]; then echo "browser profile escapes the team home" >&2; exit 1; fi',
+  'if [ -L "$parent" ]; then echo "browser profile escapes the team home" >&2; exit 1; fi',
+  'target="$parent/$name"',
+  'if [ ! -e "$target" ] && [ ! -L "$target" ]; then exit 0; fi',
+  'if [ -L "$target" ]; then rm -- "$target"; exit 0; fi',
+  'if [ ! -d "$target" ]; then echo "browser profile escapes the team home" >&2; exit 1; fi',
+  'resolved_parent=$(cd -- "$parent" && pwd -P)',
+  'resolved_target=$(cd -- "$target" && pwd -P)',
+  'case "$resolved_target" in',
+  '  "$resolved_parent/$name") ;;',
+  '  *) echo "browser profile escapes the team home" >&2; exit 1 ;;',
+  "esac",
+  'rm -rf -- "$target"',
+].join("\n");
+
 async function removeTeamBrowserProfile(
   deps: BotLifecycleDeps,
   botId: string,
-  computer: { scope: string; homeKey: string } | null,
+  computer: { scope: string; homeKey: string; kind: string; providerRef: string | null } | null,
+  context: AdapterContext,
 ) {
   if (computer?.scope !== "team") return;
+  const name = browserProfileName(botId);
+  if (!name) return;
+  const profileContext = { ...context, botId, screenLeaseId: undefined };
+  if (
+    computer.providerRef &&
+    deps.sandbox.releaseScreen &&
+    REMOTE_TEAM_SANDBOX_KINDS.has(computer.kind)
+  ) {
+    await removeRemoteBrowserProfile(
+      deps,
+      { homeKey: computer.homeKey, kind: computer.kind, providerRef: computer.providerRef },
+      name,
+      profileContext,
+    ).catch((error) => {
+      getLogger().error("team browser profile cleanup", error);
+    });
+  }
   const homeDir = resolveAgentHomePath(deps.home, computer.homeKey, deps.dataDir ?? "./data");
-  const profile = browserProfileDirectory(homeDir, botId);
-  if (!profile) return;
-  await removeContainedDirectory(homeDir, profile).catch((error) => {
-    getLogger().error("team browser profile cleanup", error);
-  });
+  await removeContainedDirectory(homeDir, path.join(homeDir, ".browser-profiles", name)).catch(
+    (error) => {
+      getLogger().error("team browser profile cleanup", error);
+    },
+  );
 }
 
-function browserProfileDirectory(homeDir: string, botId: string) {
+async function removeRemoteBrowserProfile(
+  deps: BotLifecycleDeps,
+  computer: { homeKey: string; kind: string; providerRef: string },
+  name: string,
+  context: AdapterContext,
+) {
+  let exitCode: number | undefined;
+  let stderr = "";
+  for await (const event of deps.sandbox.execute(
+    toComputerRef(computer),
+    {
+      argv: [
+        "bash",
+        "-eu",
+        "-c",
+        REMOVE_CONTAINED_BROWSER_PROFILE,
+        "bash",
+        ".browser-profiles",
+        name,
+      ],
+      cwd: ".",
+    },
+    context,
+  )) {
+    if (event.type === "stderr") stderr += event.data;
+    if (event.type === "exit") exitCode = event.code;
+  }
+  if (exitCode !== 0) {
+    throw new Error(stderr.trim() || "browser profile cleanup failed");
+  }
+}
+
+function browserProfileName(botId: string) {
   const name = path.posix.basename(browserProfilePathForScreen(botId));
   if (!/^chromium-bot-[0-9a-f]{32}$/.test(name)) return null;
-  return path.join(homeDir, ".browser-profiles", name);
+  return name;
 }
 
-/** Delete one profile directory. A symlink is unlinked and never followed. */
+/** Delete one profile directory. A symlinked parent is refused; a final symlink is unlinked. */
 async function removeContainedDirectory(root: string, target: string) {
   const info = await lstat(target).catch((error: unknown) => {
     if (isMissing(error)) return null;
     throw error;
   });
   if (!info) return;
+  const parentInfo = await lstat(path.dirname(target)).catch((error: unknown) => {
+    if (isMissing(error)) return null;
+    throw error;
+  });
+  if (!parentInfo || parentInfo.isSymbolicLink() || !parentInfo.isDirectory()) {
+    throw new Error("browser profile escapes the team home");
+  }
   if (info.isSymbolicLink()) {
     await unlink(target);
     return;
@@ -649,7 +732,13 @@ async function removeContainedDirectory(root: string, target: string) {
   const resolvedRoot = await realpath(root);
   const resolvedTarget = await realpath(target);
   const relative = path.relative(resolvedRoot, resolvedTarget);
-  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (
+    path.dirname(resolvedTarget) !== path.join(resolvedRoot, ".browser-profiles") ||
+    path.basename(resolvedTarget) !== path.basename(target) ||
+    relative === "" ||
+    relative.startsWith("..") ||
+    path.isAbsolute(relative)
+  ) {
     throw new Error("browser profile escapes the team home");
   }
   await rm(resolvedTarget, { recursive: true, force: true });

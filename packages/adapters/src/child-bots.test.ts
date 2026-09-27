@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -5,6 +6,7 @@ import type {
   AdapterContext,
   AgentHomeStore,
   ArtifactStore,
+  CommandRequest,
   JobPublisher,
   SandboxProvider,
 } from "@rakazo/adapter-kit";
@@ -634,6 +636,231 @@ describe("destroyBot", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("refuses a symlinked profile directory instead of deleting the directory it points at", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-parent-symlink-"));
+    try {
+      const home = new LocalAgentHomeStore(root);
+      const teamHome = home.pathFor("team-workspace-1");
+      const decoy = path.join(teamHome, "decoy-profiles");
+      const victim = path.join(decoy, profileDirectory("bot-1"));
+      const notes = path.join(teamHome, "notes.txt");
+      await mkdir(victim, { recursive: true });
+      await writeFile(path.join(victim, "Cookies"), "keep");
+      await writeFile(notes, "keep");
+      await symlink(decoy, path.join(teamHome, ".browser-profiles"));
+      const team = {
+        id: "team-computer",
+        homeKey: "team-workspace-1",
+        kind: "docker",
+        providerRef: "container-1",
+        scope: "team",
+      };
+
+      await destroyBot(
+        {
+          prisma: deletionPrisma(team),
+          sandbox: {
+            releaseScreen: vi.fn().mockResolvedValue(undefined),
+          } as unknown as SandboxProvider,
+          home,
+          jobs: { cancel: vi.fn() } as unknown as JobPublisher,
+        },
+        {
+          id: "bot-1",
+          spaceId: "workspace-1",
+          name: "Researcher",
+          archivedAt: null,
+          computerId: team.id,
+        },
+        context,
+        { deleteMemories: true },
+      );
+
+      await expect(readFile(path.join(victim, "Cookies"), "utf8")).resolves.toBe("keep");
+      await expect(readFile(notes, "utf8")).resolves.toBe("keep");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes the deleted bot's profile from a remote sandbox after the browser stops", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-delete-"));
+    const remote = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-workspace-"));
+    try {
+      const home = new LocalAgentHomeStore(root);
+      const teamHome = home.pathFor("team-workspace-1");
+      await seedProfile(teamHome, "bot-1", "local-gone");
+      await seedProfile(teamHome, "bot-2", "local-keep");
+      await seedProfile(remote, "bot-1", "remote-gone");
+      await seedProfile(remote, "bot-2", "remote-keep");
+      const releaseScreen = vi.fn().mockResolvedValue(undefined);
+      const execute = vi.fn(async function* (_computer: unknown, request: CommandRequest) {
+        const result = runInWorkspace(remote, request.argv);
+        if (result.stderr) yield { type: "stderr" as const, data: result.stderr };
+        yield { type: "exit" as const, code: result.code };
+      });
+      const team = {
+        id: "team-computer",
+        homeKey: "team-workspace-1",
+        kind: "e2b",
+        providerRef: "sandbox-1",
+        scope: "team",
+      };
+
+      await destroyBot(
+        {
+          prisma: deletionPrisma(team),
+          sandbox: { releaseScreen, execute } as unknown as SandboxProvider,
+          home,
+          jobs: { cancel: vi.fn() } as unknown as JobPublisher,
+        },
+        {
+          id: "bot-1",
+          spaceId: "workspace-1",
+          name: "Researcher",
+          archivedAt: null,
+          computerId: team.id,
+        },
+        { ...context, botId: "parent-1", screenLeaseId: "run-parent:4" },
+        { deleteMemories: true },
+      );
+
+      expect(releaseScreen.mock.invocationCallOrder[0]).toBeLessThan(
+        execute.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "e2b", providerRef: "sandbox-1" }),
+        expect.objectContaining({
+          cwd: ".",
+          argv: [
+            "bash",
+            "-eu",
+            "-c",
+            expect.any(String),
+            "bash",
+            ".browser-profiles",
+            profileDirectory("bot-1"),
+          ],
+        }),
+        expect.objectContaining({ botId: "bot-1", screenLeaseId: undefined }),
+      );
+      await expect(
+        access(path.join(teamHome, ".browser-profiles", profileDirectory("bot-1"))),
+      ).rejects.toThrow();
+      await expect(readFile(profileCookies(teamHome, "bot-2"), "utf8")).resolves.toBe("local-keep");
+      await expect(
+        access(path.join(remote, ".browser-profiles", profileDirectory("bot-1"))),
+      ).rejects.toThrow();
+      await expect(readFile(profileCookies(remote, "bot-2"), "utf8")).resolves.toBe("remote-keep");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a remote profile in place when its parent directory is a symlink", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-symlink-"));
+    const remote = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-symlink-workspace-"));
+    try {
+      const home = new LocalAgentHomeStore(root);
+      const teamHome = home.pathFor("team-workspace-1");
+      await seedProfile(teamHome, "bot-1", "local-gone");
+      const decoy = path.join(remote, "decoy-profiles");
+      const victim = path.join(decoy, profileDirectory("bot-1"));
+      await mkdir(victim, { recursive: true });
+      await writeFile(path.join(victim, "Cookies"), "remote-keep");
+      await symlink(decoy, path.join(remote, ".browser-profiles"));
+      const execute = vi.fn(async function* (_computer: unknown, request: CommandRequest) {
+        const result = runInWorkspace(remote, request.argv);
+        if (result.stderr) yield { type: "stderr" as const, data: result.stderr };
+        yield { type: "exit" as const, code: result.code };
+      });
+      const team = {
+        id: "team-computer",
+        homeKey: "team-workspace-1",
+        kind: "box",
+        providerRef: "box-1",
+        scope: "team",
+      };
+
+      await destroyBot(
+        {
+          prisma: deletionPrisma(team),
+          sandbox: {
+            releaseScreen: vi.fn().mockResolvedValue(undefined),
+            execute,
+          } as unknown as SandboxProvider,
+          home,
+          jobs: { cancel: vi.fn() } as unknown as JobPublisher,
+        },
+        {
+          id: "bot-1",
+          spaceId: "workspace-1",
+          name: "Researcher",
+          archivedAt: null,
+          computerId: team.id,
+        },
+        context,
+        { deleteMemories: true },
+      );
+
+      await expect(readFile(path.join(victim, "Cookies"), "utf8")).resolves.toBe("remote-keep");
+      await expect(
+        access(path.join(teamHome, ".browser-profiles", profileDirectory("bot-1"))),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("does not remove a profile when stopping the browser fails", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-release-failed-"));
+    const remote = await mkdtemp(path.join(tmpdir(), "rakazo-team-release-failed-workspace-"));
+    try {
+      const home = new LocalAgentHomeStore(root);
+      const teamHome = home.pathFor("team-workspace-1");
+      await seedProfile(teamHome, "bot-1", "local-stay");
+      await seedProfile(remote, "bot-1", "remote-stay");
+      const execute = vi.fn();
+      const team = {
+        id: "team-computer",
+        homeKey: "team-workspace-1",
+        kind: "e2b",
+        providerRef: "sandbox-1",
+        scope: "team",
+      };
+
+      await destroyBot(
+        {
+          prisma: deletionPrisma(team),
+          sandbox: {
+            releaseScreen: vi.fn().mockRejectedValue(new Error("sandbox screen release timed out")),
+            execute,
+          } as unknown as SandboxProvider,
+          home,
+          jobs: { cancel: vi.fn() } as unknown as JobPublisher,
+        },
+        {
+          id: "bot-1",
+          spaceId: "workspace-1",
+          name: "Researcher",
+          archivedAt: null,
+          computerId: team.id,
+        },
+        context,
+        { deleteMemories: true },
+      );
+
+      expect(execute).not.toHaveBeenCalled();
+      await expect(readFile(profileCookies(teamHome, "bot-1"), "utf8")).resolves.toBe("local-stay");
+      await expect(readFile(profileCookies(remote, "bot-1"), "utf8")).resolves.toBe("remote-stay");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("archiveBot", () => {
@@ -883,6 +1110,30 @@ describe("archiveBot", () => {
 
 function profileDirectory(botId: string) {
   return path.posix.basename(browserProfilePathForScreen(botId));
+}
+
+function profileCookies(homeDir: string, botId: string) {
+  return path.join(homeDir, ".browser-profiles", profileDirectory(botId), "Cookies");
+}
+
+async function seedProfile(homeDir: string, botId: string, cookies: string) {
+  const profile = path.join(homeDir, ".browser-profiles", profileDirectory(botId));
+  await mkdir(profile, { recursive: true });
+  await writeFile(path.join(profile, "Cookies"), cookies);
+}
+
+function runInWorkspace(cwd: string, argv: readonly string[]) {
+  try {
+    execFileSync(argv[0] ?? "bash", argv.slice(1), {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { code: 0, stderr: "" };
+  } catch (error) {
+    const failed = error as { status?: number; stderr?: string };
+    return { code: failed.status ?? 1, stderr: failed.stderr ?? "" };
+  }
 }
 
 function deletionPrisma(team: { id: string }) {
