@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  admitUnverifiedAllowlistedUser,
   allowlistedSignupAdmission,
   emailAllowed,
+  firstAccountClaimDecision,
   parseAllowlist,
   signupAllowlistBootUpdate,
   signupPolicyFromEnv,
@@ -97,46 +97,34 @@ describe("signup policy", () => {
     ).toBe("needs-delivery");
   });
 
-  it("admits an unverified allowlisted user only when they are the sole human and delivery is absent", () => {
+  it("gives the unverified first account one claim and refuses a second owner", () => {
     expect(
-      admitUnverifiedAllowlistedUser({
-        allowlistSize: 1,
-        hasEmailDelivery: false,
-        humanUserIds: [],
+      firstAccountClaimDecision({
         userId: "user-1",
+        ownerUserId: null,
+        otherHumanVerified: false,
       }),
-    ).toBe(true);
+    ).toBe("claim");
     expect(
-      admitUnverifiedAllowlistedUser({
-        allowlistSize: 1,
-        hasEmailDelivery: false,
-        humanUserIds: ["user-1"],
+      firstAccountClaimDecision({
         userId: "user-1",
+        ownerUserId: "user-1",
+        otherHumanVerified: false,
       }),
-    ).toBe(true);
+    ).toBe("renew");
     expect(
-      admitUnverifiedAllowlistedUser({
-        allowlistSize: 1,
-        hasEmailDelivery: false,
-        humanUserIds: ["user-2"],
-        userId: "user-1",
+      firstAccountClaimDecision({
+        userId: "user-2",
+        ownerUserId: "user-1",
+        otherHumanVerified: false,
       }),
-    ).toBe(false);
+    ).toBe("deny");
     expect(
-      admitUnverifiedAllowlistedUser({
-        allowlistSize: 1,
-        hasEmailDelivery: true,
-        humanUserIds: ["user-1"],
-        userId: "user-1",
+      firstAccountClaimDecision({
+        userId: "user-2",
+        ownerUserId: null,
+        otherHumanVerified: true,
       }),
-    ).toBe(false);
-    expect(
-      admitUnverifiedAllowlistedUser({
-        allowlistSize: 0,
-        hasEmailDelivery: false,
-        humanUserIds: [],
-        userId: "user-1",
-      }),
-    ).toBe(false);
+    ).toBe("deny");
   });
 });

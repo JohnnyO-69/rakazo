@@ -33,22 +33,60 @@ function fixture({
     session: [],
     verification: [],
   };
-  const policy = {
+  const policy: {
+    signupsEnabled: boolean;
+    signupAllowlist: string;
+    signupPolicyInitialized: boolean;
+    ownerUserId: string | null;
+  } = {
     signupsEnabled: true,
     signupAllowlist: allowlist,
     signupPolicyInitialized: true,
+    ownerUserId: null,
   };
   const messages: TransactionalEmail[] = [];
   const members = new Set<string>();
   const prisma = {
     authData: data,
-    deploymentSettings: { findUnique: vi.fn(async () => policy) },
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (run: (tx: typeof prisma) => Promise<boolean>) => run(prisma)),
+    deploymentSettings: {
+      findUnique: vi.fn(async () => policy),
+      updateMany: vi.fn(async ({ data: patch }: { data: { ownerUserId: string } }) => {
+        if (policy.ownerUserId !== null) return { count: 0 };
+        policy.ownerUserId = patch.ownerUserId;
+        return { count: 1 };
+      }),
+    },
     user: {
       findMany: vi.fn(async () =>
         data
           .user!.filter((user) => !String(user.email).toLowerCase().endsWith("@messaging.invalid"))
           .slice(0, 2)
           .map((user) => ({ id: String(user.id) })),
+      ),
+      findFirst: vi.fn(async ({ where }: { where: { id: { not: string } } }) => {
+        const other = data.user!.find(
+          (user) =>
+            user.id !== where.id.not &&
+            user.emailVerified === true &&
+            !String(user.email).toLowerCase().endsWith("@messaging.invalid"),
+        );
+        return other ? { id: String(other.id) } : null;
+      }),
+      updateMany: vi.fn(
+        async ({
+          where,
+          data: patch,
+        }: {
+          where: { id: string };
+          data: { emailVerified: boolean };
+        }) => {
+          const user = data.user!.find((item) => item.id === where.id);
+          if (!user) return { count: 0 };
+          Object.assign(user, patch);
+          return { count: 1 };
+        },
       ),
     },
     spaceMember: {

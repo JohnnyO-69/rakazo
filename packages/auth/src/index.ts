@@ -1,8 +1,8 @@
 import type { TransactionalEmail, TransactionalEmailProvider } from "@rakazo/adapter-kit";
 import {
-  admitUnverifiedAllowlistedUser,
   allowlistedSignupAdmission,
   emailAllowed,
+  firstAccountClaimDecision,
   isMessagingEmail,
   parseAllowlist,
   signupPolicyFromEnv,
@@ -40,6 +40,53 @@ export async function resolveSignupPolicy(
     };
   }
   return signupPolicyFromEnv(env);
+}
+
+/**
+ * One allowlisted account may skip mailbox proof when nothing can send mail.
+ * The deployment-settings row is locked, then a conditional owner update lets
+ * only one overlapping signup win. Other unverified rows do not count: they
+ * may belong to a signup that lost this claim.
+ */
+async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT id FROM deployment_settings WHERE id = 'default' FOR UPDATE`;
+    const [settings, otherVerified] = await Promise.all([
+      tx.deploymentSettings.findUnique({
+        where: { id: "default" },
+        select: { ownerUserId: true },
+      }),
+      tx.user.findFirst({
+        where: {
+          id: { not: userId },
+          emailVerified: true,
+          NOT: { email: { endsWith: "@messaging.invalid", mode: "insensitive" } },
+        },
+        select: { id: true },
+      }),
+    ]);
+    const decision = firstAccountClaimDecision({
+      userId,
+      ownerUserId: settings?.ownerUserId ?? null,
+      otherHumanVerified: otherVerified !== null,
+    });
+    if (decision === "deny") return false;
+    if (decision === "claim") {
+      const claimed = await tx.deploymentSettings.updateMany({
+        where: { id: "default", ownerUserId: null },
+        data: { ownerUserId: userId },
+      });
+      if (claimed.count !== 1) return false;
+    }
+    // The signup user can still be invisible here when this runs inside the
+    // auth transaction. Mark the row when it is already committed; the caller
+    // also updates it through the auth adapter.
+    await tx.user.updateMany({
+      where: { id: userId },
+      data: { emailVerified: true },
+    });
+    return true;
+  });
 }
 
 /** Humans only. Messaging identities must not consume the first-account exemption. */
@@ -208,25 +255,15 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
               throw new APIError("FORBIDDEN", { message: "Email verification required" });
             }
             if (!user.emailVerified && policy.allowlist.length > 0) {
-              const humanIds = env.email ? [] : await humanUserIds(prisma);
-              const admit =
-                !env.email &&
-                emailAllowed(user.email, policy.allowlist) &&
-                admitUnverifiedAllowlistedUser({
-                  allowlistSize: policy.allowlist.length,
-                  hasEmailDelivery: false,
-                  humanUserIds: humanIds,
-                  userId: user.id,
-                });
-              if (!admit) {
+              if (env.email || !emailAllowed(user.email, policy.allowlist)) {
                 throw new APIError("FORBIDDEN", { message: "Email verification required" });
               }
-              if (!ctx) {
+              // Mailbox ownership is not proved. The claim serializes the exemption
+              // so a second overlapping signup cannot take it as well.
+              const admitted = await claimUnverifiedFirstAccount(prisma, user.id);
+              if (!admitted || !ctx) {
                 throw new APIError("FORBIDDEN", { message: "Email verification required" });
               }
-              // No delivery channel exists, and this is the only human account.
-              // Mark it admitted so later requests keep working. Mailbox ownership
-              // is not proven; further signups stay closed until delivery exists.
               await ctx.context.internalAdapter.updateUser(user.id, { emailVerified: true });
             }
             // Unverified signup must not provision resources or claim the

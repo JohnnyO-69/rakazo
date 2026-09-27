@@ -73,18 +73,17 @@ export function allowlistedSignupAdmission(input: {
 }
 
 /**
- * The first human account may be admitted without mailbox proof when no
- * delivery provider is configured. A visible different human, or more than
- * one, keeps the delivery requirement.
+ * Decision after the deployment-settings row is locked. `claim` is the one
+ * update that may set the owner; a concurrent signup loses that update.
+ * Another verified human, or an owner that is someone else, denies the exemption.
  */
-export function admitUnverifiedAllowlistedUser(input: {
-  allowlistSize: number;
-  hasEmailDelivery: boolean;
-  humanUserIds: readonly string[];
+export function firstAccountClaimDecision(input: {
   userId: string;
-}): boolean {
-  if (input.allowlistSize === 0 || input.hasEmailDelivery) return false;
-  if (input.humanUserIds.length > 1) return false;
-  if (input.humanUserIds.length === 1) return input.humanUserIds[0] === input.userId;
-  return true;
+  ownerUserId: string | null;
+  otherHumanVerified: boolean;
+}): "deny" | "claim" | "renew" {
+  if (input.otherHumanVerified) return "deny";
+  if (input.ownerUserId && input.ownerUserId !== input.userId) return "deny";
+  if (input.ownerUserId === input.userId) return "renew";
+  return "claim";
 }
