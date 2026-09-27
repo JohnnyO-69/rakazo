@@ -330,6 +330,31 @@ describe("Dictation recorder fallback", () => {
     expect(decoded).not.toContain("STALE");
   });
 
+  it("returns to idle when the recorder cannot start", async () => {
+    const track = { stop: vi.fn() };
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })),
+      },
+      language: "en-US",
+    });
+    vi.stubGlobal(
+      "MediaRecorder",
+      class {
+        start() {
+          throw new Error("recorder unavailable");
+        }
+      },
+    );
+
+    const dictation = new Dictation();
+    await dictation.listen({ mode: "hold", transcribe: true, onFinal: () => undefined });
+
+    expect(dictation.state.status).toBe("idle");
+    expect(dictation.state.error).toBe("recorder unavailable");
+    expect(track.stop).toHaveBeenCalledOnce();
+  });
+
   it("fails visibly when endpoint dictation has no silence detector", async () => {
     const track = { stop: vi.fn() };
     vi.stubGlobal("navigator", {
@@ -673,6 +698,80 @@ describe("Dictation web speech", () => {
       expect(onFinal).toHaveBeenCalledOnce();
     },
   );
+
+  it("finishes the endpoint turn when speech arrived before Web Speech failed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const instances: Array<{
+      onresult: ((event: {
+        resultIndex: number;
+        results: ArrayLike<ArrayLike<{ transcript: string }>>;
+      }) => void) | null;
+      onerror: ((event: { error?: string }) => void) | null;
+      onend: (() => void) | null;
+      abort: ReturnType<typeof vi.fn>;
+    }> = [];
+    class FakeRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      onresult: ((event: {
+        resultIndex: number;
+        results: ArrayLike<ArrayLike<{ transcript: string }>>;
+      }) => void) | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      start = vi.fn();
+      stop = vi.fn();
+      abort = vi.fn();
+      constructor() {
+        instances.push(this);
+      }
+    }
+    vi.stubGlobal("window", { SpeechRecognition: FakeRecognition });
+    const started = vi.fn();
+    const track = { stop: vi.fn() };
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })),
+      },
+      language: "en-US",
+    });
+    vi.stubGlobal(
+      "MediaRecorder",
+      class {
+        start() {
+          started();
+        }
+      },
+    );
+
+    const onFinal = vi.fn();
+    const dictation = new Dictation();
+    await dictation.listen({
+      mode: "endpoint",
+      transcribe: true,
+      endpointMs: 850,
+      onFinal,
+    });
+    const rec = instances[0];
+    const onend = rec?.onend;
+    rec?.onresult?.({
+      resultIndex: 0,
+      results: [[{ transcript: "call me later" }]],
+    });
+    expect(dictation.state.transcript).toBe("call me later");
+    rec?.onerror?.({ error: "network" });
+    onend?.();
+
+    expect(onFinal).toHaveBeenCalledOnce();
+    expect(onFinal).toHaveBeenCalledWith("call me later");
+    expect(dictation.state.status).toBe("idle");
+    expect(dictation.state.error).toBeUndefined();
+    expect(started).not.toHaveBeenCalled();
+    expect(rec?.abort).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(850);
+    expect(onFinal).toHaveBeenCalledOnce();
+  });
 
   it("keeps a Web Speech permission error when no server fallback applies", async () => {
     const instances: Array<{

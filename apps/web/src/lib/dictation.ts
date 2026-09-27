@@ -250,10 +250,15 @@ export class Dictation {
     endpointMs: number,
     spaceId: string | null,
   ) {
+    const recognized = this.snapshot.transcript.trim();
     this.releaseRecognition(rec);
     clearTimeout(this.silenceTimer);
     this.silenceTimer = undefined;
     if (this.token !== mine) return;
+    if (recognized) {
+      this.finish(recognized, mine);
+      return;
+    }
     this.set({ status: "listening", transcript: "" });
     void this.listenRecorder(mine, mode, endpointMs, spaceId);
   }
@@ -296,20 +301,36 @@ export class Dictation {
       this.set({ ...IDLE, error: ENDPOINT_UNSUPPORTED });
       return;
     }
-    const media = new MediaRecorder(stream);
-    this.media = media;
-    this.chunks = [];
-    media.ondataavailable = (event) => {
-      if (this.token !== mine) return;
-      if (event.data.size) this.chunks.push(event.data);
-    };
-    media.onstop = () => {
+    let media: MediaRecorder | undefined;
+    try {
+      media = new MediaRecorder(stream);
+      this.media = media;
+      this.chunks = [];
+      media.ondataavailable = (event) => {
+        if (this.token !== mine) return;
+        if (event.data.size) this.chunks.push(event.data);
+      };
+      media.onstop = () => {
+        for (const track of stream.getTracks()) track.stop();
+        if (this.token !== mine) return;
+        this.stopVad();
+        void this.transcribeChunks(mine, spaceId);
+      };
+      media.start(mode === "endpoint" ? 250 : undefined);
+    } catch (error) {
+      if (media) {
+        media.ondataavailable = null;
+        media.onstop = null;
+      }
       for (const track of stream.getTracks()) track.stop();
+      if (this.media === media) this.media = null;
       if (this.token !== mine) return;
       this.stopVad();
-      void this.transcribeChunks(mine, spaceId);
-    };
-    media.start(mode === "endpoint" ? 250 : undefined);
+      this.set({
+        ...IDLE,
+        error: error instanceof Error ? error.message : "Dictation failed.",
+      });
+    }
   }
 
   private armSilence(stream: MediaStream, mine: number, endpointMs: number): boolean {
