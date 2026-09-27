@@ -124,7 +124,7 @@ describe("shared Linux desktop lifecycle", () => {
     expect(f.ensure("b").stdout).toContain("RAKAZO_DESKTOP=1:view-b");
   });
 
-  it("reports the browser stopped when the screen slot cannot be locked again", () => {
+  it("keeps the slot when the shared registry lock cannot be reacquired after the browser stops", () => {
     const f = fixture();
     expect(f.ensure("a").status).toBe(0);
     expect(readdirSync(f.root).some((name) => name.endsWith(".slot"))).toBe(true);
@@ -150,9 +150,31 @@ describe("shared Linux desktop lifecycle", () => {
       ],
       { encoding: "utf8", timeout: 5000 },
     );
-    expect(result.status).toBe(0);
+    expect(result.status).not.toBe(0);
     expect(result.stdout).toContain("RAKAZO_DESKTOP_RELEASED=");
-    expect(readdirSync(f.root).filter((name) => name.endsWith(".slot"))).toEqual([]);
+    expect(readdirSync(f.root).some((name) => name.endsWith(".slot"))).toBe(true);
+  });
+
+  it("reports slot removal failure after the browser has stopped", () => {
+    const f = fixture();
+    expect(f.ensure("a").status).toBe(0);
+    const script = releaseDesktopCommand("a", "run:1", env)
+      .replaceAll("/tmp/rakazo/desktop-assignments", f.root)
+      .replaceAll("/tmp/rakazo", f.root);
+    const result = spawnSync(
+      "bash",
+      [
+        "-eu",
+        "-c",
+        ["bash() { return 0; }", "rm() { echo 'slot remove failed' >&2; return 1; }", script].join(
+          "\n",
+        ),
+      ],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("RAKAZO_DESKTOP_RELEASED=");
+    expect(readdirSync(f.root).some((name) => name.endsWith(".slot"))).toBe(true);
   });
 
   it("reserves failed startup and teardown slots until a successful retry", () => {

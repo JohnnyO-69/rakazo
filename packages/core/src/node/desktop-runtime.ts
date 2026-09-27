@@ -639,14 +639,14 @@ export function releaseDesktopCommand(
     'index=$(sed -n "1p" "$slot")',
     "flock -u 9; exec 9>&-",
     `bash -eu -c ${shellQuote(renderStopExtraScreenCommand(undefined, screenId, env))} desktop "$index"`,
-    // Chromium has stopped. Publish that before clearing the slot so a lock or
-    // removal error cannot be mistaken for a browser that is still running.
+    // Chromium has stopped. Publish that before clearing the slot so a later
+    // lock or removal failure is not read as a browser that is still running.
+    // set -e leaves that failure non-zero, and the slot is removed only while
+    // the shared registry lock is held.
     'printf "RAKAZO_DESKTOP_RELEASED=%s\\n" "$index"',
-    "set +e",
     'exec 9>"$dir/.lock"',
     "flock -w 120 9",
     'rm -f -- "$slot"',
-    "exit 0",
   ].join("\n");
 }
 

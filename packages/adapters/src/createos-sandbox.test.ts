@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ComputerRef, PortableFile, ProcessEvent } from "@rakazo/adapter-kit";
+import {
+  browserProfilePathForScreen,
+  DEFAULT_DESKTOP_ENV,
+} from "@rakazo/core/node/desktop-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
   CREATEOS_SCREEN_MAP_SCRIPT,
@@ -174,6 +178,13 @@ const computer: ComputerRef = {
   fresh: true,
 };
 
+function createosBotProfile(botId: string) {
+  return browserProfilePathForScreen(botId, {
+    ...DEFAULT_DESKTOP_ENV,
+    browserProfilesDir: "/home/desktop/rakazo-home/.browser-profiles",
+  });
+}
+
 describe("CreateOSSandboxProvider", () => {
   it("creates a sandbox and waits until it runs", async () => {
     const fixture = createosFixture({ statuses: ["provisioning", "running"] });
@@ -267,10 +278,12 @@ describe("CreateOSSandboxProvider", () => {
       }
 
       expect(files.map((file) => file.path)).toEqual(["notes.txt"]);
+      const profile = createosBotProfile("bot-a");
       const quiesceIndex = fixture.execs.findIndex(
-        (exec) =>
-          exec.command.includes("Browser.close") &&
-          exec.command.includes("/home/desktop/rakazo-home/.browser-profiles/chromium"),
+        (exec) => exec.command.includes("Browser.close") && exec.command.includes(profile),
+      );
+      expect(fixture.execs[quiesceIndex]?.command ?? "").not.toContain(
+        "/.browser-profiles/chromium'",
       );
       const listings = fixture.execs.flatMap((exec, index) =>
         exec.command.includes("os.listdir") ? [index] : [],
@@ -279,6 +292,43 @@ describe("CreateOSSandboxProvider", () => {
       expect(quiesceIndex).toBeLessThan(listings[1] ?? -1);
     },
   );
+
+  it("launches and links each bot to the Chromium profile hard delete removes", async () => {
+    const fixture = createosFixture();
+    const target = provider(fixture);
+    await target.prepare(computer, context);
+    await target.act(
+      computer,
+      {
+        actions: [{ kind: "launch", application: "google-chrome", uri: "https://example.test" }],
+        observe: false,
+      },
+      context,
+    );
+    await target.act(
+      computer,
+      {
+        actions: [{ kind: "launch", application: "google-chrome", uri: "https://example.test" }],
+        observe: false,
+      },
+      { ...context, botId: "bot-b" },
+    );
+
+    const profileA = createosBotProfile("bot-a");
+    const profileB = createosBotProfile("bot-b");
+    expect(profileA).toMatch(/\/chromium-bot-[0-9a-f]{32}$/);
+    expect(profileB).not.toBe(profileA);
+    const commands = fixture.execs.map((exec) => exec.command);
+    expect(
+      commands.some((command) => command.includes(`ln -sfn`) && command.includes(profileA)),
+    ).toBe(true);
+    const launches = commands.filter((command) => command.includes("--user-data-dir="));
+    expect(launches.some((command) => command.includes(profileA))).toBe(true);
+    expect(launches.some((command) => command.includes(profileB))).toBe(true);
+    for (const command of commands) {
+      expect(command).not.toContain("/.browser-profiles/chromium'");
+    }
+  });
 
   it("exports the workspace after a graphical action alone", async () => {
     const fixture = createosFixture();

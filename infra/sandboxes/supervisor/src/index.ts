@@ -736,8 +736,12 @@ app.delete("/computers/:id/screen", async (c) => {
     });
     return c.json({ ok: true });
   } catch (error) {
+    if (error instanceof ComputerIdentityError)
+      return c.json({ error: "invalid computer identity" }, 403);
+    if (error && typeof error === "object" && "statusCode" in error && error.statusCode === 404)
+      return c.json({ error: "computer not found" }, 404);
     const message = error instanceof Error ? error.message : String(error);
-    return c.json({ error: message }, 404);
+    return c.json({ error: message || "computer screen failed to stop" }, 500);
   }
 });
 

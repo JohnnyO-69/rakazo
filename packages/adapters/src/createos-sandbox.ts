@@ -16,7 +16,11 @@ import type {
   ScreenSession,
 } from "@rakazo/adapter-kit";
 import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
-import { stopBrowserProfileCommand } from "@rakazo/core/node/desktop-runtime";
+import {
+  browserProfilePathForScreen,
+  DEFAULT_DESKTOP_ENV,
+  stopBrowserProfileCommand,
+} from "@rakazo/core/node/desktop-runtime";
 import { sandboxIdleMs } from "./computer-idle.js";
 import { screenSessionKey } from "./computer-screens.js";
 import {
@@ -34,9 +38,22 @@ import {
 import { readBodyCapped } from "./web-ssrf.js";
 
 const CREATEOS_WORKSPACE = "/home/desktop/rakazo-home";
-const CREATEOS_CHROMIUM_PROFILE = `${CREATEOS_WORKSPACE}/.browser-profiles/chromium`;
-const CREATEOS_FIREFOX_PROFILE = `${CREATEOS_WORKSPACE}/.browser-profiles/firefox`;
-const CREATEOS_CHROMIUM_PID = "/tmp/rakazo/createos-chromium.pid";
+const CREATEOS_BROWSER_PROFILES = `${CREATEOS_WORKSPACE}/.browser-profiles`;
+const CREATEOS_FIREFOX_PROFILE = `${CREATEOS_BROWSER_PROFILES}/firefox`;
+
+/** Same chromium-bot-<hash> directory hard delete removes for this bot. */
+function createosChromiumProfile(screenId: string) {
+  return browserProfilePathForScreen(screenId, {
+    ...DEFAULT_DESKTOP_ENV,
+    browserProfilesDir: CREATEOS_BROWSER_PROFILES,
+  });
+}
+
+function createosChromiumPid(screenId: string) {
+  const profile = createosChromiumProfile(screenId);
+  const hash = profile.slice(profile.lastIndexOf("-") + 1);
+  return `/tmp/rakazo/browser-pid-${hash}`;
+}
 const CREATEOS_DRAINING_SCREEN = "draining:";
 const CREATEOS_SCREEN_MAP_PATH = `${CREATEOS_WORKSPACE}/.rakazo/screens.json`;
 export const CREATEOS_SCREEN_MAP_SENTINEL = "RAKAZO_SCREEN_MAP_V1";
@@ -271,18 +288,19 @@ export class CreateOSSandboxProvider implements SandboxProvider {
   }
 
   async prepare(computer: ComputerRef, context: AdapterContext): Promise<void> {
+    const profile = createosChromiumProfile(screenSessionKey(context));
     await this.executeChecked(
       computer,
       [
         "bash",
         "-lc",
         [
-          `mkdir -p ${shellQuote(CREATEOS_WORKSPACE)} ${shellQuote(CREATEOS_CHROMIUM_PROFILE)} ${shellQuote(CREATEOS_FIREFOX_PROFILE)}`,
+          `mkdir -p ${shellQuote(CREATEOS_WORKSPACE)} ${shellQuote(profile)} ${shellQuote(CREATEOS_FIREFOX_PROFILE)}`,
           "mkdir -p /tmp/runtime-desktop",
           "chmod 700 /tmp/runtime-desktop",
           "mkdir -p /home/desktop/.config",
-          `ln -sfn ${shellQuote(CREATEOS_CHROMIUM_PROFILE)} /home/desktop/.config/google-chrome`,
-          `ln -sfn ${shellQuote(CREATEOS_CHROMIUM_PROFILE)} /home/desktop/.config/chromium`,
+          `ln -sfn ${shellQuote(profile)} /home/desktop/.config/google-chrome`,
+          `ln -sfn ${shellQuote(profile)} /home/desktop/.config/chromium`,
           `ln -sfn ${shellQuote(CREATEOS_FIREFOX_PROFILE)} /home/desktop/.mozilla`,
           `chown -R desktop:desktop ${shellQuote(CREATEOS_WORKSPACE)} /home/desktop/.config /home/desktop/.mozilla /tmp/runtime-desktop`,
         ].join(" && "),
@@ -485,9 +503,14 @@ print(json.dumps(out))
     if (!(await this.hasExportableWorkspaceFiles(computer, "", context))) return;
     // Preferences and Local State stay in the export. Close Chromium first, the
     // same way other desktop providers quiesce a profile before copying it.
+    const screenId = screenSessionKey(context);
     await this.executeChecked(
       computer,
-      ["bash", "-lc", stopBrowserProfileCommand(CREATEOS_CHROMIUM_PROFILE, CREATEOS_CHROMIUM_PID)],
+      [
+        "bash",
+        "-lc",
+        stopBrowserProfileCommand(createosChromiumProfile(screenId), createosChromiumPid(screenId)),
+      ],
       context,
     );
     yield* this.walkWorkspace(computer, "", context);
@@ -944,12 +967,12 @@ print(json.dumps(out))
     context: AdapterContext,
     options: { settleMs?: number } = {},
   ): Promise<void> {
-    if (await this.openBrowserTab(computer, uri, context)) {
+    const profile = createosChromiumProfile(screenSessionKey(context));
+    if (await this.openBrowserTab(computer, uri, profile, context)) {
       const settleMs = clampRounded(options.settleMs ?? 1_000, 0, 5_000);
       if (settleMs > 0) await delay(settleMs, undefined, { signal: context.signal });
       return;
     }
-    const profile = CREATEOS_CHROMIUM_PROFILE;
     const settleMs = clampRounded(options.settleMs ?? 1_000, 0, 5_000);
     await this.executeChecked(
       computer,
@@ -957,7 +980,9 @@ print(json.dumps(out))
         "bash",
         "-lc",
         [
-          `mkdir -p ${shellQuote(profile)} /tmp/runtime-desktop`,
+          `mkdir -p ${shellQuote(profile)} /home/desktop/.config /tmp/runtime-desktop`,
+          `ln -sfn ${shellQuote(profile)} /home/desktop/.config/google-chrome`,
+          `ln -sfn ${shellQuote(profile)} /home/desktop/.config/chromium`,
           `chown -R desktop:desktop ${shellQuote(profile)} /tmp/runtime-desktop`,
           "chmod 700 /tmp/runtime-desktop",
           [
@@ -973,6 +998,7 @@ print(json.dumps(out))
               "DISPLAY=:0",
               "XDG_RUNTIME_DIR=/tmp/runtime-desktop",
               "google-chrome",
+              `--user-data-dir=${shellQuote(profile)}`,
               "--new-tab",
               shellQuote(uri),
               ">/tmp/rakazo-chrome.log 2>&1 </dev/null &",
@@ -1024,11 +1050,51 @@ print(json.dumps(out))
   private async openBrowserTab(
     computer: ComputerRef,
     uri: string,
+    profile: string,
     context: AdapterContext,
   ): Promise<boolean> {
     const script = `
-import sys, urllib.parse, urllib.request
-uri = sys.argv[1]
+import os, sys, urllib.parse, urllib.request
+uri, profile = sys.argv[1], sys.argv[2]
+flag = b"--user-data-dir=" + profile.encode()
+inodes = set()
+for net in ("/proc/net/tcp", "/proc/net/tcp6"):
+    try:
+        handle = open(net, encoding="utf-8")
+    except OSError:
+        continue
+    with handle:
+        next(handle, None)
+        for line in handle:
+            fields = line.split()
+            # 9222 == 0x2406. Only reuse the debugger this profile is listening on.
+            if len(fields) < 10 or fields[1].rsplit(":", 1)[-1].upper() != "2406":
+                continue
+            inodes.add(fields[9])
+owned = False
+if inodes:
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            raw = open("/proc/" + pid + "/cmdline", "rb").read()
+            names = os.listdir("/proc/" + pid + "/fd")
+        except OSError:
+            continue
+        if flag not in raw.split(b"\\0"):
+            continue
+        for name in names:
+            try:
+                link = os.readlink("/proc/" + pid + "/fd/" + name)
+            except OSError:
+                continue
+            if link.startswith("socket:[") and link[8:-1] in inodes:
+                owned = True
+                break
+        if owned:
+            break
+if not owned:
+    raise SystemExit(1)
 target = "http://127.0.0.1:9222/json/new?" + urllib.parse.quote(uri, safe="")
 for method in ("PUT", "GET"):
     try:
@@ -1041,7 +1107,7 @@ raise SystemExit(1)
 `;
     const result = await this.runCommand(
       computer,
-      { argv: ["python3", "-c", script, uri] },
+      { argv: ["python3", "-c", script, uri, profile] },
       context,
       3_000,
     );
