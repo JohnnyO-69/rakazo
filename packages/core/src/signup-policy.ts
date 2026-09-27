@@ -75,14 +75,15 @@ export function allowlistedSignupAdmission(input: {
 /**
  * Decision after the deployment-settings row is locked. `claim` is the one
  * update that may set the owner; a concurrent signup loses that update.
- * Another verified human, or an owner that is someone else, denies the exemption.
+ * Any other human account denies the exemption, verified or not, so an old
+ * unverified signup cannot take the seat when delivery is later removed.
  */
 export function firstAccountClaimDecision(input: {
   userId: string;
   ownerUserId: string | null;
-  otherHumanVerified: boolean;
+  otherHuman: boolean;
 }): "deny" | "claim" | "renew" {
-  if (input.otherHumanVerified) return "deny";
+  if (input.otherHuman) return "deny";
   if (input.ownerUserId && input.ownerUserId !== input.userId) return "deny";
   if (input.ownerUserId === input.userId) return "renew";
   return "claim";

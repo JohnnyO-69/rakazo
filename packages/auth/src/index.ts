@@ -45,13 +45,13 @@ export async function resolveSignupPolicy(
 /**
  * One allowlisted account may skip mailbox proof when nothing can send mail.
  * The deployment-settings row is locked, then a conditional owner update lets
- * only one overlapping signup win. Other unverified rows do not count: they
- * may belong to a signup that lost this claim.
+ * only one overlapping signup win. Any other human account, verified or not,
+ * denies the exemption.
  */
 async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT id FROM deployment_settings WHERE id = 'default' FOR UPDATE`;
-    const [settings, otherVerified] = await Promise.all([
+    const [settings, otherHuman] = await Promise.all([
       tx.deploymentSettings.findUnique({
         where: { id: "default" },
         select: { ownerUserId: true },
@@ -59,7 +59,6 @@ async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string)
       tx.user.findFirst({
         where: {
           id: { not: userId },
-          emailVerified: true,
           NOT: { email: { endsWith: "@messaging.invalid", mode: "insensitive" } },
         },
         select: { id: true },
@@ -68,7 +67,7 @@ async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string)
     const decision = firstAccountClaimDecision({
       userId,
       ownerUserId: settings?.ownerUserId ?? null,
-      otherHumanVerified: otherVerified !== null,
+      otherHuman: otherHuman !== null,
     });
     if (decision === "deny") return false;
     if (decision === "claim") {

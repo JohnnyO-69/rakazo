@@ -69,7 +69,6 @@ function fixture({
         const other = data.user!.find(
           (user) =>
             user.id !== where.id.not &&
-            user.emailVerified === true &&
             !String(user.email).toLowerCase().endsWith("@messaging.invalid"),
         );
         return other ? { id: String(other.id) } : null;
@@ -215,6 +214,22 @@ describe("identity trust through auth endpoints", () => {
     expect(f.data.user).toHaveLength(1);
     expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
     expect(f.messages).toHaveLength(0);
+  });
+
+  it("does not let an unverified account claim the owner seat while another human exists", async () => {
+    const f = fixture({ allowlist: "@example.test", delivery: false });
+    expect((await f.signup()).status).toBe(200);
+    f.data.user![0]!.emailVerified = false;
+    f.data.user!.push({
+      id: "human-2",
+      name: "Other",
+      email: "other@example.test",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    expect((await f.signin()).status).toBe(403);
+    expect(f.policy.ownerUserId).toBe(f.data.user![0]!.id);
   });
 
   it("does not treat a messaging identity as the first account", async () => {

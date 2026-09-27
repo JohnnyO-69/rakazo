@@ -97,33 +97,33 @@ describe("signup policy", () => {
     ).toBe("needs-delivery");
   });
 
-  it("gives the unverified first account one claim and refuses a second owner", () => {
+  it("gives the unverified first account one claim and refuses any other human", () => {
     expect(
       firstAccountClaimDecision({
         userId: "user-1",
         ownerUserId: null,
-        otherHumanVerified: false,
+        otherHuman: false,
       }),
     ).toBe("claim");
     expect(
       firstAccountClaimDecision({
         userId: "user-1",
         ownerUserId: "user-1",
-        otherHumanVerified: false,
+        otherHuman: false,
       }),
     ).toBe("renew");
     expect(
       firstAccountClaimDecision({
         userId: "user-2",
         ownerUserId: "user-1",
-        otherHumanVerified: false,
+        otherHuman: false,
       }),
     ).toBe("deny");
     expect(
       firstAccountClaimDecision({
         userId: "user-2",
         ownerUserId: null,
-        otherHumanVerified: true,
+        otherHuman: true,
       }),
     ).toBe("deny");
   });
