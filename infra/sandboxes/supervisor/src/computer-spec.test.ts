@@ -455,6 +455,7 @@ describe("graphical computer spec", () => {
       const home = path.join(temp, "home");
       const capture = path.join(temp, "args");
       const urlsFile = path.join(temp, "urls");
+      const dropFile = path.join(temp, "drop");
       const portFile = path.join(temp, "port");
       mkdirSync(bin);
       writeFileSync(
@@ -470,17 +471,51 @@ describe("graphical computer spec", () => {
       writeFileSync(
         endpoint,
         [
-          "import os",
+          "import json, os, urllib.parse",
           "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer",
+          "pages = []",
+          "state = {'consumed': False, 'listed': False}",
+          "def mode():",
+          "    try:",
+          "        with open(os.environ['RAKAZO_TEST_DROP'], encoding='utf-8') as handle:",
+          "            return handle.read().strip()",
+          "    except OSError:",
+          "        return ''",
           "class Handler(BaseHTTPRequestHandler):",
           "    def do_GET(self):",
-          "        self.record()",
+          "        self.route()",
           "    def do_PUT(self):",
-          "        self.record()",
-          "    def record(self):",
+          "        self.route()",
+          "    def route(self):",
+          "        base = self.path.split('?', 1)[0]",
+          "        if base in ('/json/list', '/json'):",
+          "            if mode() == 'before' and state['consumed']:",
+          "                state['listed'] = True",
+          "            body = json.dumps(pages).encode('utf-8')",
+          "            self.send_response(200)",
+          "            self.send_header('Content-Type', 'application/json')",
+          "            self.send_header('Content-Length', str(len(body)))",
+          "            self.end_headers()",
+          "            self.wfile.write(body)",
+          "            return",
+          "        if base != '/json/new':",
+          "            self.send_error(404)",
+          "            return",
+          "        query = self.path.split('?', 1)[1] if '?' in self.path else ''",
+          "        opened = urllib.parse.unquote(query)",
           "        with open(os.environ['RAKAZO_TEST_URLS'], 'a', encoding='utf-8') as handle:",
           "            handle.write(self.path + '\\n')",
+          "        current = mode()",
+          "        if current == 'before' and not state['listed']:",
+          "            state['consumed'] = True",
+          "            self.connection.close()",
+          "            return",
+          "        pages.append({'id': 'tab-%d' % (len(pages) + 1), 'type': 'page', 'url': opened})",
+          "        if current == 'after':",
+          "            self.connection.close()",
+          "            return",
           "        self.send_response(200)",
+          "        self.send_header('Content-Length', '0')",
           "        self.end_headers()",
           "    def log_message(self, fmt, *args):",
           "        return",
@@ -520,6 +555,8 @@ describe("graphical computer spec", () => {
       const prefs = '{\n  "profile": {\n    "exit_type": "Crashed"\n  }\n}\n';
       writeFileSync(prefsPath, prefs);
       writeFileSync(cookiesPath, "session=kept");
+      writeFileSync(urlsFile, "");
+      writeFileSync(dropFile, "0\n");
       const launchEnv = {
         ...process.env,
         DISPLAY: ":1",
@@ -531,7 +568,12 @@ describe("graphical computer spec", () => {
       const endpointProcess = spawn("python3", [endpoint], {
         stdio: "ignore",
         detached: true,
-        env: { ...process.env, RAKAZO_TEST_PORT: portFile, RAKAZO_TEST_URLS: urlsFile },
+        env: {
+          ...process.env,
+          RAKAZO_TEST_PORT: portFile,
+          RAKAZO_TEST_URLS: urlsFile,
+          RAKAZO_TEST_DROP: dropFile,
+        },
       });
       const children = [endpointProcess];
       const publishedPort = (file: string) => {
@@ -564,8 +606,12 @@ describe("graphical computer spec", () => {
             env: launchEnv,
             encoding: "utf8",
           });
+        const newTabs = () =>
+          readFileSync(urlsFile, "utf8")
+            .split("\n")
+            .filter((line) => line.startsWith("/json/new"));
         const forwarded = (url: string) =>
-          readFileSync(urlsFile, "utf8").includes(`/json/new?${encodeURIComponent(url)}`);
+          newTabs().includes(`/json/new?${encodeURIComponent(url)}`);
         const pointLock = (pid: number | undefined) => {
           rmSync(liveLock, { force: true });
           symlinkSync(`testhost-${pid}`, liveLock);
@@ -578,21 +624,47 @@ describe("graphical computer spec", () => {
         expect(readlinkSync(liveLock)).toBe(`testhost-${renderer.pid}`);
         expect(() => readFileSync(capture, "utf8")).toThrow();
 
+        const openedAt = newTabs().length;
         const opened = launch(["https://example.com/opened"]);
         expect(opened.status, opened.error?.message ?? opened.stderr).toBe(0);
-        expect(forwarded("https://example.com/opened")).toBe(true);
+        expect(newTabs().slice(openedAt)).toEqual([
+          `/json/new?${encodeURIComponent("https://example.com/opened")}`,
+        ]);
         expect(readFileSync(prefsPath, "utf8")).toBe(prefs);
         expect(readFileSync(cookiesPath, "utf8")).toBe("session=kept");
         expect(readlinkSync(liveLock)).toBe(`testhost-${renderer.pid}`);
         expect(() => readFileSync(capture, "utf8")).toThrow();
 
         pointLock(wrapper.pid);
+        const wrapperAt = newTabs().length;
         const viaWrapper = launch(["https://example.com/from-wrapper"]);
         expect(viaWrapper.status, viaWrapper.error?.message ?? viaWrapper.stderr).toBe(0);
-        expect(forwarded("https://example.com/from-wrapper")).toBe(true);
+        expect(newTabs().slice(wrapperAt)).toEqual([
+          `/json/new?${encodeURIComponent("https://example.com/from-wrapper")}`,
+        ]);
         expect(readFileSync(prefsPath, "utf8")).toBe(prefs);
         expect(readlinkSync(liveLock)).toBe(`testhost-${wrapper.pid}`);
         expect(() => readFileSync(capture, "utf8")).toThrow();
+
+        writeFileSync(dropFile, "after\n");
+        const droppedAt = newTabs().length;
+        const dropped = launch(["https://example.com/drop-after-create"]);
+        expect(dropped.status, dropped.error?.message ?? dropped.stderr).toBe(0);
+        expect(newTabs().slice(droppedAt)).toEqual([
+          `/json/new?${encodeURIComponent("https://example.com/drop-after-create")}`,
+        ]);
+        expect(readFileSync(prefsPath, "utf8")).toBe(prefs);
+        expect(() => readFileSync(capture, "utf8")).toThrow();
+
+        writeFileSync(dropFile, "before\n");
+        const blindAt = newTabs().length;
+        const blind = launch(["https://example.com/drop-before-create"]);
+        expect(blind.status, blind.error?.message ?? blind.stderr).toBe(0);
+        expect(newTabs().slice(blindAt)).toEqual([
+          `/json/new?${encodeURIComponent("https://example.com/drop-before-create")}`,
+          `/json/new?${encodeURIComponent("https://example.com/drop-before-create")}`,
+        ]);
+        writeFileSync(dropFile, "0\n");
 
         pointLock(browser.pid);
         const owned = launch(["https://example.com/owned-lock"]);
