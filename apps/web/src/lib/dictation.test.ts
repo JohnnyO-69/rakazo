@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  combineTranscript,
   Dictation,
   MAX_TRANSCRIPTION_RESPONSE_BYTES,
   TRANSCRIPTION_RESPONSE_TIMEOUT_MS,
@@ -542,6 +543,12 @@ describe("Dictation recorder fallback", () => {
     await vi.advanceTimersByTimeAsync(240);
     await vi.waitFor(() => expect(onFinal).toHaveBeenCalledWith("later"));
     vi.useRealTimers();
+  });
+});
+
+describe("combineTranscript", () => {
+  it("joins a short prefix that is not a whole word in the server text", () => {
+    expect(combineTranscript("we", "welcome")).toBe("we welcome");
   });
 });
 

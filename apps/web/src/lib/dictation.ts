@@ -63,12 +63,20 @@ function normalizedTranscript(text: string): string {
   return text.trim().replace(/\s+/g, " ");
 }
 
-function combineTranscript(prefix: string, serverText: string): string {
+function startsWithWholePrefix(serverText: string, prefix: string): boolean {
+  const head = prefix.toLowerCase();
+  const tail = serverText.toLowerCase();
+  if (!tail.startsWith(head)) return false;
+  const boundary = tail[head.length];
+  return boundary === undefined || /\s/.test(boundary);
+}
+
+export function combineTranscript(prefix: string, serverText: string): string {
   const head = normalizedTranscript(prefix);
   const tail = serverText.trim();
   if (!head) return tail;
   if (!tail) return head;
-  if (tail.toLowerCase().startsWith(head.toLowerCase())) return tail;
+  if (startsWithWholePrefix(tail, head)) return tail;
   return `${head} ${normalizedTranscript(tail)}`;
 }
 
