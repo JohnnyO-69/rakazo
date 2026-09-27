@@ -1,6 +1,12 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import { isLocalMcpHost } from "@rakazo/contracts";
+import type { ResolveHostname } from "./network-address.js";
+import { createPrivateNetworkFetch } from "./remote-mcp.js";
 import { readBodyCapped } from "./web-ssrf.js";
 
 const SUPERMEMORY_TIMEOUT_MS = 15_000;
+export const SUPERMEMORY_CLOUD_BASE_URL = "https://api.supermemory.ai";
 
 /** Search responses contain at most five bounded memories plus small metadata. */
 export const MAX_SUPERMEMORY_RESPONSE_BYTES = 1024 * 1024;
@@ -27,6 +33,8 @@ export type SupermemoryProbeResponse = { ok: true } | { ok: false; error: string
 export interface SupermemoryConnectionConfig {
   baseUrl: string;
   apiKey: string;
+  /** Test seam. Production resolves Compose DNS and pins the private answers. */
+  resolveHostname?: ResolveHostname;
 }
 
 /** Base URLs are route prefixes, never credentials or request query/fragment state. */
@@ -51,6 +59,43 @@ function requestUrl(baseUrl: string, path: string): string {
   const url = parseSupermemoryBaseUrl(baseUrl);
   url.pathname = `${url.pathname.replace(/\/+$/, "")}${path}`;
   return url.href;
+}
+
+const defaultResolveHostname: ResolveHostname = (hostname) =>
+  lookup(hostname, { all: true, verbatim: true });
+
+function hostnameOf(url: URL): string {
+  return url.hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
+}
+
+/** Loopback and IP literals have no DNS to rebind. Compose names pin to private addresses. */
+function pinsPrivateDns(baseUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return false;
+  }
+  if (url.origin === new URL(SUPERMEMORY_CLOUD_BASE_URL).origin) return false;
+  const host = hostnameOf(url);
+  return !isLocalMcpHost(host) && isIP(host) === 0;
+}
+
+async function fetchSupermemory(
+  config: SupermemoryConnectionConfig,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  if (!pinsPrivateDns(config.baseUrl)) return fetch(url, init);
+  const safe = createPrivateNetworkFetch(fetch, config.resolveHostname ?? defaultResolveHostname);
+  try {
+    return await safe(url, init);
+  } finally {
+    await safe.close();
+  }
 }
 
 function requestSignal(signal?: AbortSignal): AbortSignal {
@@ -105,7 +150,7 @@ export async function searchSupermemory(
 ): Promise<SupermemorySearchResponse> {
   try {
     const requestAbort = requestSignal(signal);
-    const response = await fetch(requestUrl(config.baseUrl, "/v4/search"), {
+    const response = await fetchSupermemory(config, requestUrl(config.baseUrl, "/v4/search"), {
       method: "POST",
       headers: authHeaders(config),
       body: JSON.stringify({
@@ -197,7 +242,8 @@ export async function deleteSupermemoryContainer(
   signal?: AbortSignal,
 ): Promise<SupermemorySaveResponse> {
   try {
-    const response = await fetch(
+    const response = await fetchSupermemory(
+      config,
       requestUrl(config.baseUrl, `/v3/container-tags/${encodeURIComponent(containerTag)}`),
       {
         method: "DELETE",
@@ -226,7 +272,7 @@ export async function saveSupermemoryMemory(
     return { ok: false, error: "Supermemory save skipped: memory content is empty." };
   }
   try {
-    const response = await fetch(requestUrl(config.baseUrl, "/v4/memories"), {
+    const response = await fetchSupermemory(config, requestUrl(config.baseUrl, "/v4/memories"), {
       method: "POST",
       headers: authHeaders(config),
       body: JSON.stringify({ containerTag, memories: [{ content: memory, isStatic: false }] }),
@@ -272,12 +318,16 @@ export async function probeSupermemory(
   config: SupermemoryConnectionConfig,
 ): Promise<SupermemoryProbeResponse> {
   try {
-    const response = await fetch(requestUrl(config.baseUrl, "/v3/container-tags/list"), {
-      method: "GET",
-      headers: authHeaders(config),
-      redirect: "error",
-      signal: AbortSignal.timeout(SUPERMEMORY_TIMEOUT_MS),
-    });
+    const response = await fetchSupermemory(
+      config,
+      requestUrl(config.baseUrl, "/v3/container-tags/list"),
+      {
+        method: "GET",
+        headers: authHeaders(config),
+        redirect: "error",
+        signal: AbortSignal.timeout(SUPERMEMORY_TIMEOUT_MS),
+      },
+    );
     if (!response.ok) {
       return { ok: false, error: `Supermemory rejected the connection: ${response.status}` };
     }
