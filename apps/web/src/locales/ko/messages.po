@@ -1360,6 +1360,10 @@ msgstr "스킬을 저장하지 못했습니다"
 msgid "Could not save that choice"
 msgstr "선택 내용을 저장하지 못했습니다."
 
+#: src/pages/VoiceSettingsOverlay.tsx:163
+msgid "Could not save that speech model"
+msgstr "음성 모델을 저장하지 못했습니다."
+
 #: src/pages/VoiceSettingsOverlay.tsx:139
 msgid "Could not save that voice"
 msgstr "목소리를 저장하지 못했습니다."
@@ -3548,6 +3552,10 @@ msgstr "이 답변 읽기"
 #: src/pages/CallView.tsx:249
 msgid "Speaking…"
 msgstr "말하는 중…"
+
+#: src/pages/VoiceSettingsOverlay.tsx:338
+msgid "Speech model"
+msgstr "음성 모델"
 
 #: src/components/teach/TeachComputerOverlay.tsx:250
 msgid "Start recording"

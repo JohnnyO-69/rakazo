@@ -404,6 +404,7 @@ export const DE_MESSAGES: Record<string, string> = {
   "Could not load voice settings": "Stimmeinstellungen konnten nicht geladen werden",
   "Could not play a sample": "Beispiel konnte nicht abgespielt werden",
   "Could not save that preference": "Diese Einstellung konnte nicht gespeichert werden",
+  "Could not save that speech model": "Sprachmodell konnte nicht gespeichert werden",
   "Could not save that voice": "Stimme konnte nicht gespeichert werden",
   Disconnect: "Trennen",
   "Disconnecting…": "Verbindung wird getrennt…",
@@ -416,6 +417,7 @@ export const DE_MESSAGES: Record<string, string> = {
   "Replace key": "Schlüssel ersetzen",
   "Speak + transcribe": "Sprechen + transkribieren",
   "Speak only": "Nur sprechen",
+  "Speech model": "Sprachmodell",
   "This device": "Dieses Gerät",
   "Your phone's built-in voice. Free, no account needed":
     "Die eingebaute Stimme deines Telefons. Kostenlos, kein Konto nötig",

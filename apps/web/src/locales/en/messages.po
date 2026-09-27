@@ -1360,6 +1360,10 @@ msgstr "Could not save skill"
 msgid "Could not save that choice"
 msgstr "Could not save that choice"
 
+#: src/pages/VoiceSettingsOverlay.tsx:163
+msgid "Could not save that speech model"
+msgstr "Could not save that speech model"
+
 #: src/pages/VoiceSettingsOverlay.tsx:139
 msgid "Could not save that voice"
 msgstr "Could not save that voice"
@@ -3548,6 +3552,10 @@ msgstr "Speak this reply"
 #: src/pages/CallView.tsx:249
 msgid "Speaking…"
 msgstr "Speaking…"
+
+#: src/pages/VoiceSettingsOverlay.tsx:338
+msgid "Speech model"
+msgstr "Speech model"
 
 #: src/components/teach/TeachComputerOverlay.tsx:250
 msgid "Start recording"

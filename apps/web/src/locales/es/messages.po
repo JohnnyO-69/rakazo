@@ -1360,6 +1360,10 @@ msgstr "No se pudo guardar la habilidad"
 msgid "Could not save that choice"
 msgstr "No se pudo guardar esa opción"
 
+#: src/pages/VoiceSettingsOverlay.tsx:163
+msgid "Could not save that speech model"
+msgstr "No se pudo guardar ese modelo de habla"
+
 #: src/pages/VoiceSettingsOverlay.tsx:139
 msgid "Could not save that voice"
 msgstr "No se pudo guardar esa voz"
@@ -3548,6 +3552,10 @@ msgstr "Leer esta respuesta"
 #: src/pages/CallView.tsx:249
 msgid "Speaking…"
 msgstr "Hablando…"
+
+#: src/pages/VoiceSettingsOverlay.tsx:338
+msgid "Speech model"
+msgstr "Modelo de habla"
 
 #: src/components/teach/TeachComputerOverlay.tsx:250
 msgid "Start recording"

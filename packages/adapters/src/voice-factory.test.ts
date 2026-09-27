@@ -16,7 +16,7 @@ import {
   listVoiceCatalog,
   VOICE_CATALOG,
 } from "./voice-factory.js";
-import { MAX_SYNTHESIZED_AUDIO_BYTES } from "./voice-http.js";
+import { MAX_SYNTHESIZED_AUDIO_BYTES, MAX_VOICE_JSON_BYTES } from "./voice-http.js";
 
 const ctx = {
   operationId: "voice",
@@ -443,6 +443,48 @@ describe("FishAudioVoiceProvider", () => {
     expect((init.headers as Record<string, string>).model).toBe("s1");
   });
 
+  it("uses the connection speech model instead of FISH_TTS_MODEL", async () => {
+    vi.stubEnv("FISH_TTS_MODEL", "s1");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new FishAudioVoiceProvider().synthesize(
+      { text: "Hi", voiceId: "voice-id", apiKey: "sk-test", model: "s2-pro" },
+      ctx,
+    );
+    await new FishAudioVoiceProvider().synthesize(
+      { text: "Hi", voiceId: "voice-id", apiKey: "sk-other", model: "s1" },
+      ctx,
+    );
+
+    const headers = (call: number) => {
+      const init = fetchMock.mock.calls[call]?.[1] as RequestInit | undefined;
+      return (init?.headers ?? {}) as Record<string, string>;
+    };
+    expect(headers(0).model).toBe("s2-pro");
+    expect(headers(1).model).toBe("s1");
+  });
+
+  it("ignores a connection speech model that is not a model id", async () => {
+    vi.stubEnv("FISH_TTS_MODEL", "s1");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new FishAudioVoiceProvider().synthesize(
+      { text: "Hi", voiceId: "voice-id", apiKey: "sk-test", model: "s2\ninjected" },
+      ctx,
+    );
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect((init.headers as Record<string, string>).model).toBe("s1");
+  });
+
   it("keeps s2.1-pro when FISH_TTS_MODEL is not a model id", async () => {
     vi.stubEnv("FISH_TTS_MODEL", "s1\ninjected");
     const fetchMock = vi.fn().mockResolvedValue({
@@ -478,9 +520,15 @@ describe("FishAudioVoiceProvider", () => {
       ),
     );
 
-    await expect(
-      new FishAudioVoiceProvider().synthesize({ text: "Hi", voiceId: "voice-id", apiKey }, ctx),
-    ).rejects.toThrow("speaking failed: model s1 is not enabled for sk-fishaudiokey12345");
+    const error = await new FishAudioVoiceProvider()
+      .synthesize({ text: "Hi", voiceId: "voice-id", apiKey }, ctx)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "speaking failed: model s1 is not enabled for [Redacted]",
+    );
+    expect((error as Error).message).not.toContain(apiKey);
 
     const event = sink.events.find((entry) => entry.message === "Fish Audio request failed");
     expect(event).toMatchObject({
@@ -491,6 +539,49 @@ describe("FishAudioVoiceProvider", () => {
       "error.detail": "model s1 is not enabled for [Redacted]",
     });
     expect(JSON.stringify(event)).not.toContain(apiKey);
+  });
+
+  it.each([
+    [
+      "speaking",
+      (provider: FishAudioVoiceProvider) =>
+        provider.synthesize({ text: "Hi", voiceId: "voice-id", apiKey: "sk-test" }, ctx),
+    ],
+    [
+      "transcribing",
+      (provider: FishAudioVoiceProvider) =>
+        provider.transcribe!(
+          { audio: new Uint8Array([1]), mimeType: "audio/webm", apiKey: "sk-test" },
+          ctx,
+        ),
+    ],
+    ["listing voices", (provider: FishAudioVoiceProvider) => provider.listVoices("sk-test", ctx)],
+  ])("logs Fish %s status when the error body cannot be read", async (operation, call) => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-api", sinks: [sink] }));
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(
+        () =>
+          new Response(new ReadableStream({ cancel }), {
+            status: 502,
+            headers: { "content-length": String(MAX_VOICE_JSON_BYTES + 1) },
+          }),
+      ),
+    );
+
+    await expect(call(new FishAudioVoiceProvider())).rejects.toThrow(
+      `${operation} failed: Voice response is too large.`,
+    );
+
+    const event = sink.events.find((entry) => entry.message === "Fish Audio request failed");
+    expect(event).toMatchObject({
+      operation,
+      "http.status": 502,
+      "error.detail": "Voice response is too large.",
+    });
+    expect(cancel).toHaveBeenCalled();
   });
 
   it("logs a non-JSON Fish body when speaking fails", async () => {

@@ -219,6 +219,7 @@ import {
   prepareVoice,
   toVoiceCredential,
   toVoiceStatus,
+  updateVoiceSpeechModel,
   voiceContext,
 } from "./voice.js";
 
@@ -4838,6 +4839,7 @@ export function createRouter(deps: RouterDeps) {
             ...row,
             isDefault: preference?.isDefault ?? false,
             voiceId: preference?.voiceId ?? "",
+            speechModel: preference?.speechModel ?? "",
           });
         });
       }),
@@ -4846,6 +4848,7 @@ export function createRouter(deps: RouterDeps) {
           provider: input.provider,
           plaintext: input.apiKey,
           voiceId: input.voiceId,
+          speechModel: input.speechModel,
           signal: context.signal,
         }),
       ),
@@ -4884,6 +4887,9 @@ export function createRouter(deps: RouterDeps) {
         );
         return toVoiceStatus(cred);
       }),
+      setSpeechModel: authed.voice.setSpeechModel.handler(async ({ context, input }) =>
+        updateVoiceSpeechModel(deps, context.actor, input),
+      ),
       voices: authed.voice.voices.handler(async ({ context, input }) => {
         const loaded = await loadDefaultVoiceCredential(deps, context.actor);
         if (!loaded) return [];

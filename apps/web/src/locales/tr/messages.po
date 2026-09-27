@@ -1360,6 +1360,10 @@ msgstr "Beceri kaydedilemedi"
 msgid "Could not save that choice"
 msgstr "Bu seçim kaydedilemedi"
 
+#: src/pages/VoiceSettingsOverlay.tsx:163
+msgid "Could not save that speech model"
+msgstr "Bu konuşma modeli kaydedilemedi"
+
 #: src/pages/VoiceSettingsOverlay.tsx:139
 msgid "Could not save that voice"
 msgstr "Bu ses kaydedilemedi"
@@ -3548,6 +3552,10 @@ msgstr "Bu yanıtı seslendir"
 #: src/pages/CallView.tsx:249
 msgid "Speaking…"
 msgstr "Konuşuyor…"
+
+#: src/pages/VoiceSettingsOverlay.tsx:338
+msgid "Speech model"
+msgstr "Konuşma modeli"
 
 #: src/components/teach/TeachComputerOverlay.tsx:250
 msgid "Start recording"

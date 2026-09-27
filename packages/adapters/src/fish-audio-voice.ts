@@ -27,7 +27,7 @@ const PUBLIC_MODEL_PAGES = 5;
 const OWN_MODEL_PAGES = 20;
 const LIST_VOICES_DEADLINE_MS = 20_000;
 const DEFAULT_TTS_MODEL = "s2.1-pro";
-/** Header-safe Fish model id. `FISH_TTS_MODEL` overrides the default. */
+/** Header-safe Fish model id. A connection override wins over `FISH_TTS_MODEL`. */
 const TTS_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const UPSTREAM_DETAIL_LIMIT = 500;
 let invalidTtsModelWarned = false;
@@ -72,7 +72,7 @@ export class FishAudioVoiceProvider implements VoiceProvider {
   /** Synthesize one Rakazo utterance as bounded MP3 audio. */
   async synthesize(request: VoiceSynthesizeRequest, context: AdapterContext): Promise<SpeechClip> {
     const signal = voiceDeadline(request.signal ?? context.signal, 60_000);
-    const model = fishTtsModel();
+    const model = resolveFishSpeechModel(request.model);
     const res = await fetch(`${API}/v1/tts`, {
       method: "POST",
       headers: {
@@ -92,7 +92,7 @@ export class FishAudioVoiceProvider implements VoiceProvider {
       signal,
     });
     if (!res.ok) {
-      rejectFish(res.status, "speaking", await readFishError(res), request.apiKey, model);
+      rejectFish(res.status, "speaking", await readFishResponse(res), request.apiKey, model);
     }
     return { bytes: await readVoiceAudio(res, signal), mimeType: "audio/mpeg" };
   }
@@ -115,7 +115,7 @@ export class FishAudioVoiceProvider implements VoiceProvider {
       body: form,
       signal: voiceDeadline(request.signal ?? context.signal, 60_000),
     });
-    const body = await readVoiceJson(res, { requireValid: res.ok, rawOnInvalid: !res.ok });
+    const body = await readFishResponse(res);
     if (!res.ok) rejectFish(res.status, "transcribing", body, request.apiKey);
     return { text: String((body as { text?: unknown } | null)?.text ?? "").trim() };
   }
@@ -140,7 +140,7 @@ async function fetchModels(
       headers: fishAudioHeaders(apiKey),
       signal: context.signal,
     });
-    const body = await readVoiceJson(res, { requireValid: res.ok, rawOnInvalid: !res.ok });
+    const body = await readFishResponse(res);
     if (!res.ok) rejectFish(res.status, "listing voices", body, apiKey);
     const items = modelsFrom(body);
     models.push(...items);
@@ -165,11 +165,23 @@ function fishAudioHeaders(apiKey: string): Record<string, string> {
   return { authorization: `Bearer ${apiKey}` };
 }
 
+/** True when `value` can be sent as the Fish `model` header. */
+export function isFishSpeechModelId(value: string): boolean {
+  return TTS_MODEL_PATTERN.test(value);
+}
+
+/** Connection override, then `FISH_TTS_MODEL`, then s2.1-pro. */
+function resolveFishSpeechModel(override?: string | null): string {
+  const requested = override?.trim() ?? "";
+  if (requested && isFishSpeechModelId(requested)) return requested;
+  return deploymentFishSpeechModel();
+}
+
 /** `FISH_TTS_MODEL` when it is a single model id; otherwise s2.1-pro. */
-function fishTtsModel(): string {
+function deploymentFishSpeechModel(): string {
   const configured = process.env.FISH_TTS_MODEL?.trim() ?? "";
   if (!configured) return DEFAULT_TTS_MODEL;
-  if (TTS_MODEL_PATTERN.test(configured)) return configured;
+  if (isFishSpeechModelId(configured)) return configured;
   if (!invalidTtsModelWarned) {
     invalidTtsModelWarned = true;
     getLogger().warn("Ignoring FISH_TTS_MODEL because it is not a model id", {
@@ -179,9 +191,21 @@ function fishTtsModel(): string {
   return DEFAULT_TTS_MODEL;
 }
 
-/** Read a Fish error body, keeping non-JSON text for the server log. */
-async function readFishError(res: Response): Promise<unknown> {
-  return readVoiceJson(res, { rawOnInvalid: true });
+/** Read a Fish body. Error responses still return a safe message when the read fails. */
+async function readFishResponse(res: Response): Promise<unknown> {
+  try {
+    return await readVoiceJson(res, { requireValid: res.ok, rawOnInvalid: !res.ok });
+  } catch (error) {
+    if (res.ok) throw error;
+    return fishUnreadBody(error);
+  }
+}
+
+function fishUnreadBody(error: unknown): { message: string } {
+  if (error instanceof Error && error.message === "Voice response is too large.") {
+    return { message: error.message };
+  }
+  return { message: "response body could not be read" };
 }
 
 /** Log the upstream Fish status and message, then raise the user-facing error. */
@@ -201,7 +225,12 @@ function rejectFish(
     ...(detail ? { "error.detail": detail } : {}),
   });
   throw new Error(
-    voiceHttpError(status, "Fish Audio", what, typeof body === "string" ? null : body),
+    voiceHttpError(
+      status,
+      "Fish Audio",
+      what,
+      typeof body === "string" || !detail ? null : { message: detail },
+    ),
   );
 }
 

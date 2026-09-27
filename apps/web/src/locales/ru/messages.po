@@ -1360,6 +1360,10 @@ msgstr "Не удалось сохранить навык"
 msgid "Could not save that choice"
 msgstr "Не удалось сохранить этот выбор"
 
+#: src/pages/VoiceSettingsOverlay.tsx:163
+msgid "Could not save that speech model"
+msgstr "Не удалось сохранить речевую модель"
+
 #: src/pages/VoiceSettingsOverlay.tsx:139
 msgid "Could not save that voice"
 msgstr "Не удалось сохранить этот голос"
@@ -3548,6 +3552,10 @@ msgstr "Озвучить этот ответ"
 #: src/pages/CallView.tsx:249
 msgid "Speaking…"
 msgstr "Озвучивание…"
+
+#: src/pages/VoiceSettingsOverlay.tsx:338
+msgid "Speech model"
+msgstr "Речевая модель"
 
 #: src/components/teach/TeachComputerOverlay.tsx:250
 msgid "Start recording"

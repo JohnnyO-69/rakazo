@@ -1360,6 +1360,10 @@ msgstr "Impossible d'enregistrer la compétence"
 msgid "Could not save that choice"
 msgstr "Impossible d'enregistrer ce choix"
 
+#: src/pages/VoiceSettingsOverlay.tsx:163
+msgid "Could not save that speech model"
+msgstr "Impossible d'enregistrer ce modèle de parole"
+
 #: src/pages/VoiceSettingsOverlay.tsx:139
 msgid "Could not save that voice"
 msgstr "Impossible d'enregistrer cette voix"
@@ -3548,6 +3552,10 @@ msgstr "Lire cette réponse à voix haute"
 #: src/pages/CallView.tsx:249
 msgid "Speaking…"
 msgstr "Élocution en cours…"
+
+#: src/pages/VoiceSettingsOverlay.tsx:338
+msgid "Speech model"
+msgstr "Modèle de parole"
 
 #: src/components/teach/TeachComputerOverlay.tsx:250
 msgid "Start recording"
