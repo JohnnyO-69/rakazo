@@ -22,6 +22,7 @@ import {
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { BrowserStoppedReleaseError } from "./computer-screens.js";
 import { toComputerRef } from "./computer-support.js";
 import { checkpointAndRecordComputerWorkspace } from "./computer-workspace.js";
 import { resolveAgentHomePath } from "./home.js";
@@ -593,8 +594,10 @@ async function releaseTeamComputerScreen(
   if (!computer?.providerRef) return computer;
   // archive_bot runs inside the parent bot, and hard delete can omit botId.
   // Release this bot's screen; the caller's lease must not veto or redirect it.
-  // Profile removal waits on this stop. A timed-out release can return while
-  // Chromium is still exiting, and that process would recreate the profile.
+  // Profile removal waits on the browser stop. A timed-out or failed stop can
+  // return while Chromium is still exiting, and that process would recreate
+  // the profile. A stop that succeeds and then fails while reacquiring the
+  // screen lock or clearing the slot still removes the profile.
   try {
     await deps.sandbox.releaseScreen?.(toComputerRef(computer), {
       ...context,
@@ -604,6 +607,7 @@ async function releaseTeamComputerScreen(
     });
   } catch (error) {
     getLogger().error("team screen release", error);
+    if (error instanceof BrowserStoppedReleaseError) return computer;
     return null;
   }
   return computer;

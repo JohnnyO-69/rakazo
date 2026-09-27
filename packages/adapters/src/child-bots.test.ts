@@ -20,6 +20,7 @@ import {
   destroyBot,
   spawnBot,
 } from "./child-bots.js";
+import { BrowserStoppedReleaseError } from "./computer-screens.js";
 import { LocalAgentHomeStore } from "./home.js";
 
 const context = {
@@ -684,80 +685,87 @@ describe("destroyBot", () => {
     }
   });
 
-  it("removes the deleted bot's profile from a remote sandbox after the browser stops", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-delete-"));
-    const remote = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-workspace-"));
-    try {
-      const home = new LocalAgentHomeStore(root);
-      const teamHome = home.pathFor("team-workspace-1");
-      await seedProfile(teamHome, "bot-1", "local-gone");
-      await seedProfile(teamHome, "bot-2", "local-keep");
-      await seedProfile(remote, "bot-1", "remote-gone");
-      await seedProfile(remote, "bot-2", "remote-keep");
-      const releaseScreen = vi.fn().mockResolvedValue(undefined);
-      const execute = vi.fn(async function* (_computer: unknown, request: CommandRequest) {
-        const result = runInWorkspace(remote, request.argv);
-        if (result.stderr) yield { type: "stderr" as const, data: result.stderr };
-        yield { type: "exit" as const, code: result.code };
-      });
-      const team = {
-        id: "team-computer",
-        homeKey: "team-workspace-1",
-        kind: "e2b",
-        providerRef: "sandbox-1",
-        scope: "team",
-      };
+  it.each(["e2b", "createos"])(
+    "removes the deleted bot's profile from a %s sandbox after the browser stops",
+    async (kind) => {
+      const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-delete-"));
+      const remote = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-workspace-"));
+      try {
+        const home = new LocalAgentHomeStore(root);
+        const teamHome = home.pathFor("team-workspace-1");
+        await seedProfile(teamHome, "bot-1", "local-gone");
+        await seedProfile(teamHome, "bot-2", "local-keep");
+        await seedProfile(remote, "bot-1", "remote-gone");
+        await seedProfile(remote, "bot-2", "remote-keep");
+        const releaseScreen = vi.fn().mockResolvedValue(undefined);
+        const execute = vi.fn(async function* (_computer: unknown, request: CommandRequest) {
+          const result = runInWorkspace(remote, request.argv);
+          if (result.stderr) yield { type: "stderr" as const, data: result.stderr };
+          yield { type: "exit" as const, code: result.code };
+        });
+        const team = {
+          id: "team-computer",
+          homeKey: "team-workspace-1",
+          kind,
+          providerRef: "sandbox-1",
+          scope: "team",
+        };
 
-      await destroyBot(
-        {
-          prisma: deletionPrisma(team),
-          sandbox: { releaseScreen, execute } as unknown as SandboxProvider,
-          home,
-          jobs: { cancel: vi.fn() } as unknown as JobPublisher,
-        },
-        {
-          id: "bot-1",
-          spaceId: "workspace-1",
-          name: "Researcher",
-          archivedAt: null,
-          computerId: team.id,
-        },
-        { ...context, botId: "parent-1", screenLeaseId: "run-parent:4" },
-        { deleteMemories: true },
-      );
+        await destroyBot(
+          {
+            prisma: deletionPrisma(team),
+            sandbox: { releaseScreen, execute } as unknown as SandboxProvider,
+            home,
+            jobs: { cancel: vi.fn() } as unknown as JobPublisher,
+          },
+          {
+            id: "bot-1",
+            spaceId: "workspace-1",
+            name: "Researcher",
+            archivedAt: null,
+            computerId: team.id,
+          },
+          { ...context, botId: "parent-1", screenLeaseId: "run-parent:4" },
+          { deleteMemories: true },
+        );
 
-      expect(releaseScreen.mock.invocationCallOrder[0]).toBeLessThan(
-        execute.mock.invocationCallOrder[0] ?? 0,
-      );
-      expect(execute).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: "e2b", providerRef: "sandbox-1" }),
-        expect.objectContaining({
-          cwd: ".",
-          argv: [
-            "bash",
-            "-eu",
-            "-c",
-            expect.any(String),
-            "bash",
-            ".browser-profiles",
-            profileDirectory("bot-1"),
-          ],
-        }),
-        expect.objectContaining({ botId: "bot-1", screenLeaseId: undefined }),
-      );
-      await expect(
-        access(path.join(teamHome, ".browser-profiles", profileDirectory("bot-1"))),
-      ).rejects.toThrow();
-      await expect(readFile(profileCookies(teamHome, "bot-2"), "utf8")).resolves.toBe("local-keep");
-      await expect(
-        access(path.join(remote, ".browser-profiles", profileDirectory("bot-1"))),
-      ).rejects.toThrow();
-      await expect(readFile(profileCookies(remote, "bot-2"), "utf8")).resolves.toBe("remote-keep");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-      await rm(remote, { recursive: true, force: true });
-    }
-  });
+        expect(releaseScreen.mock.invocationCallOrder[0]).toBeLessThan(
+          execute.mock.invocationCallOrder[0] ?? 0,
+        );
+        expect(execute).toHaveBeenCalledWith(
+          expect.objectContaining({ kind, providerRef: "sandbox-1" }),
+          expect.objectContaining({
+            cwd: ".",
+            argv: [
+              "bash",
+              "-eu",
+              "-c",
+              expect.any(String),
+              "bash",
+              ".browser-profiles",
+              profileDirectory("bot-1"),
+            ],
+          }),
+          expect.objectContaining({ botId: "bot-1", screenLeaseId: undefined }),
+        );
+        await expect(
+          access(path.join(teamHome, ".browser-profiles", profileDirectory("bot-1"))),
+        ).rejects.toThrow();
+        await expect(readFile(profileCookies(teamHome, "bot-2"), "utf8")).resolves.toBe(
+          "local-keep",
+        );
+        await expect(
+          access(path.join(remote, ".browser-profiles", profileDirectory("bot-1"))),
+        ).rejects.toThrow();
+        await expect(readFile(profileCookies(remote, "bot-2"), "utf8")).resolves.toBe(
+          "remote-keep",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(remote, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("leaves a remote profile in place when its parent directory is a symlink", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-remote-symlink-"));
@@ -856,6 +864,64 @@ describe("destroyBot", () => {
       expect(execute).not.toHaveBeenCalled();
       await expect(readFile(profileCookies(teamHome, "bot-1"), "utf8")).resolves.toBe("local-stay");
       await expect(readFile(profileCookies(remote, "bot-1"), "utf8")).resolves.toBe("remote-stay");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("removes local and remote profiles when the browser stopped but slot cleanup failed", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-team-slot-cleanup-"));
+    const remote = await mkdtemp(path.join(tmpdir(), "rakazo-team-slot-cleanup-workspace-"));
+    try {
+      const home = new LocalAgentHomeStore(root);
+      const teamHome = home.pathFor("team-workspace-1");
+      await seedProfile(teamHome, "bot-1", "local-gone");
+      await seedProfile(teamHome, "bot-2", "local-keep");
+      await seedProfile(remote, "bot-1", "remote-gone");
+      await seedProfile(remote, "bot-2", "remote-keep");
+      const execute = vi.fn(async function* (_computer: unknown, request: CommandRequest) {
+        const result = runInWorkspace(remote, request.argv);
+        if (result.stderr) yield { type: "stderr" as const, data: result.stderr };
+        yield { type: "exit" as const, code: result.code };
+      });
+      const team = {
+        id: "team-computer",
+        homeKey: "team-workspace-1",
+        kind: "createos",
+        providerRef: "sandbox-1",
+        scope: "team",
+      };
+
+      await destroyBot(
+        {
+          prisma: deletionPrisma(team),
+          sandbox: {
+            releaseScreen: vi.fn().mockRejectedValue(new BrowserStoppedReleaseError()),
+            execute,
+          } as unknown as SandboxProvider,
+          home,
+          jobs: { cancel: vi.fn() } as unknown as JobPublisher,
+        },
+        {
+          id: "bot-1",
+          spaceId: "workspace-1",
+          name: "Researcher",
+          archivedAt: null,
+          computerId: team.id,
+        },
+        context,
+        { deleteMemories: true },
+      );
+
+      await expect(
+        access(path.join(teamHome, ".browser-profiles", profileDirectory("bot-1"))),
+      ).rejects.toThrow();
+      await expect(readFile(profileCookies(teamHome, "bot-2"), "utf8")).resolves.toBe("local-keep");
+      await expect(
+        access(path.join(remote, ".browser-profiles", profileDirectory("bot-1"))),
+      ).rejects.toThrow();
+      await expect(readFile(profileCookies(remote, "bot-2"), "utf8")).resolves.toBe("remote-keep");
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(remote, { recursive: true, force: true });
