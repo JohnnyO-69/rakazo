@@ -65,10 +65,11 @@ function fixture({
           .slice(0, 2)
           .map((user) => ({ id: String(user.id) })),
       ),
-      findFirst: vi.fn(async ({ where }: { where: { id: { not: string } } }) => {
+      findFirst: vi.fn(async ({ where }: { where?: { id?: { not?: string } } }) => {
+        const excluded = where?.id?.not;
         const other = data.user!.find(
           (user) =>
-            user.id !== where.id.not &&
+            (excluded === undefined || user.id !== excluded) &&
             !String(user.email).toLowerCase().endsWith("@messaging.invalid"),
         );
         return other ? { id: String(other.id) } : null;
@@ -214,6 +215,21 @@ describe("identity trust through auth endpoints", () => {
     expect(f.data.user).toHaveLength(1);
     expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
     expect(f.messages).toHaveLength(0);
+  });
+
+  it("admits only one of two overlapping allowlisted signups without delivery", async () => {
+    const f = fixture({ allowlist: "@example.test", delivery: false });
+    const [first, second] = await Promise.all([
+      f.signup("one@example.test"),
+      f.signup("two@example.test"),
+    ]);
+    const admitted = [first, second].filter((response) => response.status === 200);
+    const denied = [first, second].filter((response) => response.status === 400);
+    expect(admitted).toHaveLength(1);
+    expect(denied).toHaveLength(1);
+    expect(await denied[0]!.text()).toContain("Registration requires email delivery");
+    expect(f.data.user).toHaveLength(1);
+    expect(f.policy.ownerUserId).toBe(f.data.user![0]!.id);
   });
 
   it("does not let an unverified account claim the owner seat while another human exists", async () => {

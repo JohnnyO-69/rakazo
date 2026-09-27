@@ -42,11 +42,122 @@ export async function resolveSignupPolicy(
   return signupPolicyFromEnv(env);
 }
 
+const signupGates = new Map<string, Array<() => Promise<void>>>();
+
+/** Serializes first-account admission inside this process. */
+let signupGateTail: Promise<void> = Promise.resolve();
+
+/**
+ * Transaction-scoped lock shared by every API process. Held from the
+ * allowlist check until that signup finishes, so a second signup cannot
+ * insert a user until the first one is visible.
+ */
+const FIRST_ACCOUNT_ADMISSION_LOCK = 872014;
+
+function enqueueSignupGate(): { wait: Promise<void>; done: () => void } {
+  let settle: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  const wait = signupGateTail;
+  let settled = false;
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    settle();
+  };
+  signupGateTail = gate;
+  return { wait, done };
+}
+
+/**
+ * Hold the first-account gate until the signup handler finishes, so a second
+ * allowlisted signup cannot insert a user until the first one is visible.
+ * The transaction commits on release, which drops the advisory lock.
+ */
+async function holdFirstAccountGate(prisma: PrismaClient): Promise<{
+  admission: "open" | "needs-delivery";
+  release: () => Promise<void>;
+}> {
+  const turn = enqueueSignupGate();
+  await turn.wait;
+  let resolveReady: (admission: "open" | "needs-delivery") => void = () => undefined;
+  let rejectReady: (error: unknown) => void = () => undefined;
+  let readySettled = false;
+  const ready = new Promise<"open" | "needs-delivery">((resolve, reject) => {
+    resolveReady = (admission) => {
+      if (readySettled) return;
+      readySettled = true;
+      resolve(admission);
+    };
+    rejectReady = (error) => {
+      if (readySettled) return;
+      readySettled = true;
+      reject(error);
+    };
+  });
+  let releaseGate: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  const finished = prisma
+    .$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FIRST_ACCOUNT_ADMISSION_LOCK})`;
+        const otherHuman = await tx.user.findFirst({
+          where: {
+            NOT: { email: { endsWith: "@messaging.invalid", mode: "insensitive" } },
+          },
+          select: { id: true },
+        });
+        resolveReady(otherHuman ? "needs-delivery" : "open");
+        await released;
+      },
+      { timeout: 20_000, maxWait: 10_000 },
+    )
+    .catch((error: unknown) => {
+      rejectReady(error);
+      throw error;
+    })
+    .finally(() => {
+      turn.done();
+    });
+  try {
+    const admission = await ready;
+    return {
+      admission,
+      release: async () => {
+        releaseGate();
+        await finished.catch(() => undefined);
+      },
+    };
+  } catch (error) {
+    turn.done();
+    throw error;
+  }
+}
+
+function rememberSignupGate(email: string, release: () => Promise<void>) {
+  const key = email.trim().toLowerCase();
+  const pending = signupGates.get(key) ?? [];
+  pending.push(release);
+  signupGates.set(key, pending);
+}
+
+async function releaseSignupGate(email: string) {
+  const key = email.trim().toLowerCase();
+  const pending = signupGates.get(key);
+  const release = pending?.shift();
+  if (!pending?.length) signupGates.delete(key);
+  await release?.();
+}
+
 /**
  * One allowlisted account may skip mailbox proof when nothing can send mail.
- * The deployment-settings row is locked, then a conditional owner update lets
- * only one overlapping signup win. Any other human account, verified or not,
- * denies the exemption.
+ * Admission is reserved before the user row is inserted. This claim is the
+ * backstop: the deployment-settings row is locked, then a conditional owner
+ * update lets only one overlapping signup win. Any other human account,
+ * verified or not, denies the exemption.
  */
 async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
@@ -86,20 +197,6 @@ async function claimUnverifiedFirstAccount(prisma: PrismaClient, userId: string)
     });
     return true;
   });
-}
-
-/** Humans only. Messaging identities must not consume the first-account exemption. */
-async function humanUserIds(prisma: Pick<PrismaClient, "user">): Promise<string[]> {
-  const users = await prisma.user.findMany({
-    where: {
-      NOT: {
-        email: { endsWith: "@messaging.invalid", mode: "insensitive" },
-      },
-    },
-    select: { id: true },
-    take: 2,
-  });
-  return users.map((user) => user.id);
 }
 
 export function createAuth(prisma: PrismaClient, env: AuthEnv) {
@@ -198,19 +295,28 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
           if (!policy?.enabled) {
             throw new APIError("BAD_REQUEST", { message: "Registration is closed" });
           }
-          if (!emailAllowed(String(ctx.body?.email ?? ""), policy.allowlist)) {
+          const email = String(ctx.body?.email ?? "");
+          if (!emailAllowed(email, policy.allowlist)) {
             throw new APIError("BAD_REQUEST", { message: "Email is not allowed to register" });
           }
-          const admission = allowlistedSignupAdmission({
-            allowlistSize: policy.allowlist.length,
-            hasEmailDelivery: Boolean(env.email),
-            existingHumanCount:
-              policy.allowlist.length > 0 && !env.email ? (await humanUserIds(prisma)).length : 0,
-          });
-          if (admission === "needs-delivery") {
-            throw new APIError("BAD_REQUEST", { message: "Registration requires email delivery" });
+          if (policy.allowlist.length > 0 && !env.email) {
+            const held = await holdFirstAccountGate(prisma);
+            if (held.admission === "needs-delivery") {
+              await held.release();
+              throw new APIError("BAD_REQUEST", {
+                message: "Registration requires email delivery",
+              });
+            }
+            rememberSignupGate(email, held.release);
+            requireEmailVerification = false;
+          } else {
+            requireEmailVerification =
+              allowlistedSignupAdmission({
+                allowlistSize: policy.allowlist.length,
+                hasEmailDelivery: Boolean(env.email),
+                existingHumanCount: 0,
+              }) === "verify";
           }
-          requireEmailVerification = admission === "verify";
         } else if (policy) {
           requireEmailVerification = policy.allowlist.length > 0;
         }
@@ -241,6 +347,11 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             },
           },
         };
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/sign-up/email") {
+          await releaseSignupGate(String(ctx.body?.email ?? ""));
+        }
       }),
     },
     databaseHooks: {
