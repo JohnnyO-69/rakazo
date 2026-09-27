@@ -701,23 +701,16 @@ describe("Dictation web speech", () => {
 
   it("finishes the endpoint turn when speech arrived before Web Speech failed", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const instances: Array<{
-      onresult: ((event: {
-        resultIndex: number;
-        results: ArrayLike<ArrayLike<{ transcript: string }>>;
-      }) => void) | null;
-      onerror: ((event: { error?: string }) => void) | null;
-      onend: (() => void) | null;
-      abort: ReturnType<typeof vi.fn>;
-    }> = [];
+    type ResultEvent = {
+      resultIndex: number;
+      results: ArrayLike<ArrayLike<{ transcript: string }>>;
+    };
+    const instances: FakeRecognition[] = [];
     class FakeRecognition {
       continuous = false;
       interimResults = false;
       lang = "";
-      onresult: ((event: {
-        resultIndex: number;
-        results: ArrayLike<ArrayLike<{ transcript: string }>>;
-      }) => void) | null = null;
+      onresult: ((event: ResultEvent) => void) | null = null;
       onerror: ((event: { error?: string }) => void) | null = null;
       onend: (() => void) | null = null;
       start = vi.fn();
