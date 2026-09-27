@@ -65,10 +65,11 @@ function normalizedTranscript(text: string): string {
 
 function combineTranscript(prefix: string, serverText: string): string {
   const head = normalizedTranscript(prefix);
-  const tail = normalizedTranscript(serverText);
+  const tail = serverText.trim();
   if (!head) return tail;
   if (!tail) return head;
-  return `${head} ${tail}`;
+  if (tail.toLowerCase().startsWith(head.toLowerCase())) return tail;
+  return `${head} ${normalizedTranscript(tail)}`;
 }
 
 function speechRecognitionCtor(): SpeechRecognitionCtor | undefined {
@@ -293,20 +294,17 @@ export class Dictation {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
-      if (this.token !== mine) return;
-      this.set({
-        ...IDLE,
-        error: error instanceof Error ? error.message : "Microphone failed",
-      });
+      this.failListening(mine, error instanceof Error ? error.message : "Microphone failed");
       return;
     }
     if (this.token !== mine) {
       for (const track of stream.getTracks()) track.stop();
       return;
     }
-    if (mode === "endpoint" && !this.armSilence(stream, mine, endpointMs)) {
+    const keptSpeech = this.snapshot.transcript.trim().length > 0;
+    if (mode === "endpoint" && !this.armSilence(stream, mine, endpointMs, keptSpeech)) {
       for (const track of stream.getTracks()) track.stop();
-      this.set({ ...IDLE, error: ENDPOINT_UNSUPPORTED });
+      this.failListening(mine, ENDPOINT_UNSUPPORTED);
       return;
     }
     let media: MediaRecorder | undefined;
@@ -334,14 +332,16 @@ export class Dictation {
       if (this.media === media) this.media = null;
       if (this.token !== mine) return;
       this.stopVad();
-      this.set({
-        ...IDLE,
-        error: error instanceof Error ? error.message : "Dictation failed.",
-      });
+      this.failListening(mine, error instanceof Error ? error.message : "Dictation failed.");
     }
   }
 
-  private armSilence(stream: MediaStream, mine: number, endpointMs: number): boolean {
+  private armSilence(
+    stream: MediaStream,
+    mine: number,
+    endpointMs: number,
+    alreadyHeard = false,
+  ): boolean {
     const Ctor = audioContextCtor();
     if (!Ctor) return false;
     try {
@@ -353,7 +353,7 @@ export class Dictation {
       this.audioContext = ctx;
       if (ctx.state === "suspended") void ctx.resume();
       const data = new Uint8Array(analyser.fftSize);
-      let heardSpeech = false;
+      let heardSpeech = alreadyHeard;
       let silentFor = 0;
       this.vadTimer = setInterval(() => {
         const media = this.media;
@@ -435,7 +435,7 @@ export class Dictation {
       const body = await readTranscriptionBody(res, abort.signal);
       if (this.token !== mine) return;
       if (!res.ok) {
-        this.set({ ...IDLE, error: body.error ?? "Could not transcribe that recording." });
+        this.failListening(mine, body.error ?? "Could not transcribe that recording.");
         return;
       }
       this.finish(combineTranscript(this.snapshot.transcript, body.text ?? ""), mine);
@@ -449,13 +449,13 @@ export class Dictation {
           abort.signal.reason.message === "Transcription request timed out.") ||
         (error instanceof Error && error.message === "Transcription request timed out.");
       if (timedOut || (error instanceof Error && error.name === "AbortError")) {
-        this.set({ ...IDLE, error: "Transcription request timed out." });
+        this.failListening(mine, "Transcription request timed out.");
         return;
       }
-      this.set({
-        ...IDLE,
-        error: error instanceof Error ? error.message : "Could not transcribe that recording.",
-      });
+      this.failListening(
+        mine,
+        error instanceof Error ? error.message : "Could not transcribe that recording.",
+      );
     } finally {
       clearTimeout(timer);
       if (this.transcribeAbort === abort) this.transcribeAbort = null;
@@ -468,6 +468,16 @@ export class Dictation {
       return;
     }
     this.finish(this.snapshot.transcript, this.token);
+  }
+
+  private failListening(mine: number, message: string) {
+    if (this.token !== mine) return;
+    const prefix = normalizedTranscript(this.snapshot.transcript);
+    if (prefix) {
+      this.finish(prefix, mine);
+      return;
+    }
+    this.set({ ...IDLE, error: message });
   }
 
   private finish(text: string, mine: number) {
