@@ -16,6 +16,7 @@ test("opens Artifacts from the account menu and lists created files", async ({
   await expect(sidebar).toBeVisible();
   expect((await sidebar.boundingBox())?.x).toBe(0);
   await expect(sidebar.getByRole("link", { name: "Artifacts" })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "Artifacts", exact: true })).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "Integrations" })).toBeVisible();
   await page.getByTestId("user-menu-trigger").click();
   const artifactsItem = page.getByRole("button", { name: "Artifacts", exact: true });
@@ -74,6 +75,9 @@ test("opens Artifacts from the account menu and lists created files", async ({
   await page.getByRole("button", { name: "Open navigation" }).click();
   const mobileSidebar = page.getByTestId("bots-sidebar");
   await expect(mobileSidebar.getByRole("link", { name: "Artifacts" })).toHaveCount(0);
+  await expect(mobileSidebar.getByRole("button", { name: "Artifacts", exact: true })).toHaveCount(
+    0,
+  );
   await mobileSidebar.getByTestId("user-menu-trigger").click();
   const mobileArtifacts = page.getByRole("button", { name: "Artifacts", exact: true });
   await expect(mobileArtifacts).toBeVisible();

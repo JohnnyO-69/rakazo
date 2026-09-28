@@ -3249,7 +3249,6 @@ export function ShellPage() {
               align="start"
               className="w-[calc(316px-1.5rem)] max-w-[calc(100vw-3rem)] gap-0 p-1 data-closed:animate-none"
             >
-              {/* The icon rail was a second column. Artifacts is an account destination in this menu. */}
               <Button
                 variant="ghost"
                 className="w-full justify-start font-normal"
