@@ -802,6 +802,60 @@ describe("oauthCredentialAccountId", () => {
     ).toBe("acct-top");
   });
 
+  it("falls back to the top-level claim when the namespaced one is blank", () => {
+    for (const blank of ["", "   ", "\t"]) {
+      expect(
+        oauthCredentialAccountId(
+          oauthCred({
+            accountId: undefined,
+            access: fakeJwt({
+              "https://api.openai.com/auth": { chatgpt_account_id: blank },
+              chatgpt_account_id: "acct-top",
+            }),
+          }),
+        ),
+      ).toBe("acct-top");
+    }
+    expect(
+      oauthCredentialAccountId(
+        oauthCred({
+          accountId: undefined,
+          access: fakeJwt({
+            "https://api.openai.com/auth": { chatgpt_account_id: "" },
+            chatgpt_account_id: "   ",
+          }),
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("falls back to the top-level claim when the namespaced one is not a string", () => {
+    for (const namespaced of [42, false, { id: "acct-obj" }, null]) {
+      expect(
+        oauthCredentialAccountId(
+          oauthCred({
+            accountId: undefined,
+            access: fakeJwt({
+              "https://api.openai.com/auth": { chatgpt_account_id: namespaced },
+              chatgpt_account_id: "acct-top",
+            }),
+          }),
+        ),
+      ).toBe("acct-top");
+    }
+    expect(
+      oauthCredentialAccountId(
+        oauthCred({
+          accountId: undefined,
+          access: fakeJwt({
+            "https://api.openai.com/auth": { chatgpt_account_id: 42 },
+            chatgpt_account_id: 7,
+          }),
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
   it("keeps a padded accountId and skips one that is only whitespace", () => {
     const access = fakeJwt(chatGptAccountClaim("acct-jwt"));
     expect(oauthCredentialAccountId(oauthCred({ accountId: "  acct-direct  ", access }))).toBe(

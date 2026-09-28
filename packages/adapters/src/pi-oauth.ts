@@ -190,17 +190,22 @@ function decodeJwtPayload(token: string): Record<string, unknown> | undefined {
 export const OAUTH_ACCOUNT_CHANGED_ERROR =
   "The ChatGPT account changed during sign-in refresh. Connect the provider again.";
 
+/** A string with non-whitespace content, or `undefined` for every other value. */
+function nonBlankString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 /**
  * Account identity asserted by an OAuth credential: a non-blank `accountId`
  * (pi's Codex refresh always sets it), else `chatgpt_account_id` from the
- * access JWT — the `https://api.openai.com/auth` claim, then the top-level
- * claim. Never throws: an undecodable token yields `undefined`, which
- * conservatively disables the account-change comparison instead of breaking
- * refresh.
+ * access JWT. The `https://api.openai.com/auth` claim is used only when it is
+ * a non-blank string; otherwise a non-blank top-level claim is used. Never
+ * throws: an undecodable token yields `undefined`, which conservatively
+ * disables the account-change comparison instead of breaking refresh.
  */
 export function oauthCredentialAccountId(credential: OAuthCredential): string | undefined {
-  const direct = credential.accountId;
-  if (typeof direct === "string" && direct.trim()) return direct;
+  const direct = nonBlankString(credential.accountId);
+  if (direct) return direct;
   const payload = decodeJwtPayload(credential.access);
   if (!payload) return undefined;
   const namespaced = payload[OPENAI_AUTH_CLAIMS_NAMESPACE];
@@ -208,8 +213,7 @@ export function oauthCredentialAccountId(credential: OAuthCredential): string | 
     namespaced && typeof namespaced === "object"
       ? (namespaced as Record<string, unknown>)
       : undefined;
-  const accountId = claims?.chatgpt_account_id ?? payload.chatgpt_account_id;
-  return typeof accountId === "string" && accountId ? accountId : undefined;
+  return nonBlankString(claims?.chatgpt_account_id) ?? nonBlankString(payload.chatgpt_account_id);
 }
 
 const retiredCredentialErrors = new WeakSet<object>();
