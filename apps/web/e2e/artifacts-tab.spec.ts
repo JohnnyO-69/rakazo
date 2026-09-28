@@ -1,17 +1,28 @@
 import { expect, test } from "@playwright/test";
 import { activeBotId, captureScreenshot, completeOnboarding, rpc, signup } from "./helpers";
 
-test("opens Artifacts from the app rail and lists created files", async ({ page }, testInfo) => {
+test("opens Artifacts from the sidebar and lists created files", async ({ page }, testInfo) => {
   const stamp = Date.now();
   await signup(page, `artifacts-tab-${stamp}@rakazo.test`, "password12", "Artifacts Tab");
   await completeOnboarding(page);
   await page.goto("/app");
-  await page.waitForURL(/\/app\/[^/]+$/);
+  await page.waitForURL(/\/app\/(?!artifacts(?:\/|$))[^/]+$/);
   const chiefId = activeBotId(page);
 
-  const rail = page.getByTestId("app-rail");
-  await expect(rail).toBeVisible();
-  await rail.getByRole("link", { name: "Artifacts" }).click();
+  await expect(page.getByTestId("app-rail")).toHaveCount(0);
+  const sidebar = page.getByTestId("bots-sidebar");
+  await expect(sidebar).toBeVisible();
+  expect((await sidebar.boundingBox())?.x).toBe(0);
+  const artifactsLink = sidebar.getByRole("link", { name: "Artifacts" });
+  const integrations = sidebar.getByRole("button", { name: "Integrations" });
+  await expect(artifactsLink).toBeVisible();
+  await expect(integrations).toBeVisible();
+  expect((await artifactsLink.boundingBox())?.y).toBeLessThan(
+    (await integrations.boundingBox())?.y ?? 0,
+  );
+  await captureScreenshot(page, testInfo, "sidebar-artifacts-entry");
+
+  await artifactsLink.click();
   await expect(page).toHaveURL(/\/app\/artifacts$/);
   await expect(page.getByRole("heading", { name: "Artifacts", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Filters" })).toBeVisible();
@@ -34,4 +45,20 @@ test("opens Artifacts from the app rail and lists created files", async ({ page 
   await expect(page.getByRole("heading", { name: "notes/artifacts-tab.md" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Artifacts tab" })).toBeVisible();
   await captureScreenshot(page, testInfo, "artifacts-preview");
+
+  await page.getByRole("link", { name: "Bots" }).click();
+  await expect(page).toHaveURL(/\/app\/(?!artifacts(?:\/|$))[^/]+$/);
+  await expect(page.getByTestId("transcript")).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("app-rail")).toHaveCount(0);
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  const mobileSidebar = page.getByTestId("bots-sidebar");
+  const mobileArtifacts = mobileSidebar.getByRole("link", { name: "Artifacts" });
+  const mobileIntegrations = mobileSidebar.getByRole("button", { name: "Integrations" });
+  await expect(mobileArtifacts).toBeVisible();
+  expect((await mobileArtifacts.boundingBox())?.y).toBeLessThan(
+    (await mobileIntegrations.boundingBox())?.y ?? 0,
+  );
+  await captureScreenshot(page, testInfo, "sidebar-artifacts-entry-mobile");
 });
