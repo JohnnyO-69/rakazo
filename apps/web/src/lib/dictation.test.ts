@@ -582,6 +582,8 @@ describe("combineTranscript", () => {
     expect(combineTranscript("hello", "hello2")).toBe("hello hello2");
     expect(combineTranscript("hello", "hello_world")).toBe("hello hello_world");
     expect(combineTranscript("na", "naïve")).toBe("na naïve");
+    expect(combineTranscript("a", "a𐐀")).toBe("a a𐐀");
+    expect(combineTranscript("a𐐀", "a𐐀 more")).toBe("a𐐀 more");
   });
 });
 

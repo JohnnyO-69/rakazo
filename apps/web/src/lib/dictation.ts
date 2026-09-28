@@ -67,9 +67,12 @@ function startsWithWholePrefix(serverText: string, prefix: string): boolean {
   const head = prefix.toLowerCase();
   const tail = serverText.toLowerCase();
   if (!tail.startsWith(head)) return false;
-  const boundary = tail[head.length];
+  // Index by code point. A supplementary-plane letter is two UTF-16 units, and
+  // the first half alone is not a letter.
+  const point = tail.codePointAt(head.length);
+  if (point === undefined) return true;
   // Punctuation ends the retained word. Letters, numbers, and "_" continue it.
-  return boundary === undefined || !/[\p{L}\p{N}_]/u.test(boundary);
+  return !/[\p{L}\p{N}_]/u.test(String.fromCodePoint(point));
 }
 
 export function combineTranscript(prefix: string, serverText: string): string {
