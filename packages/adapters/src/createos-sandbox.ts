@@ -218,6 +218,126 @@ for offset in range(span):
 raise SystemExit(1)
 `;
 
+/**
+ * Exit 0 when this profile's browser process owns its debugger socket.
+ * argv: profile [port] [proc_root]. An empty port accepts the port on the command line.
+ */
+export const CHROME_OWNS_DEBUG_PORT_SCRIPT = `
+import os, sys
+profile = sys.argv[1]
+expect = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] != "" else None
+root = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "" else "/proc"
+flag = "--user-data-dir=" + profile
+try:
+    names = os.listdir(root)
+except OSError:
+    raise SystemExit(1)
+for pid in names:
+    if not pid.isdigit():
+        continue
+    try:
+        raw = open(root + "/" + pid + "/cmdline", "rb").read()
+    except OSError:
+        continue
+    text = raw.replace(b"\\0", b"\\n").decode("utf-8", "replace")
+    args = [line for line in text.split("\\n") if line]
+    joined = " " + text.replace("\\n", " ") + " "
+    if flag not in args and (" " + flag + " ") not in joined:
+        continue
+    stripped = text.replace(flag, "")
+    if "--type=" in stripped:
+        continue
+    found = None
+    for arg in args:
+        if arg.startswith("--remote-debugging-port=") and arg.split("=", 1)[1].isdigit():
+            found = int(arg.split("=", 1)[1])
+            break
+    if found is None:
+        marker = "--remote-debugging-port="
+        start = stripped.rfind(marker)
+        if start >= 0:
+            digits = []
+            index = start + len(marker)
+            while index < len(stripped) and stripped[index].isdigit():
+                digits.append(stripped[index])
+                index += 1
+            if digits:
+                found = int("".join(digits))
+    if found is None or (expect is not None and str(found) != expect):
+        continue
+    hexport = format(found, "X")
+    inodes = set()
+    for net in (root + "/net/tcp", root + "/net/tcp6"):
+        try:
+            handle = open(net, encoding="utf-8")
+        except OSError:
+            continue
+        with handle:
+            next(handle, None)
+            for line in handle:
+                fields = line.split()
+                if len(fields) < 10 or fields[1].rsplit(":", 1)[-1].upper() != hexport:
+                    continue
+                inodes.add(fields[9])
+    try:
+        fds = os.listdir(root + "/" + pid + "/fd")
+    except OSError:
+        continue
+    for name in fds:
+        try:
+            link = os.readlink(root + "/" + pid + "/fd/" + name)
+        except OSError:
+            continue
+        if link.startswith("socket:[") and link[8:-1] in inodes:
+            raise SystemExit(0)
+raise SystemExit(1)
+`;
+
+/** Stop this profile's browser so a failed debugger bind cannot keep the profile. */
+const CHROME_STOP_PROFILE_SCRIPT = `
+import os, signal, sys, time
+profile = sys.argv[1]
+flag = "--user-data-dir=" + profile
+pids = []
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        raw = open("/proc/" + pid + "/cmdline", "rb").read()
+    except OSError:
+        continue
+    text = raw.replace(b"\\0", b"\\n").decode("utf-8", "replace")
+    args = [line for line in text.split("\\n") if line]
+    joined = " " + text.replace("\\n", " ") + " "
+    if flag not in args and (" " + flag + " ") not in joined:
+        continue
+    if "--type=" in text.replace(flag, ""):
+        continue
+    pids.append(int(pid))
+for pid in pids:
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+deadline = time.time() + 1
+while time.time() < deadline and pids:
+    alive = []
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            continue
+        alive.append(pid)
+    pids = alive
+    if pids:
+        time.sleep(0.05)
+for pid in pids:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+`;
+
 export interface CreateOSSandboxProviderOptions {
   apiKey: string;
   baseUrl?: string;
@@ -1015,78 +1135,96 @@ print(json.dumps(out))
       return;
     }
     const settleMs = clampRounded(options.settleMs ?? 1_000, 0, 5_000);
+    const profileQuoted = shellQuote(profile);
+    const chromeEnv = [
+      "setsid",
+      "runuser -u desktop --",
+      "nohup",
+      "env",
+      "HOME=/home/desktop",
+      "USER=desktop",
+      "LOGNAME=desktop",
+      "DISPLAY=:0",
+      "XDG_RUNTIME_DIR=/tmp/runtime-desktop",
+      "google-chrome",
+    ];
+    // The port probe closes its socket before Chrome binds it, so two launches can
+    // pick the same port. A loser that stays up must not count as a healthy profile.
+    const launchBrowser = [
+      `if python3 -c ${shellQuote(CHROME_PROFILE_RUNNING_SCRIPT)} ${profileQuoted} && python3 -c ${shellQuote(CHROME_OWNS_DEBUG_PORT_SCRIPT)} ${profileQuoted}; then`,
+      [
+        ...chromeEnv,
+        `--user-data-dir=${profileQuoted}`,
+        "--new-tab",
+        shellQuote(uri),
+        ">/tmp/rakazo-chrome.log 2>&1 </dev/null &",
+      ].join(" "),
+      "else",
+      `python3 -c ${shellQuote(CHROME_STOP_PROFILE_SCRIPT)} ${profileQuoted}`,
+      "&&",
+      [
+        "rm -f",
+        shellQuote(`${profile}/SingletonLock`),
+        shellQuote(`${profile}/SingletonSocket`),
+        shellQuote(`${profile}/SingletonCookie`),
+      ].join(" "),
+      "&&",
+      `python3 -c ${shellQuote(CHROME_CLEAN_EXIT_SCRIPT)} ${profileQuoted}`,
+      "&&",
+      "owned=0",
+      "&&",
+      "attempt=0",
+      "&&",
+      'while [ "$attempt" -lt 2 ]; do',
+      `debug_port=$(python3 -c ${shellQuote(CHROME_DEBUG_PORT_SCRIPT)} ${profileQuoted}) || exit 1`,
+      [
+        ...chromeEnv,
+        "--disable-dev-shm-usage",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-crash-reporter",
+        "--disable-session-crashed-bubble",
+        "--disable-infobars",
+        "--disable-gpu",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=$debug_port",
+        `--user-data-dir=${profileQuoted}`,
+        shellQuote(uri),
+        ">/tmp/rakazo-chrome.log 2>&1 </dev/null &",
+      ].join(" "),
+      "probe=0",
+      'while [ "$probe" -lt 8 ]; do',
+      `if python3 -c ${shellQuote(CHROME_OWNS_DEBUG_PORT_SCRIPT)} ${profileQuoted} "$debug_port"; then owned=1; break; fi`,
+      "sleep 0.25",
+      "probe=$((probe + 1))",
+      "done",
+      'if [ "$owned" = 1 ]; then break; fi',
+      `python3 -c ${shellQuote(CHROME_STOP_PROFILE_SCRIPT)} ${profileQuoted}`,
+      "attempt=$((attempt + 1))",
+      "done",
+      'test "$owned" = 1',
+      "fi",
+    ].reduce((script, part) => {
+      if (part === "&&") return script.replace(/\n?$/, " &&\n");
+      return script ? `${script}\n${part}` : part;
+    }, "");
     await this.executeChecked(
       computer,
       [
         "bash",
         "-lc",
         [
-          `mkdir -p ${shellQuote(profile)} /home/desktop/.config /tmp/runtime-desktop`,
-          `ln -sfn ${shellQuote(profile)} /home/desktop/.config/google-chrome`,
-          `ln -sfn ${shellQuote(profile)} /home/desktop/.config/chromium`,
-          `chown -R desktop:desktop ${shellQuote(profile)} /tmp/runtime-desktop`,
+          `mkdir -p ${profileQuoted} /home/desktop/.config /tmp/runtime-desktop`,
+          `ln -sfn ${profileQuoted} /home/desktop/.config/google-chrome`,
+          `ln -sfn ${profileQuoted} /home/desktop/.config/chromium`,
+          `chown -R desktop:desktop ${profileQuoted} /tmp/runtime-desktop`,
           "chmod 700 /tmp/runtime-desktop",
-          [
-            `if python3 -c ${shellQuote(CHROME_PROFILE_RUNNING_SCRIPT)} ${shellQuote(profile)}; then`,
-            [
-              "setsid",
-              "runuser -u desktop --",
-              "nohup",
-              "env",
-              "HOME=/home/desktop",
-              "USER=desktop",
-              "LOGNAME=desktop",
-              "DISPLAY=:0",
-              "XDG_RUNTIME_DIR=/tmp/runtime-desktop",
-              "google-chrome",
-              `--user-data-dir=${shellQuote(profile)}`,
-              "--new-tab",
-              shellQuote(uri),
-              ">/tmp/rakazo-chrome.log 2>&1 </dev/null &",
-            ].join(" "),
-            "else",
-            [
-              "rm -f",
-              shellQuote(`${profile}/SingletonLock`),
-              shellQuote(`${profile}/SingletonSocket`),
-              shellQuote(`${profile}/SingletonCookie`),
-            ].join(" "),
-            "&&",
-            ["python3 -c", shellQuote(CHROME_CLEAN_EXIT_SCRIPT), shellQuote(profile)].join(" "),
-            "&&",
-            `debug_port=$(python3 -c ${shellQuote(CHROME_DEBUG_PORT_SCRIPT)} ${shellQuote(profile)})`,
-            "&&",
-            [
-              "setsid",
-              "runuser -u desktop --",
-              "nohup",
-              "env",
-              "HOME=/home/desktop",
-              "USER=desktop",
-              "LOGNAME=desktop",
-              "DISPLAY=:0",
-              "XDG_RUNTIME_DIR=/tmp/runtime-desktop",
-              "google-chrome",
-              "--disable-dev-shm-usage",
-              "--no-first-run",
-              "--no-default-browser-check",
-              "--disable-crash-reporter",
-              "--disable-session-crashed-bubble",
-              "--disable-infobars",
-              "--disable-gpu",
-              "--remote-debugging-address=127.0.0.1",
-              "--remote-debugging-port=$debug_port",
-              `--user-data-dir=${shellQuote(profile)}`,
-              shellQuote(uri),
-              ">/tmp/rakazo-chrome.log 2>&1 </dev/null &",
-            ].join(" "),
-            "fi",
-          ].join(" "),
+          launchBrowser,
           ...(settleMs > 0 ? [`sleep ${shellQuote(String(settleMs / 1_000))}`] : []),
         ].join(" && "),
       ],
       context,
-      10_000 + settleMs,
+      16_000 + settleMs,
     );
   }
 

@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +10,7 @@ import {
 } from "@rakazo/core/node/desktop-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
+  CHROME_OWNS_DEBUG_PORT_SCRIPT,
   CREATEOS_SCREEN_MAP_SCRIPT,
   CREATEOS_SCREEN_MAP_SENTINEL,
   CreateOSSandboxProvider,
@@ -49,6 +50,23 @@ function shellArgs(command: string): string[] {
   const args: string[] = [];
   for (const match of command.matchAll(/'([^']*)'/g)) args.push(match[1] ?? "");
   return args;
+}
+
+/** Inverse of shellQuote, including the '"'"' encoding of an embedded single quote. */
+function unshellQuote(quoted: string): string {
+  let value = "";
+  let index = 1;
+  while (index < quoted.length) {
+    if (quoted.startsWith(`'"'"'`, index)) {
+      value += "'";
+      index += `'"'"'`.length;
+      continue;
+    }
+    if (quoted[index] === "'") return value;
+    value += quoted[index];
+    index += 1;
+  }
+  throw new Error("unterminated shell quote");
 }
 
 /** Route-driven CreateOS control-plane double. Exec replies are keyed off the shell command. */
@@ -334,10 +352,45 @@ describe("CreateOSSandboxProvider", () => {
       expect(command).toContain("--remote-debugging-port=$debug_port");
       expect(command).not.toContain("--remote-debugging-port=9222");
       expect(command).toContain('flag = "--user-data-dir=" + profile');
+      expect(command).toContain('while [ "$attempt" -lt 2 ]');
+      expect(command).toContain("signal.SIGTERM");
+      const quoted = command.slice(command.lastIndexOf("'-lc' ") + "'-lc' ".length);
+      execFileSync("bash", ["-n", "-c", unshellQuote(quoted)]);
     }
     for (const command of commands) {
       expect(command).not.toContain("/.browser-profiles/chromium'");
     }
+  });
+
+  it("accepts a debugger port only when this profile's browser owns the socket", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "chrome-proc-"));
+    const profile = "/tmp/bot-profile";
+    const pid = path.join(root, "4242");
+    const port = 9333;
+    mkdirSync(path.join(pid, "fd"), { recursive: true });
+    mkdirSync(path.join(root, "net"), { recursive: true });
+    const cmdline = [
+      "google-chrome",
+      `--user-data-dir=${profile}`,
+      `--remote-debugging-port=${port}`,
+      "",
+    ].join("\0");
+    writeFileSync(path.join(pid, "cmdline"), cmdline);
+    writeFileSync(
+      path.join(root, "net", "tcp"),
+      `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:${port.toString(16).toUpperCase()} 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 99 1 0000000000000000 100 0 0 10 0\n`,
+    );
+    const socket = path.join(pid, "fd", "3");
+    symlinkSync("socket:[99]", socket);
+    const probe = (args: string[]) =>
+      execFileSync("python3", ["-c", CHROME_OWNS_DEBUG_PORT_SCRIPT, ...args], { encoding: "utf8" });
+
+    expect(() => probe([profile, String(port), root])).not.toThrow();
+    expect(() => probe([profile, "", root])).not.toThrow();
+    expect(() => probe([profile, "9444", root])).toThrow();
+    unlinkSync(socket);
+    symlinkSync("socket:[100]", socket);
+    expect(() => probe([profile, String(port), root])).toThrow();
   });
 
   it("exports the workspace after a graphical action alone", async () => {
