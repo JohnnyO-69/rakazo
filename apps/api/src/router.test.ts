@@ -2755,6 +2755,96 @@ afterEach(() => {
   delete process.env.SANDBOX_MAX_COMPUTERS_PER_USER;
 });
 
+describe("routines.update", () => {
+  const actor = {
+    spaceId: "space-1",
+    userId: "user-1",
+    email: "user@rakazo.test",
+    isDeploymentOwner: true,
+  } satisfies Actor;
+  const routine = {
+    id: "routine-1",
+    botId: "bot-1",
+    spaceId: "space-1",
+    userId: "user-1",
+    name: "Later",
+    prompt: "say done",
+    crons: ["@once"],
+    timezone: "UTC",
+    active: false,
+    notify: false,
+    webhookEnabled: false,
+    githubEnabled: false,
+    messageProvider: null,
+    lastRunAt: null,
+    nextRunAt: null,
+    createdAt: new Date("2026-09-01T00:00:00.000Z"),
+  };
+
+  function fixture(botArchived: boolean) {
+    const update = vi.fn(async (args: { data: Record<string, unknown> }) => ({
+      ...routine,
+      ...Object.fromEntries(Object.entries(args.data).filter(([, value]) => value !== undefined)),
+    }));
+    const enqueue = vi.fn(async () => undefined);
+    const prisma = {
+      routine: {
+        findFirst: vi.fn(async (args: { where: { bot?: { archivedAt: null } } }) =>
+          botArchived && args.where.bot?.archivedAt === null ? null : routine,
+        ),
+        update,
+      },
+      bot: {
+        findFirst: vi.fn(async () =>
+          botArchived ? null : { id: "bot-1", thread: { id: "thread-1" }, computer: null },
+        ),
+      },
+    };
+    const handler = new RPCHandler(
+      createRouter({
+        prisma,
+        env: { sandboxProvider: "fake" },
+        events: { append: vi.fn(async () => undefined) },
+        jobs: { enqueue, cancel: vi.fn(async () => undefined) },
+      } as unknown as RouterDeps),
+    );
+    const call = () =>
+      handler.handle(
+        new Request("http://127.0.0.1/rpc/routines/update", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            json: {
+              routineId: "routine-1",
+              active: true,
+              runAt: new Date(Date.now() + 60_000).toISOString(),
+            },
+          }),
+        }),
+        { prefix: "/rpc", context: { actor } },
+      );
+    return { update, enqueue, call };
+  }
+
+  it("refuses to re-arm a routine on an archived bot without writing", async () => {
+    const { update, enqueue, call } = fixture(true);
+    const { response } = await call();
+    expect(response.status).toBe(404);
+    expect(update).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("re-arms a routine on an active bot", async () => {
+    const { update, enqueue, call } = fixture(false);
+    const { response } = await call();
+    expect(response.status).toBe(200);
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ active: true }) }),
+    );
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+});
+
 describe("threads.endCall", () => {
   function fixture(duplicateMarker?: boolean) {
     const created: { blocks?: unknown; clientNonce?: string }[] = [];

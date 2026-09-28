@@ -2903,14 +2903,17 @@ export function createRouter(deps: RouterDeps) {
         return mapRoutine(row);
       }),
       update: authed.routines.update.handler(async ({ context, input }) => {
+        // Archived bots keep their routines paused, so resolve an active parent before any write.
         const existing = await deps.prisma.routine.findFirst({
           where: {
             id: input.routineId,
             spaceId: context.actor.spaceId,
             userId: context.actor.userId,
+            bot: { archivedAt: null },
           },
         });
-        if (!existing) throw new IsolationError();
+        if (!existing) throw new ORPCError("NOT_FOUND");
+        const bot = await repos.getBot(context.actor, existing.botId);
         const active = input.active ?? existing.active;
         const crons = input.crons ?? existing.crons;
         const timezone = input.timezone ?? existing.timezone;
@@ -2992,7 +2995,6 @@ export function createRouter(deps: RouterDeps) {
             nextRunAt,
           },
         });
-        const bot = await repos.getBot(context.actor, row.botId);
         if (bot.thread) {
           await deps.events.append({
             spaceId: context.actor.spaceId,

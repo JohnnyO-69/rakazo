@@ -1003,6 +1003,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         where: { id: routine.botId },
         include: { thread: true },
       });
+      if (bot?.archivedAt) {
+        // Archiving pauses a bot's routines; re-pause one that slipped back to active.
+        await deps.prisma.routine.updateMany({
+          where: { id: routine.id, active: true },
+          data: { active: false, nextRunAt: null },
+        });
+        return;
+      }
       if (!bot?.thread) return;
       const targetThread = routine.threadId
         ? await deps.prisma.thread.findFirst({
@@ -1042,7 +1050,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
       const routinePrompt = expandSkillReferencesInPrompt(routine.prompt, skillRecords);
       const claimed = await deps.prisma.$transaction(async (tx) => {
         const updated = await tx.routine.updateMany({
-          where: { id: routine.id, active: true, nextRunAt: scheduledAt },
+          where: {
+            id: routine.id,
+            active: true,
+            nextRunAt: scheduledAt,
+            bot: { archivedAt: null },
+          },
           data: {
             lastRunAt: new Date(),
             nextRunAt,
