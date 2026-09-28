@@ -412,7 +412,15 @@ curl --fail https://app.example.com/health
 registry serves, so the commands above build `api`, `worker`, and `web` from the checkout you just
 cloned. The opt-in command under [Updater sidecar](#updater-sidecar) builds `updater` when needed.
 
-Passing `GIT_SHA` is what makes `GET /health` report a `"revision"`; a locally built image has no
+The public `/health` only reports liveness. Runtime, sandbox, and revision details stay on the API
+port at `/internal/health`, which the edge does not route:
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.prod.yml exec api \
+  node -e "fetch('http://127.0.0.1:3100/internal/health').then(r=>r.text()).then(console.log)"
+```
+
+Passing `GIT_SHA` is what makes `/internal/health` report a `"revision"`; a locally built image has no
 other way to know its commit. Prebuilt images from the registry bake it in at publish time, so when
 you switch to a release tag you should leave `GIT_SHA` unset — a value in `.env` would override what
 the image already knows.
