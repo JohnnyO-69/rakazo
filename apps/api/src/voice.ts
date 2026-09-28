@@ -289,10 +289,22 @@ export async function updateVoiceSpeechModel(
         };
         const preference = await tx.spaceVoicePreference.findUnique({ where });
         if (!preference) {
-          const created = await selectSpaceVoicePreference(tx, actor, found.id, "", speechModel);
+          // Remember the model without taking the default. Another provider may
+          // already be selected, and this row still has no voice.
+          if (speechModel === null) {
+            return toVoiceCredential({ ...found, isDefault: false, voiceId: "", speechModel: "" });
+          }
+          const created = await tx.spaceVoicePreference.create({
+            data: {
+              spaceId: actor.spaceId,
+              userId: actor.userId,
+              credentialId: found.id,
+              speechModel,
+            },
+          });
           return toVoiceCredential({
             ...found,
-            isDefault: true,
+            isDefault: created.isDefault,
             voiceId: created.voiceId,
             speechModel: created.speechModel,
           });
