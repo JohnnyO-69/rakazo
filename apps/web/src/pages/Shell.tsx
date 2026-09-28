@@ -132,7 +132,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { ActiveBotGlyph, CollaborationMarker } from "../components/ai/CollaborationMarker";
@@ -3221,19 +3221,6 @@ export function ShellPage() {
             </div>
           ) : null}
         </div>
-        {/* The icon rail was a second column. Artifacts belongs with the other footer destinations. */}
-        <Link
-          to="/app/artifacts"
-          onClick={() => setMobileSidebarOpen(false)}
-          className="mx-3 mb-1 flex items-center gap-3 rounded-xl px-2.5 py-2 hover:bg-sidebar-accent"
-        >
-          <span className="grid h-[30px] w-[30px] place-items-center rounded-lg bg-accent text-foreground/80">
-            <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
-          </span>
-          <span className="text-[14px] font-medium text-foreground/90">
-            <Trans>Artifacts</Trans>
-          </span>
-        </Link>
         <button
           type="button"
           onClick={() => setPluginsOpen(true)}
@@ -3262,6 +3249,19 @@ export function ShellPage() {
               align="start"
               className="w-[calc(316px-1.5rem)] max-w-[calc(100vw-3rem)] gap-0 p-1 data-closed:animate-none"
             >
+              {/* The icon rail was a second column. Artifacts is an account destination in this menu. */}
+              <Button
+                variant="ghost"
+                className="w-full justify-start font-normal"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setMobileSidebarOpen(false);
+                  navigate("/app/artifacts");
+                }}
+              >
+                <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
+                <Trans>Artifacts</Trans>
+              </Button>
               <Button
                 variant="ghost"
                 className="w-full justify-start font-normal"

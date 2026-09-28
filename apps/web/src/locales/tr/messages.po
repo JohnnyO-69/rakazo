@@ -476,7 +476,7 @@ msgid "Arguments"
 msgstr "Argümanlar"
 
 #: src/pages/Artifacts.tsx:229
-#: src/pages/Shell.tsx:3234
+#: src/pages/Shell.tsx:3263
 msgid "Artifacts"
 msgstr ""
 
