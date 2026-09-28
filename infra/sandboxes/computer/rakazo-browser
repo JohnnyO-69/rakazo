@@ -110,8 +110,15 @@ profile_browser_pid() {
   profile="$1"
   [ -d /proc ] || return 1
   # One pass selects cmdline files that contain the flag. Exact checks run only
-  # on those candidates, inside the browser spawn poll.
-  grep -lsaF -- "--user-data-dir=$profile" /proc/[0-9]*/cmdline 2>/dev/null |
+  # on those candidates. The scan is capped so it cannot consume the spawn poll
+  # that also has to cover the 1.6s live-tab forward.
+  scan_status=0
+  scan=$(timeout 0.4 sh -c 'grep -lsaF -- "$1" /proc/[0-9]*/cmdline 2>/dev/null' sh "--user-data-dir=$profile" 2>/dev/null) || scan_status=$?
+  if [ "$scan_status" -eq 124 ]; then
+    return 124
+  fi
+  [ -n "$scan" ] || return 0
+  printf '%s\n' "$scan" |
     while IFS= read -r cmdline_file; do
       pid="${cmdline_file#/proc/}"
       pid="${pid%/cmdline}"
@@ -134,7 +141,8 @@ profile_browser_pid() {
 # comes up. A dropped response is reconciled with /json/list before another
 # /json/new, so one open cannot leave a second tab. A slow listing does not skip
 # that open. A socket that accepts and never answers fails on the 0.5s request cap.
-# The browser spawn poll is longer than this plus the profile scan.
+# The profile scan above is capped at 0.4s. The spawn poll is those two bounds plus
+# a little shell, so a forward that fails after the scan is still reported.
 open_live_browser_url() {
   timeout 1.6 python3 - "$@" <<'PY'
 import json
@@ -145,6 +153,13 @@ import urllib.parse
 import urllib.request
 
 pid, profile, url = sys.argv[1:]
+# /json/new does not apply omnibox fixup. A scheme-less host opens about:blank,
+# and host:port is parsed as an unknown scheme. Absolute paths are files.
+lowered = url.lower()
+if "://" not in url and not lowered.startswith(
+    ("about:", "chrome:", "data:", "file:", "javascript:", "view-source:")
+):
+    url = "file://" + url if url.startswith("/") else "http://" + url
 data = open("/proc/" + pid + "/cmdline", "rb").read().replace(b"\0", b" ")
 if profile:
     data = data.replace(b"--user-data-dir=" + profile.encode(), b" ", 1)
@@ -327,7 +342,12 @@ PY
 live_pid=""
 lock_pid=""
 if [ -d "$ACTUAL_PROFILE" ]; then
-  live_pid=$(profile_browser_pid "$ACTUAL_PROFILE" || true)
+  scan_status=0
+  live_pid=$(profile_browser_pid "$ACTUAL_PROFILE") || scan_status=$?
+  if [ "$scan_status" -eq 124 ]; then
+    echo "browser profile scan timed out" >&2
+    exit 1
+  fi
   lock_pid=$(profile_lock_pid "$ACTUAL_PROFILE" || true)
   if ! profile_lock_is_live "$ACTUAL_PROFILE" && [ -z "$live_pid" ]; then
     rm -f "$ACTUAL_PROFILE/SingletonLock" "$ACTUAL_PROFILE/SingletonCookie" "$ACTUAL_PROFILE/SingletonSocket" 2>/dev/null || true

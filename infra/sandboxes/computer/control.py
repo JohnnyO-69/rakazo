@@ -24,10 +24,10 @@ KNOWN_LAUNCH = frozenset(
 )
 CONTROL_TIMEOUT_SEC = 10
 LAUNCH_SPAWN_POLL_SEC = 0.2
-# A live browser opens a URL in this process, then exits. The spawn poll has to
-# outlast that forward (cold python, urllib, and /json/new, capped at 1.6s) plus
-# the profile scan, or a port that never answers looks like a successful launch.
-BROWSER_OPEN_POLL_SEC = 2.2
+# A live browser opens a URL in this process, then exits. rakazo-browser caps the
+# profile scan at 0.4s and that forward at 1.6s. This poll outlasts both, plus a
+# little shell, so a forward that fails after the scan is not reported as success.
+BROWSER_OPEN_POLL_SEC = 2.4
 NATIVE_CAPTURES = {}
 NATIVE_LOCK = threading.Lock()
 DISPLAY_LOCKS = {}

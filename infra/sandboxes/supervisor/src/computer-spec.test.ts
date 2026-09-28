@@ -654,11 +654,15 @@ describe("graphical computer spec", () => {
         expect(readlinkSync(liveLock)).toBe(`testhost-${renderer.pid}`);
         expect(() => readFileSync(capture, "utf8")).toThrow();
 
-        for (const target of ["example.com", "localhost:3000"]) {
+        for (const [target, openedUrl] of [
+          ["example.com", "http://example.com"],
+          ["localhost:3000", "http://localhost:3000"],
+          ["/tmp/page.html", "file:///tmp/page.html"],
+        ] as const) {
           const hostAt = newTabs().length;
           const host = launch([target]);
           expect(host.status, host.error?.message ?? host.stderr).toBe(0);
-          expect(newTabs().slice(hostAt)).toEqual([`/json/new?${encodeURIComponent(target)}`]);
+          expect(newTabs().slice(hostAt)).toEqual([`/json/new?${encodeURIComponent(openedUrl)}`]);
         }
 
         pointLock(wrapper.pid);
