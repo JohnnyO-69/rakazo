@@ -1069,6 +1069,7 @@ describe("dockerComputerToolInstruction", () => {
     const instruction = dockerComputerToolInstruction("docker");
     expect(instruction).toContain("gh auth login");
     expect(instruction).toContain("script -qec");
+    expect(instruction).toContain("/tmp/gh-login-$$.log");
     expect(instruction).toContain("https://github.com/login/device");
     expect(instruction).toContain("request_takeover");
     expect(instruction).toContain("--with-token");
