@@ -9,6 +9,7 @@ import {
   kickModelCredentialRefresh,
   matchesFailedOAuthSecret,
   OAUTH_ACCOUNT_CHANGED_ERROR,
+  oauthCredentialAccountId,
   type PiOAuthBegin,
   PiOAuthLogins,
   parseModelSecret,
@@ -772,6 +773,53 @@ describe("resolveModelAuth account-change guard", () => {
     );
 
     expect(deleteCredential).not.toHaveBeenCalled();
+  });
+});
+
+describe("oauthCredentialAccountId", () => {
+  it("reads the namespaced chatgpt_account_id claim", () => {
+    expect(
+      oauthCredentialAccountId(
+        oauthCred({
+          accountId: undefined,
+          access: fakeJwt({
+            ...chatGptAccountClaim("acct-ns"),
+            chatgpt_account_id: "acct-top",
+          }),
+        }),
+      ),
+    ).toBe("acct-ns");
+  });
+
+  it("falls back to a top-level chatgpt_account_id claim", () => {
+    expect(
+      oauthCredentialAccountId(
+        oauthCred({
+          accountId: "",
+          access: fakeJwt({ chatgpt_account_id: "acct-top" }),
+        }),
+      ),
+    ).toBe("acct-top");
+  });
+
+  it("keeps a padded accountId and skips one that is only whitespace", () => {
+    const access = fakeJwt(chatGptAccountClaim("acct-jwt"));
+    expect(oauthCredentialAccountId(oauthCred({ accountId: "  acct-direct  ", access }))).toBe(
+      "  acct-direct  ",
+    );
+    expect(oauthCredentialAccountId(oauthCred({ accountId: "   ", access }))).toBe("acct-jwt");
+  });
+
+  it("returns undefined for an undecodable token", () => {
+    expect(
+      oauthCredentialAccountId(oauthCred({ accountId: undefined, access: "not-a-jwt" })),
+    ).toBeUndefined();
+    expect(() =>
+      oauthCredentialAccountId(oauthCred({ accountId: " \t ", access: "a.!!!.c" })),
+    ).not.toThrow();
+    expect(
+      oauthCredentialAccountId(oauthCred({ accountId: " \t ", access: "a.!!!.c" })),
+    ).toBeUndefined();
   });
 });
 
