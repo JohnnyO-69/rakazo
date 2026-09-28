@@ -29,6 +29,20 @@ test("opens Artifacts from the sidebar and lists created files", async ({ page }
   await expect(page.getByText("No artifacts found.")).toBeVisible();
   await captureScreenshot(page, testInfo, "artifacts-empty");
 
+  await page.setViewportSize({ width: 360, height: 700 });
+  const narrowHeading = page.getByRole("heading", { name: "Artifacts", exact: true });
+  const narrowCardView = page.getByRole("button", { name: "Card view" });
+  await expect(narrowHeading).toBeVisible();
+  await expect(narrowCardView).toBeVisible();
+  const headingBox = await narrowHeading.boundingBox();
+  const cardViewBox = await narrowCardView.boundingBox();
+  expect(headingBox?.width).toBeGreaterThan(40);
+  expect(headingBox?.x).toBeGreaterThanOrEqual(0);
+  expect((headingBox?.x ?? 0) + (headingBox?.width ?? 0)).toBeLessThanOrEqual(360);
+  expect(cardViewBox?.x).toBeGreaterThanOrEqual(0);
+  expect((cardViewBox?.x ?? 0) + (cardViewBox?.width ?? 0)).toBeLessThanOrEqual(360);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
   await rpc(page, "artifacts/create", {
     botId: chiefId,
     name: "notes/artifacts-tab.md",

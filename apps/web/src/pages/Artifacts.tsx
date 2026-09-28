@@ -213,8 +213,9 @@ export function ArtifactsPage() {
   return (
     <div className="flex h-full min-w-0 flex-col bg-background text-foreground/90">
       <header className="app-drag border-b border-border px-4 py-4 md:px-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
+        {/* Wraps so window controls and the way back stay on screen with Filters. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex items-center gap-2">
             {/* This route is the window's leading edge, so Electron window controls sit in the header. */}
             {desktopBridge() ? <WindowChrome /> : null}
             <Link
@@ -224,11 +225,11 @@ export function ArtifactsPage() {
               <ChevronLeft size={16} strokeWidth={1.9} aria-hidden="true" />
               <Trans>Bots</Trans>
             </Link>
-            <h1 className="truncate text-xl font-semibold">
+            <h1 className="text-xl font-semibold">
               <Trans>Artifacts</Trans>
             </h1>
           </div>
-          <div className="app-no-drag flex items-center gap-2">
+          <div className="app-no-drag flex shrink-0 items-center gap-2">
             <button
               type="button"
               aria-pressed={filtersOpen}

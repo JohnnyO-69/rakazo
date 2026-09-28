@@ -475,7 +475,7 @@ msgstr "已归档。对话、记忆和文件保留。"
 msgid "Arguments"
 msgstr "参数"
 
-#: src/pages/Artifacts.tsx:228
+#: src/pages/Artifacts.tsx:229
 #: src/pages/Shell.tsx:3234
 msgid "Artifacts"
 msgstr ""
@@ -630,7 +630,7 @@ msgstr "Bot 屏幕预览"
 msgid "Bot to link"
 msgstr "要关联的 Bot"
 
-#: src/pages/Artifacts.tsx:225
+#: src/pages/Artifacts.tsx:226
 msgid "Bots"
 msgstr ""
 

@@ -475,7 +475,7 @@ msgstr "Archivado. Se conservan el chat, la memoria y los archivos."
 msgid "Arguments"
 msgstr "Argumentos"
 
-#: src/pages/Artifacts.tsx:228
+#: src/pages/Artifacts.tsx:229
 #: src/pages/Shell.tsx:3234
 msgid "Artifacts"
 msgstr ""
@@ -630,7 +630,7 @@ msgstr "Vista previa de la pantalla del bot"
 msgid "Bot to link"
 msgstr "Bot a vincular"
 
-#: src/pages/Artifacts.tsx:225
+#: src/pages/Artifacts.tsx:226
 msgid "Bots"
 msgstr ""
 

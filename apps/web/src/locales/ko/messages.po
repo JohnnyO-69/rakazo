@@ -475,7 +475,7 @@ msgstr "보관되었습니다. 대화, 기억, 파일은 유지됩니다."
 msgid "Arguments"
 msgstr "인자"
 
-#: src/pages/Artifacts.tsx:228
+#: src/pages/Artifacts.tsx:229
 #: src/pages/Shell.tsx:3234
 msgid "Artifacts"
 msgstr ""
@@ -630,7 +630,7 @@ msgstr "Bot 화면 미리보기"
 msgid "Bot to link"
 msgstr "연결할 Bot"
 
-#: src/pages/Artifacts.tsx:225
+#: src/pages/Artifacts.tsx:226
 msgid "Bots"
 msgstr ""
 
