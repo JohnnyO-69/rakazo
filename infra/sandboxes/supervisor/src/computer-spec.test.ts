@@ -186,7 +186,7 @@ describe("graphical computer spec", () => {
     expect(start).not.toMatch(/windowsize 1280 800/);
   });
 
-  it("ships a sha256-pinned gh CLI for browser device-flow login", () => {
+  it("ships a sha256-pinned gh CLI", () => {
     const root = path.resolve(import.meta.dirname, "../../computer");
     const dockerfile = readFileSync(path.join(root, "Dockerfile"), "utf8");
     expect(dockerfile).toMatch(/ARG GH_VERSION=\d+\.\d+\.\d+/);

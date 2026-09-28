@@ -4794,7 +4794,7 @@ export function filterPageBrowserTools<T extends { name: string }>(
 
 export function dockerComputerToolInstruction(computerKind: string): string | undefined {
   if (computerKind !== "docker") return undefined;
-  return "For Python CLI tools, use `uv tool install <package>`; it installs without sudo and keeps tools under this computer's persistent home. GitHub's `gh` CLI is installed. To sign this computer's browser into GitHub, run `nohup script -qec 'gh auth login --hostname github.com --web --git-protocol https' /tmp/gh-login.log >/dev/null 2>&1 &` — gh needs a TTY and keeps polling — then read the one-time code from the log, browser_navigate to https://github.com/login/device, and browser_act the code or request_takeover for the user to finish. Never use `--with-token` or otherwise bring a token onto this computer.";
+  return "For Python CLI tools, use `uv tool install <package>`; it installs without sudo and keeps tools under this computer's persistent home. GitHub's `gh` CLI is installed. To authenticate `gh`, run `nohup script -qec 'gh auth login --hostname github.com --web --git-protocol https' /tmp/gh-login.log >/dev/null 2>&1 &`, read the one-time code from the log, browser_navigate to https://github.com/login/device, and browser_act the code. Completing that page authorizes the CLI OAuth app and stores the credential under the persistent home; it does not by itself create a Chromium github.com session. If the desktop browser is not already signed into GitHub, request_takeover so the user can finish that web login. Never use `--with-token` or inject a token through the environment.";
 }
 
 // Ordering matters: stable blocks first, volatile ones last, so the prefix stays cacheable.

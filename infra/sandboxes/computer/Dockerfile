@@ -66,8 +66,7 @@ RUN set -eux; \
   rm -f "$archive"; \
   uv --version; \
   uvx --version
-# Debian bookworm does not package gh; install the pinned upstream binary so bots
-# can sign the desktop browser into GitHub through its device-flow login.
+# Bookworm has no gh package; pin the upstream binary and verify sha256, same as uv.
 ARG GH_VERSION=2.100.0
 RUN set -eux; \
   case "$TARGETARCH" in \

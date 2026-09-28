@@ -1065,7 +1065,7 @@ describe("dockerComputerToolInstruction", () => {
     expect(dockerComputerToolInstruction("e2b")).toBeUndefined();
   });
 
-  it("documents the gh device-flow login without token auth", () => {
+  it("documents gh CLI device-flow login without token injection", () => {
     const instruction = dockerComputerToolInstruction("docker");
     expect(instruction).toContain("gh auth login");
     expect(instruction).toContain("script -qec");
@@ -1073,6 +1073,10 @@ describe("dockerComputerToolInstruction", () => {
     expect(instruction).toContain("request_takeover");
     expect(instruction).toContain("--with-token");
     expect(instruction).not.toMatch(/GH_TOKEN|GITHUB_TOKEN/);
+    expect(instruction).toMatch(/authenticate `gh`/);
+    expect(instruction).toMatch(/credential under the persistent home/);
+    expect(instruction).not.toMatch(/no token ever/i);
+    expect(instruction).not.toMatch(/sign (?:this computer's |the )?(?:desktop )?browser into/i);
   });
 });
 
