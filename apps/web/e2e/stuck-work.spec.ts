@@ -2,6 +2,45 @@ import { expect, type Page, test } from "@playwright/test";
 import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 const EXPIRED_TAKEOVER = "Stopped. This was still waiting for you on the screen.";
+const EXPIRED_MESSAGE_ID = "msg-stuck-expired";
+
+type ThreadCarrier = {
+  threadId?: string;
+  cursor?: number;
+  messages?: unknown[];
+  thread?: ThreadCarrier;
+};
+
+/** Append the expired-wait status line to a thread snapshot, once. */
+function injectExpiredStatus(body: { json?: ThreadCarrier }) {
+  const targets = [body.json, body.json?.thread].filter((target): target is ThreadCarrier =>
+    Boolean(target?.threadId && Array.isArray(target.messages)),
+  );
+  for (const target of targets) {
+    const messages = target.messages ?? [];
+    if (
+      messages.some(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "id" in message &&
+          message.id === EXPIRED_MESSAGE_ID,
+      )
+    ) {
+      continue;
+    }
+    const seq = Math.max(target.cursor ?? 0, 0) + 1;
+    target.cursor = seq;
+    messages.push({
+      id: EXPIRED_MESSAGE_ID,
+      threadId: target.threadId,
+      seq,
+      role: "system",
+      blocks: [{ kind: "meta", text: EXPIRED_TAKEOVER }],
+      createdAt: new Date().toISOString(),
+    });
+  }
+}
 
 function activityRow(page: Page, botName: string) {
   return page.locator("aside").getByRole("button", {
@@ -80,52 +119,22 @@ test("aged queued work is marked and an expired wait leaves a status line", asyn
   await expect(row.locator(".text-warning").filter({ hasText: "Queued" })).toBeVisible();
   await captureActivitySidebar(page, testInfo, "stuck-queued-activity");
 
-  await page.route("**/rpc/threads/get", async (route) => {
+  // A reload paints bootstrap.thread and skips threads/get when that thread is the open bot.
+  const fulfillExpiredStatus = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
     const response = await route.fetch();
-    const parsed = (await response.json()) as {
-      json?: {
-        threadId: string;
-        cursor: number;
-        messages?: Array<{ id?: string }>;
-      };
-    };
-    const snap = parsed.json;
-    if (!snap) {
-      await route.fulfill({ response });
-      return;
-    }
-    const messages = snap.messages ?? [];
-    if (messages.some((message) => message.id === "msg-stuck-expired")) {
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ json: snap }),
-      });
-      return;
-    }
-    const seq = Math.max(snap.cursor, 0) + 1;
+    const body = (await response.json()) as { json?: ThreadCarrier };
+    injectExpiredStatus(body);
     await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        json: {
-          ...snap,
-          cursor: seq,
-          messages: [
-            ...messages,
-            {
-              id: "msg-stuck-expired",
-              threadId: snap.threadId,
-              seq,
-              role: "system",
-              blocks: [{ kind: "meta", text: EXPIRED_TAKEOVER }],
-              createdAt: new Date().toISOString(),
-            },
-          ],
-        },
-      }),
+      status: response.status(),
+      headers: response.headers(),
+      body: JSON.stringify(body),
     });
-  });
+  };
+  await page.route("**/rpc/bootstrap", fulfillExpiredStatus);
+  await page.route("**/rpc/threads/get", fulfillExpiredStatus);
 
-  await page.reload();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("combobox", { name: /^Message/ })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(EXPIRED_TAKEOVER)).toBeVisible({ timeout: 20_000 });
   await captureScreenshot(page, testInfo, "stuck-expired-status");
 });
