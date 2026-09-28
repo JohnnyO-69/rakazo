@@ -447,6 +447,8 @@ export async function createApp(
     ? createJobReconciler({
         prisma,
         jobs,
+        events,
+        notifications,
         reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
         reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
       })
