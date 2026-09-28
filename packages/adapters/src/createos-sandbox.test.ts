@@ -91,6 +91,10 @@ function createosFixture(
       const body = JSON.parse(String(init?.body)) as { args: string[] };
       const command = body.args[3] ?? "";
       execs.push({ path: url.pathname, command });
+      // The tab probe also lists /proc, so match it before the workspace listing.
+      if (command.includes("/json/new")) {
+        return jsonResponse({ result: { stdout: "", exit_code: 1 } });
+      }
       if (command.includes(CREATEOS_SCREEN_MAP_SENTINEL)) {
         const args = shellArgs(command);
         const at = args.indexOf(CREATEOS_SCREEN_MAP_SENTINEL);
@@ -111,10 +115,6 @@ function createosFixture(
       }
       if (command.includes("os.listdir")) {
         return jsonResponse({ result: { stdout: WORKSPACE_LISTING, exit_code: 0 } });
-      }
-      // Both browser probes talk to a devtools port that the double does not run.
-      if (command.includes("127.0.0.1:9222")) {
-        return jsonResponse({ result: { stdout: "", exit_code: 1 } });
       }
       return jsonResponse({ result: { stdout: "hello\n", exit_code: 0 } });
     }
@@ -278,13 +278,14 @@ describe("CreateOSSandboxProvider", () => {
       }
 
       expect(files.map((file) => file.path)).toEqual(["notes.txt"]);
-      const profile = createosBotProfile("bot-a");
       const quiesceIndex = fixture.execs.findIndex(
-        (exec) => exec.command.includes("Browser.close") && exec.command.includes(profile),
+        (exec) =>
+          exec.command.includes("Browser.close") &&
+          exec.command.includes("chromium-bot-*") &&
+          exec.command.includes(".browser-profiles'\"'\"'/chromium ") &&
+          exec.command.includes("/chromium-screen-*"),
       );
-      expect(fixture.execs[quiesceIndex]?.command ?? "").not.toContain(
-        "/.browser-profiles/chromium'",
-      );
+      expect(quiesceIndex).toBeGreaterThanOrEqual(0);
       const listings = fixture.execs.flatMap((exec, index) =>
         exec.command.includes("os.listdir") ? [index] : [],
       );
@@ -322,9 +323,18 @@ describe("CreateOSSandboxProvider", () => {
     expect(
       commands.some((command) => command.includes(`ln -sfn`) && command.includes(profileA)),
     ).toBe(true);
-    const launches = commands.filter((command) => command.includes("--user-data-dir="));
+    const launches = commands.filter(
+      (command) => command.includes("google-chrome") && command.includes("--user-data-dir="),
+    );
     expect(launches.some((command) => command.includes(profileA))).toBe(true);
     expect(launches.some((command) => command.includes(profileB))).toBe(true);
+    for (const command of launches) {
+      expect(command).not.toContain("pgrep -u desktop");
+      expect(command).toContain("--no-first-run");
+      expect(command).toContain("--remote-debugging-port=$debug_port");
+      expect(command).not.toContain("--remote-debugging-port=9222");
+      expect(command).toContain('flag = "--user-data-dir=" + profile');
+    }
     for (const command of commands) {
       expect(command).not.toContain("/.browser-profiles/chromium'");
     }

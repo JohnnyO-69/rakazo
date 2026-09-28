@@ -862,6 +862,36 @@ describe("screen release status", () => {
     expect(released.status).toBe(500);
     await expect(released.json()).resolves.toEqual({ error: "computer screen failed to stop" });
   });
+
+  it("returns 500 when exec.start 404s after the container was found", async () => {
+    const { supervisorApp } = await import("./index.js");
+    let failStart = false;
+    const container = managedContainer(
+      vi.fn(async () => ({
+        start: async () => {
+          if (failStart) throw Object.assign(new Error("no such exec"), { statusCode: 404 });
+          return Readable.from([]);
+        },
+        inspect: async () => ({ ExitCode: 0 }),
+      })),
+    );
+    mocks.docker.getContainer.mockReturnValue(container);
+    const opened = await supervisorApp.request("/computers/exec-start-404/screen-mode", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ interactive: false, revokeControl: false }),
+    });
+    expect(opened.status).toBe(200);
+    expect(container.inspect).toHaveBeenCalled();
+
+    failStart = true;
+    const released = await supervisorApp.request("/computers/exec-start-404/screen", {
+      method: "DELETE",
+      headers: { ...headers, "x-rakazo-screen-lease-id": "run-1:1" },
+    });
+    expect(released.status).toBe(500);
+    await expect(released.json()).resolves.toEqual({ error: "no such exec" });
+  });
 });
 
 describe("screen registry across run boundaries", () => {

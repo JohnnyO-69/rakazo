@@ -19,7 +19,7 @@ import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
 import {
   browserProfilePathForScreen,
   DEFAULT_DESKTOP_ENV,
-  stopBrowserProfileCommand,
+  quiesceBrowserProfilesCommand,
 } from "@rakazo/core/node/desktop-runtime";
 import { sandboxIdleMs } from "./computer-idle.js";
 import { screenSessionKey } from "./computer-screens.js";
@@ -41,18 +41,18 @@ const CREATEOS_WORKSPACE = "/home/desktop/rakazo-home";
 const CREATEOS_BROWSER_PROFILES = `${CREATEOS_WORKSPACE}/.browser-profiles`;
 const CREATEOS_FIREFOX_PROFILE = `${CREATEOS_BROWSER_PROFILES}/firefox`;
 
-/** Same chromium-bot-<hash> directory hard delete removes for this bot. */
-function createosChromiumProfile(screenId: string) {
-  return browserProfilePathForScreen(screenId, {
+function createosDesktopEnv() {
+  return {
     ...DEFAULT_DESKTOP_ENV,
+    homeDir: "/home/desktop",
+    workspaceDir: CREATEOS_WORKSPACE,
     browserProfilesDir: CREATEOS_BROWSER_PROFILES,
-  });
+  };
 }
 
-function createosChromiumPid(screenId: string) {
-  const profile = createosChromiumProfile(screenId);
-  const hash = profile.slice(profile.lastIndexOf("-") + 1);
-  return `/tmp/rakazo/browser-pid-${hash}`;
+/** Same chromium-bot-<hash> directory hard delete removes for this bot. */
+function createosChromiumProfile(screenId: string) {
+  return browserProfilePathForScreen(screenId, createosDesktopEnv());
 }
 const CREATEOS_DRAINING_SCREEN = "draining:";
 const CREATEOS_SCREEN_MAP_PATH = `${CREATEOS_WORKSPACE}/.rakazo/screens.json`;
@@ -170,6 +170,52 @@ for relative in ("Default/Preferences", "Local State"):
     data["profile"]["exit_type"] = "Normal"
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(data, handle)
+`;
+
+/** True when this profile's browser is running. Renderers carry --type= and do not count. */
+const CHROME_PROFILE_RUNNING_SCRIPT = `
+import os, sys
+profile = sys.argv[1]
+flag = "--user-data-dir=" + profile
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        raw = open("/proc/" + pid + "/cmdline", "rb").read()
+    except OSError:
+        continue
+    text = raw.replace(b"\\0", b"\\n").decode("utf-8", "replace")
+    args = [line for line in text.split("\\n") if line]
+    joined = " " + text.replace("\\n", " ") + " "
+    if flag not in args and (" " + flag + " ") not in joined:
+        continue
+    if "--type=" in text.replace(flag, ""):
+        continue
+    raise SystemExit(0)
+raise SystemExit(1)
+`;
+
+/** A free loopback debugger port, starting from a stable offset of this profile path. */
+const CHROME_DEBUG_PORT_SCRIPT = `
+import socket, sys
+profile = sys.argv[1]
+digest = 0
+for byte in profile.encode():
+    digest = (digest * 131 + byte) & 0xFFFFFFFF
+span = 65535 - 9222 + 1
+start = digest % span
+for offset in range(span):
+    port = 9222 + ((start + offset) % span)
+    sock = socket.socket()
+    try:
+        sock.bind(("127.0.0.1", port))
+    except OSError:
+        sock.close()
+        continue
+    sock.close()
+    print(port)
+    raise SystemExit(0)
+raise SystemExit(1)
 `;
 
 export interface CreateOSSandboxProviderOptions {
@@ -501,16 +547,11 @@ print(json.dumps(out))
     // Dirty state does not survive a process restart or a second provider
     // instance, and skipping the walk commits an empty checkpoint over the home.
     if (!(await this.hasExportableWorkspaceFiles(computer, "", context))) return;
-    // Preferences and Local State stay in the export. Close Chromium first, the
-    // same way other desktop providers quiesce a profile before copying it.
-    const screenId = screenSessionKey(context);
+    // Preferences and Local State stay in the export. Close every Chromium profile
+    // the walk copies. Browsers outside those directories keep running.
     await this.executeChecked(
       computer,
-      [
-        "bash",
-        "-lc",
-        stopBrowserProfileCommand(createosChromiumProfile(screenId), createosChromiumPid(screenId)),
-      ],
+      ["bash", "-lc", quiesceBrowserProfilesCommand(createosDesktopEnv())],
       context,
     );
     yield* this.walkWorkspace(computer, "", context);
@@ -986,7 +1027,7 @@ print(json.dumps(out))
           `chown -R desktop:desktop ${shellQuote(profile)} /tmp/runtime-desktop`,
           "chmod 700 /tmp/runtime-desktop",
           [
-            "if pgrep -u desktop -f 'chrome|chromium' >/dev/null; then",
+            `if python3 -c ${shellQuote(CHROME_PROFILE_RUNNING_SCRIPT)} ${shellQuote(profile)}; then`,
             [
               "setsid",
               "runuser -u desktop --",
@@ -1013,6 +1054,8 @@ print(json.dumps(out))
             "&&",
             ["python3 -c", shellQuote(CHROME_CLEAN_EXIT_SCRIPT), shellQuote(profile)].join(" "),
             "&&",
+            `debug_port=$(python3 -c ${shellQuote(CHROME_DEBUG_PORT_SCRIPT)} ${shellQuote(profile)})`,
+            "&&",
             [
               "setsid",
               "runuser -u desktop --",
@@ -1032,7 +1075,7 @@ print(json.dumps(out))
               "--disable-infobars",
               "--disable-gpu",
               "--remote-debugging-address=127.0.0.1",
-              "--remote-debugging-port=9222",
+              "--remote-debugging-port=$debug_port",
               `--user-data-dir=${shellQuote(profile)}`,
               shellQuote(uri),
               ">/tmp/rakazo-chrome.log 2>&1 </dev/null &",
@@ -1056,7 +1099,48 @@ print(json.dumps(out))
     const script = `
 import os, sys, urllib.parse, urllib.request
 uri, profile = sys.argv[1], sys.argv[2]
-flag = b"--user-data-dir=" + profile.encode()
+flag = "--user-data-dir=" + profile
+port = None
+owner = None
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        raw = open("/proc/" + pid + "/cmdline", "rb").read()
+    except OSError:
+        continue
+    text = raw.replace(b"\\0", b"\\n").decode("utf-8", "replace")
+    args = [line for line in text.split("\\n") if line]
+    joined = " " + text.replace("\\n", " ") + " "
+    if flag not in args and (" " + flag + " ") not in joined:
+        continue
+    stripped = text.replace(flag, "")
+    if "--type=" in stripped:
+        continue
+    found = None
+    for arg in args:
+        if arg.startswith("--remote-debugging-port=") and arg.split("=", 1)[1].isdigit():
+            found = int(arg.split("=", 1)[1])
+            break
+    if found is None:
+        marker = "--remote-debugging-port="
+        start = stripped.rfind(marker)
+        if start >= 0:
+            digits = []
+            index = start + len(marker)
+            while index < len(stripped) and stripped[index].isdigit():
+                digits.append(stripped[index])
+                index += 1
+            if digits:
+                found = int("".join(digits))
+    if found is None:
+        continue
+    port = found
+    owner = pid
+    break
+if port is None or owner is None:
+    raise SystemExit(1)
+hexport = format(port, "X")
 inodes = set()
 for net in ("/proc/net/tcp", "/proc/net/tcp6"):
     try:
@@ -1067,35 +1151,25 @@ for net in ("/proc/net/tcp", "/proc/net/tcp6"):
         next(handle, None)
         for line in handle:
             fields = line.split()
-            # 9222 == 0x2406. Only reuse the debugger this profile is listening on.
-            if len(fields) < 10 or fields[1].rsplit(":", 1)[-1].upper() != "2406":
+            if len(fields) < 10 or fields[1].rsplit(":", 1)[-1].upper() != hexport:
                 continue
             inodes.add(fields[9])
 owned = False
-if inodes:
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        try:
-            raw = open("/proc/" + pid + "/cmdline", "rb").read()
-            names = os.listdir("/proc/" + pid + "/fd")
-        except OSError:
-            continue
-        if flag not in raw.split(b"\\0"):
-            continue
-        for name in names:
-            try:
-                link = os.readlink("/proc/" + pid + "/fd/" + name)
-            except OSError:
-                continue
-            if link.startswith("socket:[") and link[8:-1] in inodes:
-                owned = True
-                break
-        if owned:
-            break
+try:
+    names = os.listdir("/proc/" + owner + "/fd")
+except OSError:
+    raise SystemExit(1)
+for name in names:
+    try:
+        link = os.readlink("/proc/" + owner + "/fd/" + name)
+    except OSError:
+        continue
+    if link.startswith("socket:[") and link[8:-1] in inodes:
+        owned = True
+        break
 if not owned:
     raise SystemExit(1)
-target = "http://127.0.0.1:9222/json/new?" + urllib.parse.quote(uri, safe="")
+target = "http://127.0.0.1:" + str(port) + "/json/new?" + urllib.parse.quote(uri, safe="")
 for method in ("PUT", "GET"):
     try:
         req = urllib.request.Request(target, method=method)
