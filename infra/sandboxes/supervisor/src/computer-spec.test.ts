@@ -474,16 +474,21 @@ describe("graphical computer spec", () => {
       writeFileSync(
         endpoint,
         [
-          "import json, os, urllib.parse",
+          "import json, os, time, urllib.parse",
           "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer",
           "pages = []",
-          "state = {'consumed': False, 'listed': False}",
+          "state = {'consumed': False, 'listed': False, 'mode': ''}",
           "def mode():",
           "    try:",
           "        with open(os.environ['RAKAZO_TEST_DROP'], encoding='utf-8') as handle:",
-          "            return handle.read().strip()",
+          "            current = handle.read().strip()",
           "    except OSError:",
-          "        return ''",
+          "        current = ''",
+          "    if current != state['mode']:",
+          "        state['mode'] = current",
+          "        state['consumed'] = False",
+          "        state['listed'] = False",
+          "    return current",
           "class Handler(BaseHTTPRequestHandler):",
           "    def do_GET(self):",
           "        self.route()",
@@ -492,9 +497,16 @@ describe("graphical computer spec", () => {
           "    def route(self):",
           "        base = self.path.split('?', 1)[0]",
           "        if base in ('/json/list', '/json'):",
-          "            if mode() == 'before' and state['consumed']:",
+          "            current = mode()",
+          "            if current == 'slow-list' and not state['listed']:",
           "                state['listed'] = True",
-          "            body = json.dumps(pages).encode('utf-8')",
+          "                time.sleep(0.6)",
+          "            if current == 'before' and state['consumed']:",
+          "                state['listed'] = True",
+          "            listed = pages",
+          "            if current == 'stranger' and state['consumed']:",
+          "                listed = pages + [{'id': 'stranger', 'type': 'page', 'url': 'https://other.example/unrelated'}]",
+          "            body = json.dumps(listed).encode('utf-8')",
           "            self.send_response(200)",
           "            self.send_header('Content-Type', 'application/json')",
           "            self.send_header('Content-Length', str(len(body)))",
@@ -510,6 +522,10 @@ describe("graphical computer spec", () => {
           "            handle.write(self.path + '\\n')",
           "        current = mode()",
           "        if current == 'before' and not state['listed']:",
+          "            state['consumed'] = True",
+          "            self.connection.close()",
+          "            return",
+          "        if current == 'stranger' and not state['consumed']:",
           "            state['consumed'] = True",
           "            self.connection.close()",
           "            return",
@@ -638,6 +654,13 @@ describe("graphical computer spec", () => {
         expect(readlinkSync(liveLock)).toBe(`testhost-${renderer.pid}`);
         expect(() => readFileSync(capture, "utf8")).toThrow();
 
+        for (const target of ["example.com", "localhost:3000"]) {
+          const hostAt = newTabs().length;
+          const host = launch([target]);
+          expect(host.status, host.error?.message ?? host.stderr).toBe(0);
+          expect(newTabs().slice(hostAt)).toEqual([`/json/new?${encodeURIComponent(target)}`]);
+        }
+
         pointLock(wrapper.pid);
         const wrapperAt = newTabs().length;
         const viaWrapper = launch(["https://example.com/from-wrapper"]);
@@ -666,6 +689,22 @@ describe("graphical computer spec", () => {
         expect(newTabs().slice(blindAt)).toEqual([
           `/json/new?${encodeURIComponent("https://example.com/drop-before-create")}`,
           `/json/new?${encodeURIComponent("https://example.com/drop-before-create")}`,
+        ]);
+
+        writeFileSync(dropFile, "stranger\n");
+        const strangerAt = newTabs().length;
+        const stranger = launch(["https://example.com/not-the-stranger"]);
+        expect(stranger.status).not.toBe(0);
+        expect(newTabs().slice(strangerAt)).toEqual([
+          `/json/new?${encodeURIComponent("https://example.com/not-the-stranger")}`,
+        ]);
+
+        writeFileSync(dropFile, "slow-list\n");
+        const slowAt = newTabs().length;
+        const slow = launch(["https://example.com/after-slow-list"]);
+        expect(slow.status, slow.error?.message ?? slow.stderr).toBe(0);
+        expect(newTabs().slice(slowAt)).toEqual([
+          `/json/new?${encodeURIComponent("https://example.com/after-slow-list")}`,
         ]);
         writeFileSync(dropFile, "0\n");
 
