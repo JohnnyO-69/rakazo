@@ -80,7 +80,7 @@ import {
   VoiceInfoSchema,
   VoiceStatusSchema,
 } from "./domain.js";
-import { ProductEventSchema } from "./events.js";
+import { ComputerCommandSchema, ProductEventSchema } from "./events.js";
 import { Id, IsoDate } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
@@ -326,7 +326,26 @@ export const appContract = {
       .output(z.object({ ok: z.literal(true) })),
     stop: oc.input(threadTarget).output(z.object({ ok: z.literal(true) })),
     followUp: oc
-      .input(threadTarget.safeExtend({ text: z.string().min(1) }))
+      .input(
+        threadTarget.safeExtend({
+          text: z.string().min(1),
+          /** Carries the call id, so a turn taken mid-run stays in the call's card. */
+          clientNonce: z.string().min(1).max(200).optional(),
+        }),
+      )
+      .output(z.object({ ok: z.literal(true) })),
+    /** The client hung up: close the call card and let the bot finish what was asked on it. */
+    endCall: oc
+      // ":" separates the call id from the nonce suffix, so it can never appear inside one.
+      .input(
+        botId.safeExtend({
+          callId: z
+            .string()
+            .min(1)
+            .max(200)
+            .regex(/^[^:]+$/),
+        }),
+      )
       .output(z.object({ ok: z.literal(true) })),
     clear: oc.input(threadTarget).output(z.object({ ok: z.literal(true) })),
     answer: oc
@@ -381,6 +400,21 @@ export const appContract = {
     readFile: oc
       .input(z.object({ botId: Id, path: z.string() }))
       .output(z.object({ path: z.string(), content: z.string() })),
+    downloadFile: oc
+      .input(z.object({ botId: Id, path: z.string().min(1) }))
+      .output(z.object({ path: z.string(), contentBase64: z.string() })),
+    uploadFile: oc
+      .input(
+        z.object({
+          botId: Id,
+          path: z.string().min(1),
+          contentBase64: z.string().max(ATTACHMENT_MAX_BASE64_LENGTH),
+        }),
+      )
+      .output(z.object({ ok: z.literal(true) })),
+    commands: oc
+      .input(botId)
+      .output(z.array(ComputerCommandSchema.extend({ createdAt: z.string() }))),
     screenUrl: oc.input(botId).output(z.object({ url: z.string().nullable() })),
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
