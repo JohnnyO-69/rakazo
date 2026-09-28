@@ -55,6 +55,14 @@ if command -v dbus-launch >/dev/null 2>&1; then
   eval "$(dbus-launch --sh-syntax)"
 fi
 
+# Chromium's file chooser talks to xdg-desktop-portal over the session bus.
+# Without a running portal backend, the select-file dialog opens but the
+# chosen file never reaches the page — uploads silently do nothing.
+if [ -x /usr/libexec/xdg-desktop-portal/xdg-desktop-portal ] && [ -x /usr/libexec/xdg-desktop-portal/xdg-desktop-portal-gtk ]; then
+  /usr/libexec/xdg-desktop-portal/xdg-desktop-portal >/tmp/rakazo/portal.log 2>&1 &
+  /usr/libexec/xdg-desktop-portal/xdg-desktop-portal-gtk >/tmp/rakazo/portal-gtk.log 2>&1 &
+fi
+
 xsetroot -solid "#111113" >/dev/null 2>&1 || true
 mkdir -p /tmp/fluxbox-home/.fluxbox
 cp /etc/rakazo/fluxbox/init /tmp/fluxbox-home/.fluxbox/init
