@@ -2989,21 +2989,27 @@ export function createRouter(deps: RouterDeps) {
             : isOneShotRoutineCrons(crons)
               ? (armedOneShotAt ?? existing.nextRunAt)
               : (recalculatedNextRunAt ?? existing.nextRunAt);
-        const row = await deps.prisma.routine.update({
-          where: { id: existing.id },
-          data: {
-            name: input.name,
-            prompt: input.prompt,
-            crons: input.crons,
-            timezone: input.timezone,
-            active: input.active,
-            notify: input.notify,
-            webhookEnabled: input.webhookEnabled,
-            githubEnabled: input.githubEnabled,
-            messageProvider: input.messageProvider,
-            nextRunAt,
-          },
-        });
+        // Re-check the parent in the write itself so an archive that lands after the read wins.
+        const row = await deps.prisma.routine
+          .update({
+            where: { id: existing.id, bot: { archivedAt: null } },
+            data: {
+              name: input.name,
+              prompt: input.prompt,
+              crons: input.crons,
+              timezone: input.timezone,
+              active: input.active,
+              notify: input.notify,
+              webhookEnabled: input.webhookEnabled,
+              githubEnabled: input.githubEnabled,
+              messageProvider: input.messageProvider,
+              nextRunAt,
+            },
+          })
+          .catch((error: unknown) => {
+            if (isRecordNotFound(error)) throw new ORPCError("NOT_FOUND");
+            throw error;
+          });
         if (bot.thread) {
           await deps.events.append({
             spaceId: context.actor.spaceId,
@@ -6067,6 +6073,10 @@ async function messagingIdentityDto(
 
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
+}
+
+function isRecordNotFound(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2025");
 }
 
 function messagingChannelDto(membership: {

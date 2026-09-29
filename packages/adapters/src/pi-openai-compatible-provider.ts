@@ -18,6 +18,7 @@ import {
   isPrivateAddress,
   type ResolveHostname,
 } from "./network-address.js";
+import type { OpenAiCompatibleUrlPolicy } from "./openai-compatible-url.js";
 import {
   assertAllowedOpenAiCompatibleRequestUrl,
   assertAllowedOpenAiCompatibleUrl,
@@ -25,7 +26,6 @@ import {
   isPrivateOpenAiCompatibleHostname,
   normalizeOpenAiCompatibleBaseUrl,
   OPENAI_COMPATIBLE_PROVIDER_ID,
-  type OpenAiCompatibleUrlPolicy,
 } from "./openai-compatible-url.js";
 import { dispatcherFetch } from "./undici-fetch.js";
 

@@ -9,12 +9,8 @@ import {
   requireCredential,
 } from "./connector-http.js";
 import { combineSignals } from "./connector-safety.js";
-import {
-  assertSafeRemoteUrl,
-  createSafeRemoteFetch,
-  type RemoteTransportDependencies,
-  type RemoteUrlPolicy,
-} from "./remote-mcp.js";
+import type { RemoteTransportDependencies, RemoteUrlPolicy } from "./remote-mcp.js";
+import { assertSafeRemoteUrl, createSafeRemoteFetch } from "./remote-mcp.js";
 
 const MAX_GRAPHQL_SELECTION_CHARS = 6_000;
 const MAX_GRAPHQL_RESULT_BYTES = 1_000_000;

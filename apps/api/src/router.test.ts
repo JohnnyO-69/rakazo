@@ -2877,11 +2877,14 @@ describe("routines.update", () => {
     createdAt: new Date("2026-09-01T00:00:00.000Z"),
   };
 
-  function fixture(botArchived: boolean) {
-    const update = vi.fn(async (args: { data: Record<string, unknown> }) => ({
-      ...routine,
-      ...Object.fromEntries(Object.entries(args.data).filter(([, value]) => value !== undefined)),
-    }));
+  function fixture(botArchived: boolean, archivedBeforeWrite = false) {
+    const update = vi.fn(async (args: { data: Record<string, unknown> }) => {
+      if (archivedBeforeWrite) throw Object.assign(new Error("not found"), { code: "P2025" });
+      return {
+        ...routine,
+        ...Object.fromEntries(Object.entries(args.data).filter(([, value]) => value !== undefined)),
+      };
+    });
     const enqueue = vi.fn(async () => undefined);
     const prisma = {
       routine: {
@@ -2935,9 +2938,19 @@ describe("routines.update", () => {
     const { response } = await call();
     expect(response.status).toBe(200);
     expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ active: true }) }),
+      expect.objectContaining({
+        where: { id: "routine-1", bot: { archivedAt: null } },
+        data: expect.objectContaining({ active: true }),
+      }),
     );
     expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("does not re-arm when the bot is archived between the read and the write", async () => {
+    const { enqueue, call } = fixture(false, true);
+    const { response } = await call();
+    expect(response.status).toBe(404);
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });
 

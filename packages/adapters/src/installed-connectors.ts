@@ -38,13 +38,12 @@ import {
   resolveCatalogCall,
 } from "./lazy-tool-catalog.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
+import type { RemoteTransportDependencies, RemoteUrlPolicy } from "./remote-mcp.js";
 import {
   assertSafeRemoteUrl,
   callRemoteMcpTool,
   createSafeRemoteFetch,
   listRemoteMcpTools,
-  type RemoteTransportDependencies,
-  type RemoteUrlPolicy,
 } from "./remote-mcp.js";
 import type { EncryptedSecretStore } from "./secrets.js";
 
