@@ -9,7 +9,7 @@ import {
   releaseSpaceDeletionClaim,
   renewSpaceDeletionClaim,
 } from "@rakazo/db";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { createApp } from "../../../apps/api/src/app.ts";
 import type { BotIntroHarness } from "./discard-bot-intro.js";
 import { discardBotIntroFromCreate } from "./discard-bot-intro.js";
@@ -1191,10 +1191,15 @@ describeWithDatabase("API authorization and resource isolation", () => {
   it("validates custom thinking against the saved connection capability", async () => {
     const cookie = await signup(app, `custom-thinking-${stamp}@rakazo.test`, "Custom Thinking");
     const bot = await rpc<Bot>(app, cookie, "bots/create", botInput("Thinking Bot"));
+    // This signup does not own the deployment, so it cannot use a private model server.
+    vi.stubEnv("RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC", "1");
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
     const connection = {
       provider: "openai-compatible",
       modelId: "arbitrary-model",
-      baseUrl: "http://localhost:8000/v1",
+      baseUrl: "https://models.example.test/v1",
     };
     await rpc(app, cookie, "models/connect", {
       ...connection,

@@ -25,6 +25,7 @@ import {
   isPrivateOpenAiCompatibleHostname,
   normalizeOpenAiCompatibleBaseUrl,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  type OpenAiCompatibleUrlPolicy,
 } from "./openai-compatible-url.js";
 import { dispatcherFetch } from "./undici-fetch.js";
 
@@ -76,6 +77,10 @@ export function openAiCompatibleModel(
   };
 }
 
+/** A run's connection was checked against its owner when the executor resolved it
+ * (`assertUserMayUseOpenAiCompatibleEndpoint`), so requests here may reach private hosts. */
+const RESOLVED_CONNECTION_POLICY: OpenAiCompatibleUrlPolicy = { allowPrivate: true };
+
 function openAiCompatibleProvider(models: Model<"openai-completions">[]): Provider {
   const api = openAICompletionsApi();
   // Guard the fetch the caller supplied (the runtime's seam for tests) or the
@@ -84,12 +89,12 @@ function openAiCompatibleProvider(models: Model<"openai-completions">[]): Provid
     stream: (model, context, options) =>
       api.stream(model, context, {
         ...options,
-        fetch: createOpenAiCompatibleFetch(options?.fetch),
+        fetch: createOpenAiCompatibleFetch(RESOLVED_CONNECTION_POLICY, options?.fetch),
       }),
     streamSimple: (model, context, options) =>
       api.streamSimple(model, context, {
         ...options,
-        fetch: createOpenAiCompatibleFetch(options?.fetch),
+        fetch: createOpenAiCompatibleFetch(RESOLVED_CONNECTION_POLICY, options?.fetch),
       }),
   };
   return createProvider({
@@ -159,12 +164,13 @@ function requestCarriesAuthorization(input: RequestInfo | URL, init?: RequestIni
 }
 
 export function createOpenAiCompatibleFetch(
+  policy: OpenAiCompatibleUrlPolicy,
   baseFetch: typeof globalThis.fetch = dispatcherFetch,
   resolve: ResolveHostname = resolveHostname,
 ): typeof globalThis.fetch {
   return async (input, init) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
-    const url = assertAllowedOpenAiCompatibleRequestUrl(rawUrl);
+    const url = assertAllowedOpenAiCompatibleRequestUrl(rawUrl, policy);
     if (requestCarriesAuthorization(input, init)) {
       assertHttpsForKeyedOpenAiCompatibleUrl(url, "present");
     }
@@ -315,7 +321,10 @@ export type OpenAiCompatibleConnectInput = {
   apiKey?: string;
 };
 
-export function prepareOpenAiCompatibleConnect(input: OpenAiCompatibleConnectInput): {
+export function prepareOpenAiCompatibleConnect(
+  input: OpenAiCompatibleConnectInput,
+  policy: OpenAiCompatibleUrlPolicy,
+): {
   baseUrl: string;
   modelId: string;
   apiKey?: string;
@@ -324,7 +333,7 @@ export function prepareOpenAiCompatibleConnect(input: OpenAiCompatibleConnectInp
   const modelId = input.modelId?.trim();
   if (!baseUrl) throw new Error("Base URL is required for OpenAI-compatible models");
   if (!modelId) throw new Error("Model id is required for OpenAI-compatible models");
-  const allowed = assertAllowedOpenAiCompatibleUrl(baseUrl);
+  const allowed = assertAllowedOpenAiCompatibleUrl(baseUrl, policy);
   const apiKey = input.apiKey?.trim();
   assertHttpsForKeyedOpenAiCompatibleUrl(allowed, apiKey);
   const normalized = allowed.href;
@@ -339,6 +348,7 @@ export type OpenAiCompatibleModelsResponse = {
 
 /** Shared suffix: /models probe is optional when the user already knows a model id. */
 const OPENAI_COMPAT_PROBE_HAND_FILL_HINT = "You can still Connect with an explicit model id.";
+const OPENAI_COMPAT_PROBE_FAILED = `Could not list models. ${OPENAI_COMPAT_PROBE_HAND_FILL_HINT}`;
 
 function probeModelIds(body: OpenAiCompatibleModelsResponse): string[] {
   const entries = Array.isArray(body.data)
@@ -396,20 +406,39 @@ async function readBoundedJson(response: Response): Promise<OpenAiCompatibleMode
   }
 }
 
+/**
+ * Lists model ids from `/models`. Without private-network access the caller may only
+ * reach public servers, and every network, status and timeout failure reads the same,
+ * so the probe cannot map what the server can reach.
+ */
 export async function probeOpenAiCompatibleModels(
   input: { baseUrl: string; apiKey?: string },
-  fetchImpl?: typeof fetch,
-  signal?: AbortSignal,
+  options: OpenAiCompatibleUrlPolicy & { fetch?: typeof fetch; signal?: AbortSignal },
 ): Promise<string[]> {
-  const baseUrl = assertAllowedOpenAiCompatibleUrl(input.baseUrl);
+  const baseUrl = assertAllowedOpenAiCompatibleUrl(input.baseUrl, options);
   assertHttpsForKeyedOpenAiCompatibleUrl(baseUrl, input.apiKey);
+  const { signal } = options;
+  try {
+    return await fetchOpenAiCompatibleModelIds(baseUrl, input.apiKey, options);
+  } catch (error) {
+    if (options.allowPrivate || signal?.aborted) throw error;
+    throw new Error(OPENAI_COMPAT_PROBE_FAILED);
+  }
+}
+
+async function fetchOpenAiCompatibleModelIds(
+  baseUrl: URL,
+  apiKey: string | undefined,
+  options: OpenAiCompatibleUrlPolicy & { fetch?: typeof fetch; signal?: AbortSignal },
+): Promise<string[]> {
+  const { signal } = options;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   const merged = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   try {
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (input.apiKey?.trim()) headers.Authorization = `Bearer ${input.apiKey.trim()}`;
-    const safeFetch = createOpenAiCompatibleFetch(fetchImpl);
+    if (apiKey?.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`;
+    const safeFetch = createOpenAiCompatibleFetch(options, options.fetch);
     const response = await safeFetch(new URL("models", `${baseUrl.href}/`).href, {
       headers,
       redirect: "error",

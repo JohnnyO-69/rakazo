@@ -75,6 +75,8 @@ describe.skipIf(!databaseAvailable)("offline Pi product journey", () => {
         signupsEnabled: "true",
         composio: new ComposioEmulator(),
         encryptionKey: "offline-model-fixture-encryption-key",
+        // Fixture users do not own the deployment; the loopback emulator is a private server.
+        mcpAllowPrivateEndpoint: true,
       });
       stop = handles.stop;
       const signup = await handles.app.request("/api/auth/sign-up/email", {

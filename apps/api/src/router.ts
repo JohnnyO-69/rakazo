@@ -452,6 +452,11 @@ function connectionContext(
   };
 }
 
+/** Loopback / LAN / Docker-network endpoints: the deployment owner, or everyone under the flag. */
+function mayUsePrivateEndpoint(actor: Actor, deps: Pick<RouterDeps, "env">): boolean {
+  return actor.isDeploymentOwner || deps.env.mcpAllowPrivateEndpoint === true;
+}
+
 async function assertMcpRemoteEndpoint(
   endpoint: string | null | undefined,
   actor: Actor,
@@ -460,7 +465,7 @@ async function assertMcpRemoteEndpoint(
   if (!endpoint) return;
   try {
     await assertSafeRemoteUrl(endpoint, deps.remoteConnectors?.resolveHostname, {
-      allowPrivateEndpoint: actor.isDeploymentOwner || deps.env.mcpAllowPrivateEndpoint === true,
+      allowPrivateEndpoint: mayUsePrivateEndpoint(actor, deps),
     });
   } catch (error) {
     throw new ORPCError("BAD_REQUEST", {
@@ -1012,6 +1017,7 @@ export function createRouter(deps: RouterDeps) {
           }
           plaintext = buildModelConnectPlaintext(input, previousPlaintext, {
             omitVisionModelIds,
+            allowPrivateEndpoint: mayUsePrivateEndpoint(context.actor, deps),
           });
         } catch (error) {
           throw new ORPCError("BAD_REQUEST", {
@@ -1035,7 +1041,10 @@ export function createRouter(deps: RouterDeps) {
       probeOpenAiCompatible: authed.models.probeOpenAiCompatible.handler(
         async ({ context, input }) => {
           try {
-            const models = await probeOpenAiCompatibleModels(input, undefined, context.signal);
+            const models = await probeOpenAiCompatibleModels(input, {
+              allowPrivate: mayUsePrivateEndpoint(context.actor, deps),
+              signal: context.signal,
+            });
             return { models };
           } catch (error) {
             throw new ORPCError("BAD_REQUEST", {
@@ -3290,6 +3299,7 @@ export function createRouter(deps: RouterDeps) {
               credential,
               signal: context.signal,
               remote: deps.remoteConnectors,
+              allowPrivateEndpoint: mayUsePrivateEndpoint(context.actor, deps),
             });
             config = verified.config;
           }
@@ -3300,6 +3310,7 @@ export function createRouter(deps: RouterDeps) {
               credential,
               signal: context.signal,
               remote: deps.remoteConnectors,
+              allowPrivateEndpoint: mayUsePrivateEndpoint(context.actor, deps),
             });
             source = prepared.source;
             config = prepared.config;
@@ -3311,6 +3322,7 @@ export function createRouter(deps: RouterDeps) {
               credential,
               signal: context.signal,
               remote: deps.remoteConnectors,
+              allowPrivateEndpoint: mayUsePrivateEndpoint(context.actor, deps),
             });
             source = prepared.source;
             config = prepared.config;

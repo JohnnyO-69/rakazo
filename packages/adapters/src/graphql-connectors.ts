@@ -13,6 +13,7 @@ import {
   assertSafeRemoteUrl,
   createSafeRemoteFetch,
   type RemoteTransportDependencies,
+  type RemoteUrlPolicy,
 } from "./remote-mcp.js";
 
 const MAX_GRAPHQL_SELECTION_CHARS = 6_000;
@@ -42,7 +43,7 @@ export const GraphqlConfigSchema = z.object({
 
 export type GraphqlOperation = z.infer<typeof GraphqlOperationSchema>;
 export type GraphqlConfig = z.infer<typeof GraphqlConfigSchema>;
-export type RemoteGraphqlDependencies = RemoteTransportDependencies;
+export type RemoteGraphqlDependencies = RemoteTransportDependencies & RemoteUrlPolicy;
 
 const INTROSPECTION_QUERY = `query RakazoIntrospection {
   __schema {
@@ -138,13 +139,16 @@ export async function prepareGraphqlInstall(input: {
   config: Record<string, unknown>;
   credential?: string;
   signal?: AbortSignal;
-  remote?: RemoteGraphqlDependencies;
+  remote?: RemoteTransportDependencies;
+  /** Loopback / LAN endpoint escape: deployment owner or instance flag. */
+  allowPrivateEndpoint?: boolean;
 }): Promise<{ source: string; config: Record<string, unknown>; operationCount: number }> {
   const auth = AuthSchema.parse(input.config.auth);
   requireCredential(auth, input.credential);
   const headers = PublicHeadersSchema.parse(input.config.headers);
   assertNoSensitiveQuery(input.source);
-  await assertSafeRemoteUrl(input.source, input.remote?.resolveHostname);
+  const remote = { ...input.remote, allowPrivateEndpoint: input.allowPrivateEndpoint };
+  await assertSafeRemoteUrl(input.source, remote.resolveHostname, remote);
 
   const endpoint = new URL(input.source);
   const requestHeaders: Record<string, string> = {
@@ -153,12 +157,7 @@ export async function prepareGraphqlInstall(input: {
     ...headers,
   };
   applyCredential(endpoint, requestHeaders, auth, input.credential);
-  const document = await introspectGraphqlEndpoint(
-    endpoint,
-    requestHeaders,
-    input.signal,
-    input.remote,
-  );
+  const document = await introspectGraphqlEndpoint(endpoint, requestHeaders, input.signal, remote);
   const operations = importGraphqlSchema(document);
   const config = GraphqlConfigSchema.parse({ auth, headers, operations });
   return {
@@ -295,7 +294,7 @@ export async function executeGraphqlOperation(
     if (name in args) variables[name] = args[name];
   }
 
-  const safeFetch = createSafeRemoteFetch(remote.fetch, remote.resolveHostname);
+  const safeFetch = createSafeRemoteFetch(remote.fetch, remote.resolveHostname, remote);
   try {
     const response = await safeFetch(url, {
       method: "POST",
@@ -357,7 +356,7 @@ async function introspectGraphqlEndpoint(
   signal?: AbortSignal,
   remote: RemoteGraphqlDependencies = {},
 ): Promise<Record<string, unknown>> {
-  const safeFetch = createSafeRemoteFetch(remote.fetch, remote.resolveHostname);
+  const safeFetch = createSafeRemoteFetch(remote.fetch, remote.resolveHostname, remote);
   try {
     const response = await safeFetch(url, {
       method: "POST",

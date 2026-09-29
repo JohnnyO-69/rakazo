@@ -4,6 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModelConnectPlaintext } from "./model-connect.js";
 import { registerOpenAiCompatibleRuntime } from "./pi-openai-compatible-provider.js";
 
+/** The deployment owner may save private-network model servers. */
+function connectAsOwner(
+  input: Parameters<typeof buildModelConnectPlaintext>[0],
+  previous?: string,
+  options?: { omitVisionModelIds?: boolean },
+): string {
+  return buildModelConnectPlaintext(input, previous, { ...options, allowPrivateEndpoint: true });
+}
+
 const modelId = "arbitrary-model";
 const baseUrl = "http://127.0.0.1:8090/v1";
 
@@ -13,7 +22,7 @@ afterEach(() => {
 });
 
 it("keeps the existing keyless connection format", () => {
-  const plaintext = buildModelConnectPlaintext({ provider: "openai-compatible", baseUrl, modelId });
+  const plaintext = connectAsOwner({ provider: "openai-compatible", baseUrl, modelId });
   expect(plaintext).toContain(baseUrl);
   expect(plaintext).not.toContain("apiKey");
 });

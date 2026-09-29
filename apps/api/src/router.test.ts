@@ -518,6 +518,102 @@ describe("MCP loopback endpoints", () => {
   });
 });
 
+describe("private API connectors and model servers", () => {
+  function privateDeps(mcpAllowPrivateEndpoint = false) {
+    const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...data,
+      id: "install-1",
+      secretId: null,
+      version: "1.0.0",
+      digest: "sha256:fake",
+      createdAt: new Date(0),
+    }));
+    const prisma = {
+      capabilityInstall: { create },
+      $transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => run(prisma)),
+    } as unknown as PrismaClient;
+    const deps = {
+      prisma,
+      env: {
+        defaultProvider: "fake",
+        defaultModel: "fake-model",
+        webOrigin: "http://127.0.0.1:5173",
+        screenProxySecret: "fake-test-secret",
+        sandboxProvider: "fake",
+        mcpAllowPrivateEndpoint,
+      },
+      dataDir: "/tmp/rakazo-router-test",
+    } as unknown as RouterDeps;
+    return { create, handler: new RPCHandler(createRouter(deps)) };
+  }
+
+  function actor(isDeploymentOwner: boolean): Actor {
+    return {
+      spaceId: "workspace-1",
+      userId: isDeploymentOwner ? "owner-1" : "member-1",
+      email: "user@rakazo.test",
+      isDeploymentOwner,
+    };
+  }
+
+  function rpc(path: string, json: unknown) {
+    return new Request(`http://127.0.0.1/rpc/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ json }),
+    });
+  }
+
+  const installInput = {
+    kind: "api",
+    name: "Local API",
+    source: "http://localhost:4000",
+    config: {
+      auth: { type: "none" },
+      operations: [{ id: "list_items", method: "GET", path: "/items" }],
+    },
+  };
+
+  it.each([
+    ["the deployment owner", true, false],
+    ["every user under the instance flag", false, true],
+  ])("lets %s install a loopback API connector", async (_label, owner, flag) => {
+    const { create, handler } = privateDeps(flag);
+    const { response } = await handler.handle(rpc("capabilities/install", installInput), {
+      prefix: "/rpc",
+      context: { actor: actor(owner) },
+    });
+
+    expect(response.status).toBe(200);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a loopback API connector from a user who is not the deployment owner", async () => {
+    const { create, handler } = privateDeps();
+    const { response } = await handler.handle(rpc("capabilities/install", installInput), {
+      prefix: "/rpc",
+      context: { actor: actor(false) },
+    });
+
+    expect(response.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("refuses to probe a private model server for a user who is not the deployment owner", async () => {
+    const { handler } = privateDeps();
+    const { response } = await handler.handle(
+      rpc("models/probeOpenAiCompatible", { baseUrl: "http://127.0.0.1:3100" }),
+      { prefix: "/rpc", context: { actor: actor(false) } },
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { json: { message: string } };
+    expect(body.json.message).toBe(
+      "Only the server owner can use a model server on a private network",
+    );
+  });
+});
+
 describe("connections.begin", () => {
   it("reuses a revoked row for the same provider instead of inserting a duplicate", async () => {
     const begin = vi.fn().mockResolvedValue({ state: "gmail-state", authorizationUrl: null });

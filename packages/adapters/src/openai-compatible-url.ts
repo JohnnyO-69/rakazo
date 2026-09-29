@@ -63,12 +63,23 @@ function isBlockedHostname(hostname: string): boolean {
   );
 }
 
+export type OpenAiCompatibleUrlPolicy = {
+  /** Loopback / LAN / Docker-network model servers: the deployment owner, or every user under
+   * `MCP_ALLOW_PRIVATE_ENDPOINT`. Otherwise any user could probe the server's private network. */
+  allowPrivate: boolean;
+  /** Defaults to `RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC`. */
+  allowPublic?: boolean;
+};
+
+export const PRIVATE_MODEL_ENDPOINT_OWNER_ONLY =
+  "Only the server owner can use a model server on a private network";
+
 export function assertAllowedOpenAiCompatibleUrl(
   raw: string,
-  opts?: { allowPublic?: boolean },
+  policy: OpenAiCompatibleUrlPolicy,
 ): URL {
   const normalized = normalizeOpenAiCompatibleBaseUrl(raw);
-  return assertAllowedOpenAiCompatibleRequestUrl(normalized, opts);
+  return assertAllowedOpenAiCompatibleRequestUrl(normalized, policy);
 }
 
 /**
@@ -91,7 +102,7 @@ export function assertHttpsForKeyedOpenAiCompatibleUrl(
 
 export function assertAllowedOpenAiCompatibleRequestUrl(
   raw: string,
-  opts?: { allowPublic?: boolean },
+  policy: OpenAiCompatibleUrlPolicy,
 ): URL {
   let url: URL;
   try {
@@ -109,8 +120,11 @@ export function assertAllowedOpenAiCompatibleRequestUrl(
   if (isBlockedHostname(hostname)) {
     throw new Error("Base URL targets a blocked metadata or link-local host");
   }
-  const allowPublic = opts?.allowPublic ?? openAiCompatAllowPublicHosts();
-  if (isPrivateOpenAiCompatibleHostname(hostname)) return url;
+  if (isPrivateOpenAiCompatibleHostname(hostname)) {
+    if (!policy.allowPrivate) throw new Error(PRIVATE_MODEL_ENDPOINT_OWNER_ONLY);
+    return url;
+  }
+  const allowPublic = policy.allowPublic ?? openAiCompatAllowPublicHosts();
   if (!allowPublic) {
     throw new Error(
       "Public model endpoints are blocked. Set RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC=1 to allow them. A private reverse proxy on localhost or an RFC1918 address does not need that gate.",

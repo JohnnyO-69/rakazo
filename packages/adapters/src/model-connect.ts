@@ -17,24 +17,27 @@ import {
 export type BuildModelConnectOptions = {
   /** Skip writing visionModelIds when prior plaintext was unavailable during key replacement. */
   omitVisionModelIds?: boolean;
+  /** Whether the connecting user may save a private-network OpenAI-compatible server. */
+  allowPrivateEndpoint: boolean;
 };
 
 export function buildModelConnectPlaintext(
   input: ModelConnectInput,
-  previousPlaintext?: string,
-  options?: BuildModelConnectOptions,
+  previousPlaintext: string | undefined,
+  options: BuildModelConnectOptions,
 ): string {
   if (input.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
-    const prepared = prepareOpenAiCompatibleConnect(input);
+    const policy = { allowPrivate: options.allowPrivateEndpoint };
+    const prepared = prepareOpenAiCompatibleConnect(input, policy);
     const previous = tryParseModelSecret(previousPlaintext);
     const sameEndpoint =
       previous?.kind === "openai_compatible" && previous.baseUrl === prepared.baseUrl;
     if (input.apiKey === undefined && sameEndpoint) {
       // Revalidate the inherited key too: public endpoints must still use HTTPS.
-      prepared.apiKey = prepareOpenAiCompatibleConnect({
-        ...input,
-        apiKey: previous.apiKey,
-      }).apiKey;
+      prepared.apiKey = prepareOpenAiCompatibleConnect(
+        { ...input, apiKey: previous.apiKey },
+        policy,
+      ).apiKey;
     }
     const previousVisionModelIds = sameEndpoint ? previous.visionModelIds : undefined;
     const maxImagesPerPrompt =
@@ -63,7 +66,7 @@ export function buildModelConnectPlaintext(
       input.supportsImages,
     );
     const includeVisionModelIds =
-      !options?.omitVisionModelIds &&
+      !options.omitVisionModelIds &&
       (input.supportsImages !== undefined || previousVisionModelIds !== undefined);
     const secret: StoredModelSecret = {
       kind: "openai_compatible",

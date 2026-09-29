@@ -6,6 +6,7 @@ import type {
   ModelCredentialRetireReason,
 } from "@rakazo/adapter-kit";
 import {
+  assertUserMayUseOpenAiCompatibleEndpoint,
   type EncryptedSecretStore,
   formatCurrentTimeInstruction,
   matchesFailedOAuthSecret,
@@ -118,6 +119,8 @@ interface ModelTeamChatEngagementJudgeDeps {
   providerOverride?: string;
   modelOverride?: string;
   timeoutMs?: number;
+  /** `MCP_ALLOW_PRIVATE_ENDPOINT`: private model servers for every user, not just the owner. */
+  allowPrivateEndpoint?: boolean;
 }
 
 export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
@@ -295,6 +298,12 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
       };
     }
     if (parsed.kind === "openai_compatible") {
+      await assertUserMayUseOpenAiCompatibleEndpoint(
+        this.deps.prisma,
+        bot.userId,
+        parsed.baseUrl,
+        this.deps.allowPrivateEndpoint === true,
+      );
       return {
         model: {
           provider,

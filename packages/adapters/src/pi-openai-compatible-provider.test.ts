@@ -14,9 +14,20 @@ import {
   registerOpenAiCompatibleRuntime,
 } from "./pi-openai-compatible-provider.js";
 
+const OWNER = { allowPrivate: true };
+
+/** The deployment owner may save private-network model servers. */
+function connectAsOwner(
+  input: Parameters<typeof buildModelConnectPlaintext>[0],
+  previous?: string,
+  options?: { omitVisionModelIds?: boolean },
+): string {
+  return buildModelConnectPlaintext(input, previous, { ...options, allowPrivateEndpoint: true });
+}
+
 describe("model connect", () => {
   it("serializes keyless openai-compatible credentials", () => {
-    const plaintext = buildModelConnectPlaintext({
+    const plaintext = connectAsOwner({
       provider: OPENAI_COMPATIBLE_PROVIDER_ID,
       baseUrl: "http://127.0.0.1:8000",
       modelId: "qwen3-4b",
@@ -30,7 +41,7 @@ describe("model connect", () => {
   });
 
   it("still requires hosted providers to supply a real API key", () => {
-    expect(() => buildModelConnectPlaintext({ provider: "openrouter", apiKey: "short" })).toThrow(
+    expect(() => connectAsOwner({ provider: "openrouter", apiKey: "short" })).toThrow(
       /at least 8 characters/,
     );
   });
@@ -47,7 +58,7 @@ describe("model connect", () => {
   });
 
   it("keeps private http openai-compatible connects when an API key is set", () => {
-    const plaintext = buildModelConnectPlaintext({
+    const plaintext = connectAsOwner({
       provider: OPENAI_COMPATIBLE_PROVIDER_ID,
       baseUrl: "http://127.0.0.1:8000",
       modelId: "local-model",
@@ -65,15 +76,18 @@ describe("model connect", () => {
     process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = "1";
     try {
       expect(() =>
-        prepareOpenAiCompatibleConnect({
-          provider: OPENAI_COMPATIBLE_PROVIDER_ID,
-          baseUrl: "http://api.example.com/v1",
-          modelId: "my-model-id",
-          apiKey: "secret-key",
-        }),
+        prepareOpenAiCompatibleConnect(
+          {
+            provider: OPENAI_COMPATIBLE_PROVIDER_ID,
+            baseUrl: "http://api.example.com/v1",
+            modelId: "my-model-id",
+            apiKey: "secret-key",
+          },
+          OWNER,
+        ),
       ).toThrow(/must use HTTPS/);
       expect(() =>
-        buildModelConnectPlaintext({
+        connectAsOwner({
           provider: OPENAI_COMPATIBLE_PROVIDER_ID,
           baseUrl: "http://api.example.com/v1",
           modelId: "my-model-id",
@@ -90,12 +104,15 @@ describe("model connect", () => {
     const previous = process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
     process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = "1";
     try {
-      const prepared = prepareOpenAiCompatibleConnect({
-        provider: OPENAI_COMPATIBLE_PROVIDER_ID,
-        baseUrl: "https://api.example.com/v1",
-        modelId: "my-model-id",
-        apiKey: "secret-key",
-      });
+      const prepared = prepareOpenAiCompatibleConnect(
+        {
+          provider: OPENAI_COMPATIBLE_PROVIDER_ID,
+          baseUrl: "https://api.example.com/v1",
+          modelId: "my-model-id",
+          apiKey: "secret-key",
+        },
+        OWNER,
+      );
       expect(prepared).toEqual({
         baseUrl: "https://api.example.com/v1",
         modelId: "my-model-id",
@@ -117,6 +134,7 @@ describe("openai-compatible provider", () => {
         headers: { Authorization: "Bearer secret" },
       });
       const safeFetch = createOpenAiCompatibleFetch(
+        OWNER,
         async () => new Response("{}", { status: 200 }),
       );
       await expect(
@@ -134,7 +152,7 @@ describe("openai-compatible provider", () => {
     const previous = process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
     process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = "1";
     try {
-      const safeFetch = createOpenAiCompatibleFetch(undefined, async () => {
+      const safeFetch = createOpenAiCompatibleFetch(OWNER, undefined, async () => {
         throw new Error("lookup reached");
       });
       await expect(safeFetch("https://models.example.test/v1/models")).rejects.toMatchObject({
@@ -152,7 +170,7 @@ describe("openai-compatible provider", () => {
     const previous = process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
     process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = "1";
     try {
-      const safeFetch = createOpenAiCompatibleFetch(undefined, async () => {
+      const safeFetch = createOpenAiCompatibleFetch(OWNER, undefined, async () => {
         throw new Error("lookup reached");
       });
       const request = new Request("https://models.example.test/v1/chat/completions", {
@@ -171,7 +189,7 @@ describe("openai-compatible provider", () => {
 
   it("carries a Request's method, headers and body through as init", async () => {
     let seen: { url: string; init?: RequestInit } | undefined;
-    const safeFetch = createOpenAiCompatibleFetch(async (input, init) => {
+    const safeFetch = createOpenAiCompatibleFetch(OWNER, async (input, init) => {
       seen = { url: String(input), init };
       return new Response("{}", { status: 200 });
     });
@@ -251,13 +269,77 @@ describe("openai-compatible provider", () => {
     expect(model?.contextWindow).toBe(65536);
   });
 
+  it("keeps private model servers to the deployment owner when probing and connecting", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return Response.json({ data: [{ id: "a" }] });
+    };
+    for (const baseUrl of ["http://127.0.0.1:3100", "http://10.255.255.254", "http://localhost"]) {
+      await expect(
+        probeOpenAiCompatibleModels({ baseUrl }, { allowPrivate: false, fetch: fetchImpl }),
+      ).rejects.toThrow("Only the server owner can use a model server on a private network");
+      expect(() =>
+        prepareOpenAiCompatibleConnect(
+          { provider: OPENAI_COMPATIBLE_PROVIDER_ID, baseUrl, modelId: "a" },
+          { allowPrivate: false },
+        ),
+      ).toThrow("private network");
+    }
+    expect(calls).toBe(0);
+    await expect(
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:3100" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
+    ).resolves.toEqual(["a"]);
+  });
+
+  it("reports one generic probe failure without private-network access", async () => {
+    const previous = process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
+    process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = "1";
+    try {
+      const failures: Array<typeof fetch> = [
+        async () => new Response("missing", { status: 404 }),
+        async () => {
+          throw new TypeError("fetch failed");
+        },
+        async () => {
+          throw new DOMException("The operation was aborted.", "AbortError");
+        },
+      ];
+      for (const fetchImpl of failures) {
+        await expect(
+          probeOpenAiCompatibleModels(
+            { baseUrl: "https://models.example.test/v1" },
+            { allowPrivate: false, fetch: fetchImpl },
+          ),
+        ).rejects.toThrow(
+          /^Could not list models\. You can still Connect with an explicit model id\.$/,
+        );
+      }
+      await expect(
+        probeOpenAiCompatibleModels(
+          { baseUrl: "https://models.example.test/v1" },
+          { ...OWNER, fetch: failures[0] },
+        ),
+      ).rejects.toThrow("Model server returned 404");
+    } finally {
+      if (previous === undefined) delete process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
+      else process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = previous;
+    }
+  });
+
   it("probes /v1/models with mocked fetch", async () => {
     const fetchImpl = async () =>
       new Response(JSON.stringify({ object: "list", data: [{ id: "a" }, { id: "b" }] }), {
         status: 200,
       });
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).resolves.toEqual(["a", "b"]);
   });
 
@@ -265,7 +347,10 @@ describe("openai-compatible provider", () => {
     const fetchImpl = async () =>
       new Response(JSON.stringify({ models: [{ id: "legacy" }] }), { status: 200 });
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).resolves.toEqual(["legacy"]);
   });
 
@@ -278,42 +363,60 @@ describe("openai-compatible provider", () => {
       });
     };
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/redirect.*explicit model id/is);
   });
 
   it("clarifies non-2xx probe failures with status and hand-fill hint", async () => {
     const fetchImpl = async () => new Response("nope", { status: 404 });
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/returned 404.*You can still Connect with an explicit model id/s);
   });
 
   it("clarifies missing models list with hand-fill hint", async () => {
     const fetchImpl = async () => new Response(JSON.stringify({ object: "list" }), { status: 200 });
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/did not include a models list.*explicit model id/s);
   });
 
   it("clarifies invalid JSON probe bodies with hand-fill hint", async () => {
     const fetchImpl = async () => new Response("{not-json", { status: 200 });
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/invalid JSON.*explicit model id/s);
   });
 
   it("clarifies empty probe responses with hand-fill hint", async () => {
     const fetchImpl = async () => new Response(null, { status: 200 });
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/empty response.*explicit model id/s);
   });
 
   it("rejects oversized model lists", async () => {
     const fetchImpl = async () => new Response("x".repeat(64 * 1024 + 1));
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/too large.*explicit model id/is);
   });
 
@@ -329,7 +432,10 @@ describe("openai-compatible provider", () => {
         { headers: { "content-length": String(64 * 1024 + 1) } },
       );
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/too large.*explicit model id/is);
     expect(cancelled).toBe(true);
   });
@@ -342,7 +448,10 @@ describe("openai-compatible provider", () => {
         });
       });
     await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        { ...OWNER, fetch: fetchImpl },
+      ),
     ).rejects.toThrow(/timed out.*explicit model id/is);
   });
 
@@ -355,8 +464,7 @@ describe("openai-compatible provider", () => {
     await expect(
       probeOpenAiCompatibleModels(
         { baseUrl: "http://127.0.0.1:8000/v1" },
-        fetchImpl,
-        caller.signal,
+        { ...OWNER, fetch: fetchImpl, signal: caller.signal },
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
   });

@@ -79,6 +79,8 @@ describe.skipIf(!databaseAvailable)("eval history accounting", () => {
                 signupsEnabled: "true",
                 composio,
                 encryptionKey: "offline-eval-history-encryption-key",
+                // Fixture users do not own the deployment; the loopback emulator is private.
+                mcpAllowPrivateEndpoint: true,
               }),
           },
         );
