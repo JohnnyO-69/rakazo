@@ -112,6 +112,19 @@ import {
 import { mountVoiceHttpRoutes } from "./voice.js";
 import { mountWebhookHttpRoutes } from "./webhook.js";
 
+/**
+ * Native clients always send the app scheme, including in Expo Go, so no
+ * exp:// origin is trusted: it would accept any Expo host as a redirect target.
+ * The loopback entries are the Expo web dev server.
+ */
+export const MOBILE_AUTH_ORIGINS = [
+  "rakazo://",
+  "http://localhost:8081",
+  "http://127.0.0.1:8081",
+  "http://localhost:19006",
+  "http://127.0.0.1:19006",
+];
+
 export interface AppHandles {
   app: Hono;
   prisma: PrismaClient;
@@ -339,15 +352,7 @@ export async function createApp(
     signupAllowlist: env.signupAllowlist,
     email,
     onEmailError: (error) => getLogger().error("transactional email delivery failed", error),
-    extraOrigins: [
-      "rakazo://",
-      "exp://",
-      "exp://*",
-      "http://localhost:8081",
-      "http://127.0.0.1:8081",
-      "http://localhost:19006",
-      "http://127.0.0.1:19006",
-    ],
+    extraOrigins: MOBILE_AUTH_ORIGINS,
     beforeDeleteUser: async (userId) => {
       const bots = await prisma.bot.findMany({
         where: { userId },
@@ -897,7 +902,7 @@ export async function createApp(
 function isTrustedOrigin(origin: string, env: AppEnv) {
   if (!origin) return true;
   if (origin === env.webOrigin || origin === env.apiUrl || origin === env.authUrl) return true;
-  if (origin.startsWith("rakazo://") || origin.startsWith("exp://")) return true;
+  if (origin.startsWith("rakazo://")) return true;
   try {
     const host = new URL(origin).hostname;
     return isLoopbackHost(host);
