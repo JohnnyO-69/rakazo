@@ -165,6 +165,27 @@ describe("mobile API authentication", () => {
     );
   });
 
+  it("keeps the session the server issues after revoking the others", async () => {
+    vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) =>
+      key === "rakazo.session_token" ? "session-token" : null,
+    );
+    await selectInitialSpace("space-default");
+    vi.mocked(resumeLiveNotifications).mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ token: "rotated-token", user: { id: "user-1" } })),
+    );
+
+    await changePassword("old-password", "new-password");
+
+    expect(SecureStore.setItemAsync).toHaveBeenCalledWith("rakazo.session_token", "rotated-token");
+    expect(resumeLiveNotifications).toHaveBeenCalledWith(
+      "http://127.0.0.1:3100",
+      "rotated-token",
+      "space-default",
+    );
+  });
+
   it("does not send a password or bearer token to a persisted public HTTP server", async () => {
     vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) => {
       if (key === "rakazo.api_base") return "http://app.example.test";

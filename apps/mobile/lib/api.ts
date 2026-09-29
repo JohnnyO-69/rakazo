@@ -458,6 +458,14 @@ export async function changePassword(currentPassword: string, newPassword: strin
     {},
   );
   if (!response.ok) throw new Error(responseErrorMessage(body, t("Could not change password")));
+  // Revoking other sessions also revokes this one; keep the replacement the server issued.
+  const token = tokenFromAuthResponse(response, body);
+  if (!token) return;
+  await saveSessionToken(token);
+  const spaceId = selectedSpaceId();
+  if (spaceId) {
+    await resumeLiveNotifications(currentApiBase(), token, spaceId).catch(() => undefined);
+  }
 }
 
 async function fetchMobileJson<T>(
