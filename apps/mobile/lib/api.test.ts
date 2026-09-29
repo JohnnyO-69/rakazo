@@ -222,7 +222,7 @@ describe("mobile API authentication", () => {
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith("rakazo.session_token", "rotated-token");
   });
 
-  it("keeps the rotated token in memory when the keychain write fails", async () => {
+  it("keeps the rotated token in memory and reports a failed keychain write", async () => {
     const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
     mockSecureStore(store);
     vi.stubGlobal(
@@ -231,7 +231,9 @@ describe("mobile API authentication", () => {
     );
     vi.mocked(SecureStore.setItemAsync).mockRejectedValue(new Error("keychain unavailable"));
 
-    await expect(changePassword("old-password", "new-password")).resolves.toBeUndefined();
+    await expect(changePassword("old-password", "new-password")).rejects.toThrow(
+      "keychain unavailable",
+    );
 
     await expect(authHeaders()).resolves.toMatchObject({ authorization: "Bearer rotated-token" });
   });
