@@ -468,12 +468,21 @@ export async function changePassword(currentPassword: string, newPassword: strin
   if (!token) return;
   // A sign-out or server switch changes the session while the request is in flight.
   if (currentApiBase() !== apiBase) return;
-  if (!(await replaceSessionTokenIfCurrent(generation, token))) return;
-  // Our save is the only change allowed; a sign-out during it must not restart notifications.
-  const spaceId = selectedSpaceId();
-  if (spaceId && currentSessionGeneration() === generation + 1) {
-    await resumeLiveNotifications(apiBase, token, spaceId).catch(() => undefined);
+  const maybeResume = async () => {
+    // Our save is the only change allowed; a sign-out during it must not restart notifications.
+    const spaceId = selectedSpaceId();
+    if (spaceId && currentSessionGeneration() === generation + 1) {
+      await resumeLiveNotifications(apiBase, token, spaceId).catch(() => undefined);
+    }
+  };
+  try {
+    if (!(await replaceSessionTokenIfCurrent(generation, token))) return;
+  } catch (error) {
+    // The replacement is already in memory; resume before the keychain error reaches the UI.
+    await maybeResume();
+    throw error;
   }
+  await maybeResume();
 }
 
 async function fetchMobileJson<T>(
