@@ -52,7 +52,11 @@ function fixture({
     authData: data,
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(
-      async (run: (tx: typeof prisma) => Promise<unknown>, options?: { timeout?: number }) => {
+      async (
+        run: ((tx: typeof prisma) => Promise<unknown>) | Promise<unknown>[],
+        options?: { timeout?: number },
+      ) => {
+        if (Array.isArray(run)) return Promise.all(run);
         if (!expireAdmissionGate || options?.timeout === undefined) return run(prisma);
         if (expireAdmissionGate === "before") throw new Error("admission gate timeout");
         const pending = run(prisma);
@@ -100,6 +104,9 @@ function fixture({
         },
       ),
     },
+    member: { findMany: vi.fn(async () => []) },
+    messagingIdentity: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+    organization: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     spaceMember: {
       findFirst: vi.fn(async ({ where }: { where: { userId: string } }) =>
         members.has(where.userId) ? { spaceId: "space-1" } : null,
@@ -384,7 +391,7 @@ describe("identity trust through auth endpoints", () => {
   });
 
   it("gates existing unverified sessions and auth mutations when the live allowlist is enabled", async () => {
-    const f = fixture();
+    const f = fixture({ delivery: false });
     const signedUp = await f.signup();
     const cookie = signedUp.headers.get("set-cookie")!.split(";")[0]!;
     const { token } = (await signedUp.json()) as { token: string };
@@ -397,21 +404,21 @@ describe("identity trust through auth endpoints", () => {
     ).toBeNull();
     expect((await f.request("/update-user", { name: "Changed" }, token)).status).toBe(401);
     expect((await f.signin()).status).toBe(403);
-    await f.verify();
+    f.data.user![0]!.emailVerified = true;
     expect((await f.signin()).status).toBe(200);
   });
 
   it("does not leak request-local verification settings when signup policy changes", async () => {
-    const f = fixture({ allowlist: "@example.test" });
-    expect(await (await f.signup()).json()).toMatchObject({ token: null });
-    f.policy.signupAllowlist = "";
+    const f = fixture({ delivery: false });
     expect(await (await f.signup("open@example.test")).json()).toMatchObject({
       token: expect.any(String),
     });
-    expect(f.messages).toHaveLength(1);
     f.policy.signupAllowlist = "@example.test";
-    expect(await (await f.signup("restricted@example.test")).json()).toMatchObject({ token: null });
-    expect(f.messages).toHaveLength(2);
+    expect((await f.signup("restricted@example.test")).status).toBe(400);
+    f.policy.signupAllowlist = "";
+    expect(await (await f.signup("open-again@example.test")).json()).toMatchObject({
+      token: expect.any(String),
+    });
   });
 
   it("reserves internal messaging emails across registration, recovery and email changes", async () => {
@@ -426,7 +433,10 @@ describe("identity trust through auth endpoints", () => {
       expect((await f.request("/send-verification-email", { email })).status).toBe(400);
     }
     expect(f.data.user).toHaveLength(0);
-    const { token } = (await (await f.signup()).json()) as { token: string };
+    expect(f.messages).toHaveLength(0);
+    await f.signup();
+    await f.verify();
+    const { token } = (await (await f.signin()).json()) as { token: string };
     expect(
       (await f.request("/change-email", { newEmail: "msg-taken@messaging.invalid" }, token)).status,
     ).toBe(400);
@@ -434,6 +444,108 @@ describe("identity trust through auth endpoints", () => {
     f.data.user![0]!.email = "msg-taken@messaging.invalid";
     expect(await (await f.request("/get-session", undefined, token)).json()).toBeNull();
     expect((await f.request("/update-user", { name: "Changed" }, token)).status).toBe(401);
-    expect(f.messages).toHaveLength(0);
+  });
+
+  it("requires mailbox proof for open registration once the deployment can send email", async () => {
+    const f = fixture();
+    const response = await f.signup();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toMatchObject({ token: null, user: { emailVerified: false } });
+    expect(f.data.session).toHaveLength(0);
+    expect(bootstrapUserSpace).not.toHaveBeenCalled();
+    expect((await f.signin()).status).toBe(403);
+    await f.verify();
+    const signedIn = await f.signin();
+    expect(signedIn.status).toBe(200);
+    expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers signup for a registered email exactly like a new one", async () => {
+    const f = fixture();
+    const first = await f.signup();
+    const again = await f.signup();
+    expect(again.status).toBe(first.status);
+    expect(again.headers.get("set-cookie")).toBeNull();
+    type Body = { token: unknown; user: Record<string, unknown> };
+    const firstBody = (await first.json()) as Body;
+    const againBody = (await again.json()) as Body;
+    expect(againBody.token).toBeNull();
+    // Postgres returns a null image; the offline adapter omits it.
+    expect(Object.keys(againBody.user).sort()).toEqual(
+      Object.keys({ image: null, ...firstBody.user }).sort(),
+    );
+    expect(againBody.user.id).not.toBe(firstBody.user.id);
+    expect(f.data.user).toHaveLength(1);
+    expect(f.messages).toHaveLength(1);
+  });
+
+  it("stops resolving unverified sessions once the deployment can send email", async () => {
+    const f = fixture();
+    const now = new Date();
+    f.data.user!.push({
+      id: "legacy-user",
+      name: "Legacy",
+      email: "legacy@example.test",
+      emailVerified: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    f.data.session!.push({
+      id: "legacy-session",
+      token: "legacy-session-token",
+      userId: "legacy-user",
+      expiresAt: new Date(now.getTime() + 60_000),
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(
+      await f.auth.api.getSession({
+        headers: new Headers({ authorization: "Bearer legacy-session-token" }),
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("session credentials", () => {
+  it("lists and reads sessions without handing out their tokens", async () => {
+    const f = fixture({ delivery: false });
+    await f.signup();
+    const tokens: string[] = [];
+    for (let i = 0; i < 2; i += 1) {
+      tokens.push(((await (await f.signin()).json()) as { token: string }).token);
+    }
+    const listed = await f.request("/list-sessions", undefined, tokens[0]);
+    expect(listed.status).toBe(200);
+    const text = await listed.text();
+    const sessions = JSON.parse(text) as Array<Record<string, unknown>>;
+    expect(sessions.length).toBeGreaterThanOrEqual(2);
+    for (const session of sessions) {
+      expect(session).toMatchObject({ id: expect.any(String), userId: expect.any(String) });
+      expect(session).not.toHaveProperty("token");
+    }
+    for (const token of tokens) expect(text).not.toContain(token);
+
+    const current = await f.request("/get-session", undefined, tokens[0]);
+    const body = (await current.json()) as { session: Record<string, unknown>; user: unknown };
+    expect(body.user).toMatchObject({ email: "approved@example.test" });
+    expect(body.session).not.toHaveProperty("token");
+    const server = await f.auth.api.getSession({
+      headers: new Headers({ authorization: `Bearer ${tokens[1]}` }),
+    });
+    expect(server?.session).not.toHaveProperty("token");
+  });
+
+  it("requires the password to delete an account, even from a fresh session", async () => {
+    const f = fixture({ delivery: false });
+    const { token } = (await (await f.signup()).json()) as { token: string };
+    for (const body of [{}, { password: "" }, { password: "wrong-password12" }]) {
+      const response = await f.request("/delete-user", body, token);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(f.data.user).toHaveLength(1);
+    }
+    const deleted = await f.request("/delete-user", { password: "offline-password12" }, token);
+    expect(deleted.status).toBe(200);
+    expect(f.data.user).toHaveLength(0);
   });
 });

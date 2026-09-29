@@ -1,9 +1,9 @@
 import type { TransactionalEmail, TransactionalEmailProvider } from "@rakazo/adapter-kit";
 import {
-  allowlistedSignupAdmission,
   emailAllowed,
   firstAccountClaimDecision,
   isMessagingEmail,
+  mailboxProofRequired,
   parseAllowlist,
   signupPolicyFromEnv,
 } from "@rakazo/core";
@@ -238,7 +238,11 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
               "callbackURL",
               new URL("/sign-in", env.webOrigin).href,
             );
-            await env.email!.send(verificationEmail(user.email, verificationUrl.href));
+            // Do not await delivery: signup for a new address must take as long
+            // as the generic reply for an existing one.
+            void env.email
+              ?.send(verificationEmail(user.email, verificationUrl.href))
+              .catch((error) => env.onEmailError?.(error));
           }
         : undefined,
     },
@@ -292,11 +296,24 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             throw new APIError("BAD_REQUEST", { message: "Email is not available" });
           }
         }
+        // Better Auth skips the password for a session under a day old, so a
+        // borrowed session alone could delete the account.
+        if (ctx.path === "/delete-user" && !ctx.body?.password) {
+          throw new APIError("BAD_REQUEST", {
+            message: "Invalid password",
+            code: "INVALID_PASSWORD",
+          });
+        }
+        const hasEmailDelivery = Boolean(env.email);
         let policy =
           ctx.path === "/sign-up/email" || ctx.path === "/sign-in/email"
             ? await resolveSignupPolicy(prisma, env)
             : undefined;
-        let requireEmailVerification = false;
+        // With verification required, Better Auth also answers signup for an
+        // existing address with the same pending reply as for a new one.
+        let requireEmailVerification = policy
+          ? mailboxProofRequired({ allowlistSize: policy.allowlist.length, hasEmailDelivery })
+          : false;
         if (ctx.path === "/sign-up/email") {
           if (!policy?.enabled) {
             throw new APIError("BAD_REQUEST", { message: "Registration is closed" });
@@ -305,7 +322,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
           if (!emailAllowed(email, policy.allowlist)) {
             throw new APIError("BAD_REQUEST", { message: "Email is not allowed to register" });
           }
-          if (policy.allowlist.length > 0 && !env.email) {
+          if (policy.allowlist.length > 0 && !hasEmailDelivery) {
             const held = await holdFirstAccountGate(prisma);
             if (held.admission === "needs-delivery") {
               await held.release();
@@ -315,16 +332,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             }
             rememberSignupGate(email, held.release);
             requireEmailVerification = false;
-          } else {
-            requireEmailVerification =
-              allowlistedSignupAdmission({
-                allowlistSize: policy.allowlist.length,
-                hasEmailDelivery: Boolean(env.email),
-                existingHumanCount: 0,
-              }) === "verify";
           }
-        } else if (policy) {
-          requireEmailVerification = policy.allowlist.length > 0;
         }
         // Return a request-local override; mutating the shared auth options
         // would leak a concurrent request's policy into another signup.
@@ -346,6 +354,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
                   const session = await ctx.context.internalAdapter.findSession(token);
                   if (!session || isMessagingEmail(session.user.email)) return null;
                   if (session.user.emailVerified) return session;
+                  if (hasEmailDelivery) return null;
                   policy ??= await resolveSignupPolicy(prisma, env);
                   return policy.allowlist.length === 0 ? session : null;
                 },
@@ -358,6 +367,8 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
         if (ctx.path === "/sign-up/email") {
           await releaseSignupGate(String(ctx.body?.email ?? ""));
         }
+        const redacted = withoutSessionTokens(ctx.path, ctx.context.returned);
+        if (redacted) return ctx.json(redacted);
       }),
     },
     databaseHooks: {
@@ -370,7 +381,13 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             if (!user || isMessagingEmail(user.email)) {
               throw new APIError("FORBIDDEN", { message: "Email verification required" });
             }
-            if (!user.emailVerified && policy.allowlist.length > 0) {
+            if (
+              !user.emailVerified &&
+              mailboxProofRequired({
+                allowlistSize: policy.allowlist.length,
+                hasEmailDelivery: Boolean(env.email),
+              })
+            ) {
               if (env.email || !emailAllowed(user.email, policy.allowlist)) {
                 throw new APIError("FORBIDDEN", { message: "Email verification required" });
               }
@@ -454,6 +471,38 @@ function escapeHtml(value: string): string {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * A session token is a bearer credential. Session reads describe sessions
+ * without handing any of them out; sign-in and sign-up still return the token
+ * they just issued. Returns the redacted body, or undefined to keep it.
+ */
+function withoutSessionTokens(
+  path: string,
+  returned: unknown,
+): Record<string, unknown> | unknown[] | undefined {
+  if (path === "/list-sessions" && Array.isArray(returned)) {
+    return returned.map(withoutToken);
+  }
+  if (
+    (path === "/get-session" || path === "/update-session") &&
+    isRecord(returned) &&
+    isRecord(returned.session)
+  ) {
+    return { ...returned, session: withoutToken(returned.session) };
+  }
+  return undefined;
+}
+
+function withoutToken(session: unknown): unknown {
+  if (!isRecord(session)) return session;
+  const { token: _token, ...rest } = session;
+  return rest;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 /** Assemble Better Auth trustedOrigins, adding localhost↔127.0.0.1 twins for loopback. */
 export function buildTrustedOrigins(env: Pick<AuthEnv, "webOrigin" | "baseURL" | "extraOrigins">) {
