@@ -73,7 +73,16 @@ export async function replaceSessionTokenIfCurrent(
   token: string,
 ): Promise<boolean> {
   if (generation !== sessionGeneration) return false;
-  await saveSessionToken(token);
+  try {
+    await saveSessionToken(token);
+  } catch {
+    // The server already revoked the stored token; keep the replacement in memory unless
+    // something else changed the session meanwhile.
+    if (sessionGeneration === generation + 1) {
+      sessionInvalidated = false;
+      sessionFallback = token;
+    }
+  }
   return true;
 }
 
