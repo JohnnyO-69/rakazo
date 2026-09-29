@@ -10,9 +10,7 @@ describe.each(caddyfiles)("%s HSTS", (filename) => {
   const httpsSite = config.slice(config.lastIndexOf("{$RAKAZO_HOST:app.example.com} {"));
 
   it("sends HSTS from the HTTPS site without preloading", () => {
-    expect(httpsSite).toContain(
-      'header @hsts Strict-Transport-Security "max-age=31536000; includeSubDomains"',
-    );
+    expect(httpsSite).toContain('header @hsts Strict-Transport-Security "max-age=31536000"');
     expect(config).not.toContain("preload");
   });
 
