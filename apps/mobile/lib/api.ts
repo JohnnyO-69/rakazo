@@ -444,14 +444,19 @@ export async function requestPasswordReset(email: string, redirectTo: string): P
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const apiBase = currentApiBase();
+  const headers = await authHeaders();
+  const sessionToken = headers.authorization?.startsWith("Bearer ")
+    ? headers.authorization.slice("Bearer ".length)
+    : "";
   const { response, body } = await fetchMobileJson<unknown>(
-    `${currentApiBase()}/api/auth/change-password`,
+    `${apiBase}/api/auth/change-password`,
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
         origin: "rakazo://",
-        ...(await authHeaders()),
+        ...headers,
       },
       body: JSON.stringify({ currentPassword, newPassword, revokeOtherSessions: true }),
     },
@@ -461,10 +466,13 @@ export async function changePassword(currentPassword: string, newPassword: strin
   // Revoking other sessions also revokes this one; keep the replacement the server issued.
   const token = tokenFromAuthResponse(response, body);
   if (!token) return;
+  // A sign-out or server switch can clear this session while the request is in flight.
+  const storedToken = await loadSessionToken();
+  if (currentApiBase() !== apiBase || storedToken !== sessionToken) return;
   await saveSessionToken(token);
   const spaceId = selectedSpaceId();
   if (spaceId) {
-    await resumeLiveNotifications(currentApiBase(), token, spaceId).catch(() => undefined);
+    await resumeLiveNotifications(apiBase, token, spaceId).catch(() => undefined);
   }
 }
 

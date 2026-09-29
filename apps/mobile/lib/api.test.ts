@@ -186,6 +186,60 @@ describe("mobile API authentication", () => {
     );
   });
 
+  it("drops a rotated token when sign-out clears the session before the response", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    await selectSpace("space-default");
+    vi.mocked(resumeLiveNotifications).mockClear();
+    const { fetchMock, resolveFetch, fetchStarted } = deferredFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = changePassword("old-password", "new-password");
+    await fetchStarted;
+    await clearSessionToken();
+    resolveFetch(jsonResponse({ token: "rotated-token", user: { id: "user-1" } }));
+    await pending;
+
+    expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(
+      "rakazo.session_token",
+      "rotated-token",
+    );
+    expect(resumeLiveNotifications).not.toHaveBeenCalled();
+  });
+
+  it("drops a rotated token when the server changes before the response", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    await selectSpace("space-default");
+    vi.mocked(resumeLiveNotifications).mockClear();
+    const { fetchMock, resolveFetch, fetchStarted } = deferredFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = changePassword("old-password", "new-password");
+    try {
+      await fetchStarted;
+      await expect(saveApiBase("https://second-server.example")).resolves.toMatchObject({
+        ok: true,
+      });
+      resolveFetch(jsonResponse({ token: "rotated-token", user: { id: "user-1" } }));
+      await pending;
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:3100/api/auth/change-password",
+        expect.objectContaining({
+          headers: expect.objectContaining({ authorization: "Bearer session-token" }),
+        }),
+      );
+      expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(
+        "rakazo.session_token",
+        "rotated-token",
+      );
+      expect(resumeLiveNotifications).not.toHaveBeenCalled();
+    } finally {
+      await resetApiBase();
+    }
+  });
+
   it("does not send a password or bearer token to a persisted public HTTP server", async () => {
     vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) => {
       if (key === "rakazo.api_base") return "http://app.example.test";
@@ -2333,6 +2387,36 @@ describe("mobile thread event reduction", () => {
     expect(applyMobileThreadEvent(null, { type: "thread.progress" })).toBeNull();
   });
 });
+
+function mockSecureStore(store: Map<string, string>) {
+  vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) => store.get(key) ?? null);
+  vi.mocked(SecureStore.deleteItemAsync).mockImplementation(async (key) => {
+    store.delete(key);
+  });
+  vi.mocked(SecureStore.setItemAsync).mockImplementation(async (key, value) => {
+    store.set(key, value);
+  });
+}
+
+function deferredFetch() {
+  let resolveFetch: (response: Response) => void = () => undefined;
+  let markStarted: () => void = () => undefined;
+  const fetchStarted = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const fetchMock = vi.fn(
+    () =>
+      new Promise<Response>((resolveResponse) => {
+        resolveFetch = resolveResponse;
+        markStarted();
+      }),
+  );
+  return {
+    fetchMock,
+    fetchStarted,
+    resolveFetch: (response: Response) => resolveFetch(response),
+  };
+}
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(body), {
