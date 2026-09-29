@@ -36,7 +36,9 @@ import { t } from "./i18n";
 import { resumeLiveNotifications } from "./live-notifications";
 import {
   clearSessionToken,
+  currentSessionGeneration,
   loadSessionToken,
+  replaceSessionTokenIfCurrent,
   restoreSessionToken,
   saveSessionToken,
   snapshotSessionToken,
@@ -445,10 +447,8 @@ export async function requestPasswordReset(email: string, redirectTo: string): P
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   const apiBase = currentApiBase();
+  const generation = currentSessionGeneration();
   const headers = await authHeaders();
-  const sessionToken = headers.authorization?.startsWith("Bearer ")
-    ? headers.authorization.slice("Bearer ".length)
-    : "";
   const { response, body } = await fetchMobileJson<unknown>(
     `${apiBase}/api/auth/change-password`,
     {
@@ -466,12 +466,12 @@ export async function changePassword(currentPassword: string, newPassword: strin
   // Revoking other sessions also revokes this one; keep the replacement the server issued.
   const token = tokenFromAuthResponse(response, body);
   if (!token) return;
-  // A sign-out or server switch can clear this session while the request is in flight.
-  const storedToken = await loadSessionToken();
-  if (currentApiBase() !== apiBase || storedToken !== sessionToken) return;
-  await saveSessionToken(token);
+  // A sign-out or server switch changes the session while the request is in flight.
+  if (currentApiBase() !== apiBase) return;
+  if (!(await replaceSessionTokenIfCurrent(generation, token))) return;
+  // Our save is the only change allowed; a sign-out during it must not restart notifications.
   const spaceId = selectedSpaceId();
-  if (spaceId) {
+  if (spaceId && currentSessionGeneration() === generation + 1) {
     await resumeLiveNotifications(apiBase, token, spaceId).catch(() => undefined);
   }
 }

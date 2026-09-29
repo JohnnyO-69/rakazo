@@ -207,6 +207,21 @@ describe("mobile API authentication", () => {
     expect(resumeLiveNotifications).not.toHaveBeenCalled();
   });
 
+  it("keeps the rotated token when the session store is unreadable at response time", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    const { fetchMock, resolveFetch, fetchStarted } = deferredFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = changePassword("old-password", "new-password");
+    await fetchStarted;
+    vi.mocked(SecureStore.getItemAsync).mockRejectedValue(new Error("keychain locked"));
+    resolveFetch(jsonResponse({ token: "rotated-token", user: { id: "user-1" } }));
+    await pending;
+
+    expect(SecureStore.setItemAsync).toHaveBeenCalledWith("rakazo.session_token", "rotated-token");
+  });
+
   it("drops a rotated token when the server changes before the response", async () => {
     const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
     mockSecureStore(store);
