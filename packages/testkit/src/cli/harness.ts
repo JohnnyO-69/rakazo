@@ -76,8 +76,6 @@ async function main() {
     process.env.DATA_DIR = path.join(reportDir, "data");
     process.env.SIGNUPS_ENABLED = "true";
     process.env.SIGNUP_ALLOWLIST = "";
-    // Specs sign up users who do not own the deployment and point them at loopback model servers.
-    process.env.MCP_ALLOW_PRIVATE_ENDPOINT = "true";
     process.env.CI = "1";
 
     execSync("pnpm --filter @rakazo/db generate", { stdio: "inherit", env: process.env });

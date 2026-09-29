@@ -272,10 +272,7 @@ import {
   renderPlotSpecToSvg,
   searchChartCatalog,
 } from "./plot-tool.js";
-import {
-  actorMayUsePrivateEndpoint,
-  assertUserMayUseOpenAiCompatibleEndpoint,
-} from "./private-endpoint.js";
+import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
@@ -598,7 +595,7 @@ export interface ExecutorDeps {
   /** Page browser (DOM refs) on the bot computer. Defaults to the sandbox live browser when supported. */
   browser?: BrowserProvider;
   secretHttp?: RemoteTransportDependencies;
-  /** Let every user reach loopback / LAN endpoints (MCP, connectors, model servers), not just the owner. */
+  /** Allow RFC1918 / Docker-network MCP URLs when the deployment owner enabled the escape. */
   mcpAllowPrivateEndpoint?: boolean;
   /** Remote cloud coding agents. Null/omit means tools stay uninjected. */
   cloudAgent?: CloudAgentConnection | null;
@@ -5570,21 +5567,6 @@ async function resolveModelKey(
         if (!liveListed) throw new UnavailableModelForAuthError(authError);
       }
       resolved ??= await resolveAuth();
-      if (resolved.secret.kind === "openai_compatible") {
-        try {
-          await assertUserMayUseOpenAiCompatibleEndpoint(
-            deps.prisma,
-            userId,
-            resolved.secret.baseUrl,
-            deps.mcpAllowPrivateEndpoint === true,
-          );
-        } catch (error) {
-          // A configuration error: fail the run with the reason instead of retrying setup.
-          throw new UnavailableModelForAuthError(
-            error instanceof Error ? error.message : undefined,
-          );
-        }
-      }
       const oauth = resolved.secret.kind === "oauth" ? resolved.secret.credential : undefined;
       const baseUrl =
         resolved.secret.kind === "openai_compatible" ? resolved.secret.baseUrl : undefined;

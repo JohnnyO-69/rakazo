@@ -1017,7 +1017,6 @@ export function createRouter(deps: RouterDeps) {
           }
           plaintext = buildModelConnectPlaintext(input, previousPlaintext, {
             omitVisionModelIds,
-            allowPrivateEndpoint: mayUsePrivateEndpoint(context.actor, deps),
           });
         } catch (error) {
           throw new ORPCError("BAD_REQUEST", {
@@ -1041,10 +1040,7 @@ export function createRouter(deps: RouterDeps) {
       probeOpenAiCompatible: authed.models.probeOpenAiCompatible.handler(
         async ({ context, input }) => {
           try {
-            const models = await probeOpenAiCompatibleModels(input, {
-              allowPrivate: mayUsePrivateEndpoint(context.actor, deps),
-              signal: context.signal,
-            });
+            const models = await probeOpenAiCompatibleModels(input, undefined, context.signal);
             return { models };
           } catch (error) {
             throw new ORPCError("BAD_REQUEST", {

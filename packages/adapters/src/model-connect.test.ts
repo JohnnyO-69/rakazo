@@ -2,15 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModelConnectPlaintext, modelCredentialDto } from "./model-connect.js";
 import { parseModelSecret, serializeModelSecret } from "./pi-oauth.js";
 
-/** The deployment owner may save private-network model servers. */
-function connectAsOwner(
-  input: Parameters<typeof buildModelConnectPlaintext>[0],
-  previous?: string,
-  options?: { omitVisionModelIds?: boolean },
-): string {
-  return buildModelConnectPlaintext(input, previous, { ...options, allowPrivateEndpoint: true });
-}
-
 describe("built-in provider output limits", () => {
   const row = {
     id: "cred-builtin",
@@ -20,7 +11,7 @@ describe("built-in provider output limits", () => {
   };
 
   it("stores an output-token limit with an API key", () => {
-    const plaintext = connectAsOwner({
+    const plaintext = buildModelConnectPlaintext({
       provider: "anthropic",
       apiKey: "sk-test-key",
       maxTokens: 16384,
@@ -36,7 +27,7 @@ describe("built-in provider output limits", () => {
 
   it("keeps a raw API key when no limit is configured", () => {
     expect(
-      connectAsOwner({
+      buildModelConnectPlaintext({
         provider: "anthropic",
         apiKey: "sk-test-key",
       }),
@@ -44,12 +35,15 @@ describe("built-in provider output limits", () => {
   });
 
   it("updates the limit without replacing the key", () => {
-    const previous = connectAsOwner({
+    const previous = buildModelConnectPlaintext({
       provider: "anthropic",
       apiKey: "sk-test-key",
       maxTokens: 8192,
     });
-    const updated = connectAsOwner({ provider: "anthropic", maxTokens: 16384 }, previous);
+    const updated = buildModelConnectPlaintext(
+      { provider: "anthropic", maxTokens: 16384 },
+      previous,
+    );
     expect(parseModelSecret(updated)).toEqual({
       kind: "api_key",
       key: "sk-test-key",
@@ -58,25 +52,25 @@ describe("built-in provider output limits", () => {
   });
 
   it("clears the limit without replacing the key", () => {
-    const previous = connectAsOwner({
+    const previous = buildModelConnectPlaintext({
       provider: "anthropic",
       apiKey: "sk-test-key",
       maxTokens: 8192,
     });
-    expect(connectAsOwner({ provider: "anthropic", maxTokens: null }, previous)).toBe(
+    expect(buildModelConnectPlaintext({ provider: "anthropic", maxTokens: null }, previous)).toBe(
       "sk-test-key",
     );
   });
 
   it("preserves the limit when a replacement key omits it", () => {
-    const previous = connectAsOwner({
+    const previous = buildModelConnectPlaintext({
       provider: "anthropic",
       apiKey: "sk-test-key",
       maxTokens: 8192,
     });
     expect(
       parseModelSecret(
-        connectAsOwner({ provider: "anthropic", apiKey: "sk-new-key-value" }, previous),
+        buildModelConnectPlaintext({ provider: "anthropic", apiKey: "sk-new-key-value" }, previous),
       ),
     ).toEqual({ kind: "api_key", key: "sk-new-key-value", maxTokens: 8192 });
   });
@@ -90,12 +84,16 @@ describe("built-in provider output limits", () => {
     };
     const previous = serializeModelSecret({ kind: "oauth", credential });
     expect(
-      parseModelSecret(connectAsOwner({ provider: "openai-codex", maxTokens: 8192 }, previous)),
+      parseModelSecret(
+        buildModelConnectPlaintext({ provider: "openai-codex", maxTokens: 8192 }, previous),
+      ),
     ).toEqual({ kind: "oauth", credential, maxTokens: 8192 });
   });
 
   it("rejects a limit update when no credential exists", () => {
-    expect(() => connectAsOwner({ provider: "anthropic", maxTokens: 8192 })).toThrow(/API key/);
+    expect(() => buildModelConnectPlaintext({ provider: "anthropic", maxTokens: 8192 })).toThrow(
+      /API key/,
+    );
   });
 });
 
@@ -106,36 +104,41 @@ describe("openai-codex API key guard", () => {
   });
 
   it("rejects an API key because the Codex transport needs the sign-in JWT", () => {
-    expect(() => connectAsOwner({ provider: "openai-codex", apiKey: "sk-test-key-123" })).toThrow(
-      /ChatGPT subscription sign-in is required/,
-    );
+    expect(() =>
+      buildModelConnectPlaintext({ provider: "openai-codex", apiKey: "sk-test-key-123" }),
+    ).toThrow(/ChatGPT subscription sign-in is required/);
   });
 
   it("rejects replacing a ChatGPT sign-in with an API key", () => {
     expect(() =>
-      connectAsOwner({ provider: "openai-codex", apiKey: "sk-test-key-123" }, codexOauth),
+      buildModelConnectPlaintext(
+        { provider: "openai-codex", apiKey: "sk-test-key-123" },
+        codexOauth,
+      ),
     ).toThrow(/ChatGPT subscription sign-in is required/);
   });
 
   it("points a keyless first connect at subscription sign-in instead of asking for a key", () => {
-    expect(() => connectAsOwner({ provider: "openai-codex", maxTokens: 8192 })).toThrow(
+    expect(() => buildModelConnectPlaintext({ provider: "openai-codex", maxTokens: 8192 })).toThrow(
       /ChatGPT subscription sign-in is required/,
     );
   });
 
   it("rejects re-saving a legacy stored API key on a keyless connect", () => {
-    const legacyKey = connectAsOwner({
+    const legacyKey = buildModelConnectPlaintext({
       provider: "anthropic",
       apiKey: "sk-legacy-key",
     });
-    expect(() => connectAsOwner({ provider: "openai-codex", maxTokens: 8192 }, legacyKey)).toThrow(
-      /ChatGPT subscription sign-in is required/,
-    );
+    expect(() =>
+      buildModelConnectPlaintext({ provider: "openai-codex", maxTokens: 8192 }, legacyKey),
+    ).toThrow(/ChatGPT subscription sign-in is required/);
   });
 
   it("carries a previous ChatGPT sign-in forward when only the output limit changes", () => {
     expect(
-      parseModelSecret(connectAsOwner({ provider: "openai-codex", maxTokens: 8192 }, codexOauth)),
+      parseModelSecret(
+        buildModelConnectPlaintext({ provider: "openai-codex", maxTokens: 8192 }, codexOauth),
+      ),
     ).toEqual({
       kind: "oauth",
       credential: { type: "oauth", access: "access", refresh: "refresh", expires: 10 },
@@ -144,7 +147,7 @@ describe("openai-codex API key guard", () => {
   });
 
   it("keeps other providers' API keys working", () => {
-    expect(connectAsOwner({ provider: "anthropic", apiKey: "sk-test-key-123" })).toBe(
+    expect(buildModelConnectPlaintext({ provider: "anthropic", apiKey: "sk-test-key-123" })).toBe(
       "sk-test-key-123",
     );
   });
@@ -291,7 +294,7 @@ describe("modelCredentialDto", () => {
 it.each([true, false])(
   "persists generic reasoning capability %s with the connection",
   (reasoning) => {
-    const plaintext = connectAsOwner({
+    const plaintext = buildModelConnectPlaintext({
       provider: "openai-compatible",
       baseUrl: "http://localhost:8000/v1",
       modelId: "arbitrary-model",
@@ -323,7 +326,7 @@ it.each([true, false])(
 it.each([null, "low", "high"] as const)(
   "round-trips the nullable custom reasoning effort %s",
   (thinkingLevel) => {
-    const plaintext = connectAsOwner({
+    const plaintext = buildModelConnectPlaintext({
       provider: "openai-compatible",
       baseUrl: "http://localhost:8000/v1",
       modelId: "arbitrary-model",
@@ -365,19 +368,26 @@ describe("compatible connection updates", () => {
 
   it("preserves a saved key on a capability-only update to the same normalized URL", () => {
     expect(
-      parseModelSecret(connectAsOwner({ ...input, baseUrl: "http://localhost:8000" }, previous)),
+      parseModelSecret(
+        buildModelConnectPlaintext({ ...input, baseUrl: "http://localhost:8000" }, previous),
+      ),
     ).toMatchObject({ apiKey: "fake-saved-key", reasoning: true });
   });
   it("does not transfer a saved key to a different endpoint", () => {
     expect(
-      parseModelSecret(connectAsOwner({ ...input, baseUrl: "http://localhost:8001/v1" }, previous)),
+      parseModelSecret(
+        buildModelConnectPlaintext({ ...input, baseUrl: "http://localhost:8001/v1" }, previous),
+      ),
     ).not.toHaveProperty("apiKey");
   });
 
   it("keeps image capability scoped to each explicitly enabled model", () => {
-    const vision = connectAsOwner({ ...input, supportsImages: true });
-    const text = connectAsOwner({ ...input, modelId: "text-model", supportsImages: false }, vision);
-    const nextVision = connectAsOwner(
+    const vision = buildModelConnectPlaintext({ ...input, supportsImages: true });
+    const text = buildModelConnectPlaintext(
+      { ...input, modelId: "text-model", supportsImages: false },
+      vision,
+    );
+    const nextVision = buildModelConnectPlaintext(
       { ...input, modelId: "another-vision-model", supportsImages: true },
       text,
     );
@@ -390,21 +400,21 @@ describe("compatible connection updates", () => {
     });
   });
   it("persists the image limit while preserving it on connection updates", () => {
-    const configured = connectAsOwner({
+    const configured = buildModelConnectPlaintext({
       ...input,
       maxImagesPerPrompt: 1,
     });
-    const updated = connectAsOwner({ ...input, reasoning: false }, configured);
+    const updated = buildModelConnectPlaintext({ ...input, reasoning: false }, configured);
 
     expect(parseModelSecret(configured)).toMatchObject({ maxImagesPerPrompt: 1 });
     expect(parseModelSecret(updated)).toMatchObject({ maxImagesPerPrompt: 1 });
   });
   it("clears a saved image limit when explicitly requested", () => {
-    const configured = connectAsOwner({
+    const configured = buildModelConnectPlaintext({
       ...input,
       maxImagesPerPrompt: 1,
     });
-    const cleared = connectAsOwner(
+    const cleared = buildModelConnectPlaintext(
       {
         ...input,
         maxImagesPerPrompt: null,
@@ -416,21 +426,21 @@ describe("compatible connection updates", () => {
   });
 
   it("persists the output-token limit while preserving it on connection updates", () => {
-    const configured = connectAsOwner({
+    const configured = buildModelConnectPlaintext({
       ...input,
       maxTokens: 8192,
     });
-    const updated = connectAsOwner({ ...input, reasoning: false }, configured);
+    const updated = buildModelConnectPlaintext({ ...input, reasoning: false }, configured);
 
     expect(parseModelSecret(configured)).toMatchObject({ maxTokens: 8192 });
     expect(parseModelSecret(updated)).toMatchObject({ maxTokens: 8192 });
   });
   it("persists the context window while preserving it on connection updates", () => {
-    const configured = connectAsOwner({
+    const configured = buildModelConnectPlaintext({
       ...input,
       contextWindow: 65536,
     });
-    const updated = connectAsOwner({ ...input, reasoning: false }, configured);
+    const updated = buildModelConnectPlaintext({ ...input, reasoning: false }, configured);
 
     expect(parseModelSecret(configured)).toMatchObject({ contextWindow: 65536 });
     expect(parseModelSecret(updated)).toMatchObject({ contextWindow: 65536 });
@@ -438,14 +448,14 @@ describe("compatible connection updates", () => {
   it.each(["", "fake-replacement-key"])(
     "honors an explicit key replacement or removal",
     (apiKey) => {
-      const saved = parseModelSecret(connectAsOwner({ ...input, apiKey }, previous));
+      const saved = parseModelSecret(buildModelConnectPlaintext({ ...input, apiKey }, previous));
       if (apiKey) expect(saved).toHaveProperty("apiKey", apiKey);
       else expect(saved).not.toHaveProperty("apiKey");
     },
   );
   it("omits visionModelIds when prior plaintext is unavailable during key replacement", () => {
     const saved = parseModelSecret(
-      connectAsOwner(
+      buildModelConnectPlaintext(
         { ...input, apiKey: "fake-replacement-key", supportsImages: true },
         undefined,
         { omitVisionModelIds: true },
@@ -465,7 +475,10 @@ describe("compatible connection updates", () => {
       visionModelIds: ["bot-vision-model", "another-vision-model"],
     });
     const saved = parseModelSecret(
-      connectAsOwner({ ...input, apiKey: "fake-replacement-key", supportsImages: true }, prior),
+      buildModelConnectPlaintext(
+        { ...input, apiKey: "fake-replacement-key", supportsImages: true },
+        prior,
+      ),
     );
     expect(saved).toMatchObject({
       apiKey: "fake-replacement-key",
@@ -476,6 +489,6 @@ describe("compatible connection updates", () => {
     vi.stubEnv("RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC", "1");
     const baseUrl = "http://example.invalid/v1";
     const legacy = serializeModelSecret({ kind: "openai_compatible", baseUrl, apiKey: "fake-key" });
-    expect(() => connectAsOwner({ ...input, baseUrl }, legacy)).toThrow(/HTTPS/);
+    expect(() => buildModelConnectPlaintext({ ...input, baseUrl }, legacy)).toThrow(/HTTPS/);
   });
 });

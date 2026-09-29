@@ -518,7 +518,7 @@ describe("MCP loopback endpoints", () => {
   });
 });
 
-describe("private API connectors and model servers", () => {
+describe("private API connectors", () => {
   function privateDeps(mcpAllowPrivateEndpoint = false) {
     const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
       ...data,
@@ -597,20 +597,6 @@ describe("private API connectors and model servers", () => {
 
     expect(response.status).toBe(400);
     expect(create).not.toHaveBeenCalled();
-  });
-
-  it("refuses to probe a private model server for a user who is not the deployment owner", async () => {
-    const { handler } = privateDeps();
-    const { response } = await handler.handle(
-      rpc("models/probeOpenAiCompatible", { baseUrl: "http://127.0.0.1:3100" }),
-      { prefix: "/rpc", context: { actor: actor(false) } },
-    );
-
-    expect(response.status).toBe(400);
-    const body = (await response.json()) as { json: { message: string } };
-    expect(body.json.message).toBe(
-      "Only the server owner can use a model server on a private network",
-    );
   });
 });
 

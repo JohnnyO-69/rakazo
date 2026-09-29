@@ -8,15 +8,6 @@ import { resolveModelAuth } from "./pi-oauth.js";
 import { OPENAI_COMPATIBLE_PROVIDER_ID } from "./pi-openai-compatible-provider.js";
 import { modelsForRequest, resolveRuntimeModel } from "./pi-runtime.js";
 
-/** The deployment owner may save private-network model servers. */
-function connectAsOwner(
-  input: Parameters<typeof buildModelConnectPlaintext>[0],
-  previous?: string,
-  options?: { omitVisionModelIds?: boolean },
-): string {
-  return buildModelConnectPlaintext(input, previous, { ...options, allowPrivateEndpoint: true });
-}
-
 function requestModel(id: string, baseUrl: string): Pick<AgentRunRequest, "model"> {
   return { model: { provider: OPENAI_COMPATIBLE_PROVIDER_ID, id, baseUrl } };
 }
@@ -89,7 +80,7 @@ describe("request model catalogs", () => {
 it.each([true, false, undefined])(
   "keeps saved capability %s consistent between metadata and runtime",
   async (reasoning) => {
-    const plaintext = connectAsOwner({
+    const plaintext = buildModelConnectPlaintext({
       provider: OPENAI_COMPATIBLE_PROVIDER_ID,
       modelId: "same-model",
       baseUrl: "http://localhost:8000/v1",

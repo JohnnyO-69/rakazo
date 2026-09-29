@@ -717,7 +717,6 @@ export async function createApp(
               deploymentModelKey: env.deploymentModelKey,
               providerOverride: env.teamChatJudgeProvider,
               modelOverride: env.teamChatJudgeModel,
-              allowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
             })
           : new ModelTeamChatEngagementJudge({
               prisma,
@@ -726,7 +725,6 @@ export async function createApp(
               deploymentProvider: env.defaultProvider,
               deploymentModel: env.defaultModel,
               deploymentModelKey: env.deploymentModelKey,
-              allowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
             });
       const bridge = new TeamChatBridge({
         prisma,

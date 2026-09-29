@@ -98,8 +98,6 @@ describe.skipIf(!databaseAvailable)("offline Slack customer-support eval", () =>
             messagingOpenSignup: false,
             cloudAgentProvider: "none",
             encryptionKey: "offline-customer-eval-encryption-key",
-            // Fixture users do not own the deployment; the loopback emulator is private.
-            mcpAllowPrivateEndpoint: true,
           });
         },
       });

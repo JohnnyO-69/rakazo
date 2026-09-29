@@ -106,8 +106,6 @@ describe.skipIf(!databaseAvailable)("offline Pi computer approval", () => {
           signupsEnabled: "true",
           composio: new ComposioEmulator(),
           encryptionKey: "offline-computer-fixture-encryption-key",
-          // Fixture users do not own the deployment; the loopback emulator is a private server.
-          mcpAllowPrivateEndpoint: true,
         });
         stop = handles.stop;
         expect(handles.sandbox).toBeInstanceOf(FakeSandboxProvider);

@@ -2325,8 +2325,7 @@ description: Prepare standup notes
       bot: { findFirst: vi.fn(async () => bot) },
       spaceModelPreference: { findFirst },
       userModelCredential: { findFirst: vi.fn(async () => null) },
-      // Private model servers are the deployment owner's.
-      deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "user-1" })) },
+      deploymentSettings: { findUnique: vi.fn(async () => null) },
       secret: {
         findFirst: vi.fn(async () => ({
           id: "secret-openai-compatible",
@@ -2359,63 +2358,6 @@ description: Prepare standup notes
       id: "text-only-model",
       acceptsImages: false,
     });
-  });
-
-  it("uses a saved private model server only for the deployment owner or under the flag", async () => {
-    const provider = "openai-compatible";
-    const plaintext = serializeModelSecret({
-      kind: "openai_compatible",
-      baseUrl: "http://127.0.0.1:8000/v1",
-    });
-    const deployment = { ownerUserId: "owner-1" };
-    const prisma = {
-      bot: {
-        findFirst: vi.fn(async () => ({
-          modelProvider: provider,
-          modelId: "local-model",
-          thinkingLevel: null,
-        })),
-      },
-      spaceModelPreference: {
-        findFirst: vi.fn(async () =>
-          modelPreference({
-            provider,
-            secretId: "secret-local",
-            modelId: "local-model",
-            isDefault: true,
-          }),
-        ),
-      },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
-      deploymentSettings: { findUnique: vi.fn(async () => deployment) },
-      secret: {
-        findFirst: vi.fn(async () => ({ id: "secret-local", ciphertext: plaintext })),
-        findUnique: vi.fn(async () => null),
-      },
-    } as unknown as PrismaClient;
-    const resolveFor = (userId: string, mcpAllowPrivateEndpoint = false) =>
-      createRunExecutor({
-        prisma,
-        secretStore: { load: vi.fn(() => plaintext), put: vi.fn() },
-        mcpAllowPrivateEndpoint,
-      } as unknown as Parameters<typeof createRunExecutor>[0]).resolveModel({
-        userId,
-        spaceId: "ws-1",
-        botId: "bot-1",
-      });
-
-    await expect(resolveFor("owner-1")).resolves.toMatchObject({
-      baseUrl: "http://127.0.0.1:8000/v1",
-    });
-    await expect(resolveFor("member-1")).rejects.toThrow(
-      "Only the server owner can use a model server on a private network",
-    );
-    await expect(resolveFor("member-1", true)).resolves.toMatchObject({
-      baseUrl: "http://127.0.0.1:8000/v1",
-    });
-    // Saved while this user owned the deployment: checked again on every use.
-    deployment.ownerUserId = "member-1";
-    await expect(resolveFor("owner-1")).rejects.toThrow("private network");
   });
 
   it("falls back to the Space default when the override provider has no credential", async () => {
