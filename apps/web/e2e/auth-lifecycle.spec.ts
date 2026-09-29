@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, emailLink, signup } from "./helpers";
+import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
 test("restricted signup waits for mailbox verification", async ({ page }, testInfo) => {
   await page.route("**/api/auth/get-session**", (route) => route.fulfill({ json: null }));
@@ -199,11 +199,21 @@ test("changes and recovers an email password", async ({ page }, testInfo) => {
   await captureScreenshot(page, testInfo, "42-password-reset-requested");
 
   const emailApi = process.env.API_URL ?? "http://127.0.0.1:3110";
-  const resetUrl = await emailLink(page, email, "Reset your Rakazo password");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`${emailApi}/__e2e/emails`);
+      return ((await response.json()) as unknown[]).length;
+    })
+    .toBeGreaterThan(0);
   const messagesResponse = await page.request.get(`${emailApi}/__e2e/emails`);
   expect(messagesResponse.headers()["cache-control"]).toBe("no-store");
+  const messages = (await messagesResponse.json()) as Array<{
+    text: string;
+  }>;
+  const resetUrl = messages.at(-1)?.text.match(/https?:\/\/\S+/)?.[0];
+  expect(resetUrl).toBeTruthy();
 
-  await page.goto(resetUrl);
+  await page.goto(resetUrl!);
   await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
   await page.getByLabel("New password").fill(resetPassword);
   await page.getByLabel("Confirm password").fill(resetPassword);

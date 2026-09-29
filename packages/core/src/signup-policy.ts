@@ -60,18 +60,16 @@ export function signupAllowlistBootUpdate(
   return next;
 }
 
-/**
- * Whether an email identity must prove its mailbox before it gets a session.
- * Any deployment that can send mail requires it, so nobody can register an
- * address they do not own. Without delivery nothing can prove a mailbox:
- * open registration stays unverified, and an allowlist admits only its first
- * account (see firstAccountClaimDecision).
- */
-export function mailboxProofRequired(input: {
+/** How an allowlisted signup proceeds when delivery may be missing. */
+export function allowlistedSignupAdmission(input: {
   allowlistSize: number;
   hasEmailDelivery: boolean;
-}): boolean {
-  return input.hasEmailDelivery || input.allowlistSize > 0;
+  existingHumanCount: number;
+}): "open" | "verify" | "needs-delivery" {
+  if (input.allowlistSize === 0) return "open";
+  if (input.hasEmailDelivery) return "verify";
+  if (input.existingHumanCount === 0) return "open";
+  return "needs-delivery";
 }
 
 /**

@@ -174,9 +174,8 @@ when the API starts for the first time and is not reapplied on restart. A non-em
 `SIGNUP_ALLOWLIST` is applied on every API start, replacing the allowlist stored for the deployment.
 Leave it empty to keep that stored list.
 
-With SMTP configured, users—including existing accounts—must verify their email to sign in,
-whether or not there is an allowlist. Without SMTP nothing can verify an address, so open
-registration accepts unverified emails. On a fresh instance with no SMTP, the first allowlisted account
+With a nonempty signup allowlist and SMTP configured, users—including existing accounts—must
+verify their email to sign in. On a fresh instance with no SMTP, the first allowlisted account
 can register without verification. That signup does not prove mailbox ownership, so create the
 account before exposing the service. Further accounts still need SMTP.
 

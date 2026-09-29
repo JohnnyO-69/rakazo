@@ -178,7 +178,7 @@ function configureEnvironment() {
 }
 
 async function seedFixture(app: App, prisma: PrismaClient) {
-  const cookie = await signup(app, prisma);
+  const cookie = await signup(app);
   const researcher = await rpc<{ id: string }>(app, cookie, "bots/create", {
     name: "Researcher",
     title: "Product research",
@@ -278,23 +278,14 @@ async function seedFixture(app: App, prisma: PrismaClient) {
   return { botId: researcher.id, groupId: group.id, routineId: routine.id };
 }
 
-async function signup(app: App, prisma: PrismaClient) {
-  const headers = { "content-type": "application/json", origin: WEB_ORIGIN };
+async function signup(app: App) {
   const response = await app.request("/api/auth/sign-up/email", {
     method: "POST",
-    headers,
+    headers: { "content-type": "application/json", origin: WEB_ORIGIN },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD, name: "Screenshot User" }),
   });
   if (!response.ok) throw new Error(`Fixture signup failed with ${response.status}`);
-  // Email delivery is on, so the account needs mailbox proof before a session.
-  await prisma.user.update({ where: { email: EMAIL }, data: { emailVerified: true } });
-  const signedIn = await app.request("/api/auth/sign-in/email", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-  });
-  if (!signedIn.ok) throw new Error(`Fixture sign-in failed with ${signedIn.status}`);
-  const cookie = sessionCookieHeader(signedIn);
+  const cookie = sessionCookieHeader(response);
   if (!cookie) throw new Error("Fixture signup did not return a session cookie");
   return cookie;
 }

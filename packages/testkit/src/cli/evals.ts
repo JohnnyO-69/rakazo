@@ -169,7 +169,7 @@ async function main() {
             cloudAgentProvider: "none",
             signupsEnabled: "true",
             signupAllowlist: "",
-            emailEmulator: false,
+            emailEmulator: true,
             pipedreamClientId: undefined,
             pipedreamClientSecret: undefined,
             pipedreamProjectId: undefined,

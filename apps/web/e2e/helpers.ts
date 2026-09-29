@@ -64,39 +64,6 @@ export async function signup(
   await page.getByPlaceholder("Your email address").fill(email);
   await page.getByPlaceholder("Password").fill(password);
   await page.getByRole("button", { name: "Create account" }).click();
-  await page.waitForURL(
-    (url) => url.pathname !== "/sign-up" || url.searchParams.get("verify") === "email",
-  );
-  if (new URL(page.url()).pathname !== "/sign-up") return;
-  // A server with email delivery needs mailbox proof before the first session.
-  await page.goto(await emailLink(page, email, "Verify your Rakazo email"));
-  await page.waitForURL((url) => url.pathname === "/sign-in");
-  const signedIn = await page.request.post("/api/auth/sign-in/email", {
-    data: { email, password },
-    headers: { origin: new URL(page.url()).origin },
-  });
-  expect(signedIn.ok()).toBe(true);
-  await page.goto("/onboarding");
-}
-
-/** Link from the newest message the e2e email emulator captured for `to`. */
-export async function emailLink(page: Page, to: string, subject: string) {
-  const emailApi = process.env.API_URL ?? "http://127.0.0.1:3110";
-  let link: string | undefined;
-  await expect
-    .poll(async () => {
-      const response = await page.request.get(`${emailApi}/__e2e/emails`);
-      const messages = (await response.json()) as Array<{
-        to: string;
-        subject: string;
-        text: string;
-      }>;
-      const message = messages.findLast((item) => item.to === to && item.subject === subject);
-      link = message?.text.match(/https?:\/\/\S+/)?.[0];
-      return link;
-    })
-    .toBeTruthy();
-  return link!;
 }
 
 export async function captureScreenshot(page: Page, testInfo: TestInfo, name: string) {

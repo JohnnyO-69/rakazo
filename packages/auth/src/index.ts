@@ -1,9 +1,9 @@
 import type { TransactionalEmail, TransactionalEmailProvider } from "@rakazo/adapter-kit";
 import {
+  allowlistedSignupAdmission,
   emailAllowed,
   firstAccountClaimDecision,
   isMessagingEmail,
-  mailboxProofRequired,
   parseAllowlist,
   signupPolicyFromEnv,
 } from "@rakazo/core";
@@ -238,11 +238,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
               "callbackURL",
               new URL("/sign-in", env.webOrigin).href,
             );
-            // Do not await delivery: signup for a new address must take as long
-            // as the generic reply for an existing one.
-            void env.email
-              ?.send(verificationEmail(user.email, verificationUrl.href))
-              .catch((error) => env.onEmailError?.(error));
+            await env.email!.send(verificationEmail(user.email, verificationUrl.href));
           }
         : undefined,
     },
@@ -304,16 +300,11 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             code: "INVALID_PASSWORD",
           });
         }
-        const hasEmailDelivery = Boolean(env.email);
         let policy =
           ctx.path === "/sign-up/email" || ctx.path === "/sign-in/email"
             ? await resolveSignupPolicy(prisma, env)
             : undefined;
-        // With verification required, Better Auth also answers signup for an
-        // existing address with the same pending reply as for a new one.
-        let requireEmailVerification = policy
-          ? mailboxProofRequired({ allowlistSize: policy.allowlist.length, hasEmailDelivery })
-          : false;
+        let requireEmailVerification = false;
         if (ctx.path === "/sign-up/email") {
           if (!policy?.enabled) {
             throw new APIError("BAD_REQUEST", { message: "Registration is closed" });
@@ -322,7 +313,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
           if (!emailAllowed(email, policy.allowlist)) {
             throw new APIError("BAD_REQUEST", { message: "Email is not allowed to register" });
           }
-          if (policy.allowlist.length > 0 && !hasEmailDelivery) {
+          if (policy.allowlist.length > 0 && !env.email) {
             const held = await holdFirstAccountGate(prisma);
             if (held.admission === "needs-delivery") {
               await held.release();
@@ -332,7 +323,16 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             }
             rememberSignupGate(email, held.release);
             requireEmailVerification = false;
+          } else {
+            requireEmailVerification =
+              allowlistedSignupAdmission({
+                allowlistSize: policy.allowlist.length,
+                hasEmailDelivery: Boolean(env.email),
+                existingHumanCount: 0,
+              }) === "verify";
           }
+        } else if (policy) {
+          requireEmailVerification = policy.allowlist.length > 0;
         }
         // Return a request-local override; mutating the shared auth options
         // would leak a concurrent request's policy into another signup.
@@ -354,7 +354,6 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
                   const session = await ctx.context.internalAdapter.findSession(token);
                   if (!session || isMessagingEmail(session.user.email)) return null;
                   if (session.user.emailVerified) return session;
-                  if (hasEmailDelivery) return null;
                   policy ??= await resolveSignupPolicy(prisma, env);
                   return policy.allowlist.length === 0 ? session : null;
                 },
@@ -381,13 +380,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
             if (!user || isMessagingEmail(user.email)) {
               throw new APIError("FORBIDDEN", { message: "Email verification required" });
             }
-            if (
-              !user.emailVerified &&
-              mailboxProofRequired({
-                allowlistSize: policy.allowlist.length,
-                hasEmailDelivery: Boolean(env.email),
-              })
-            ) {
+            if (!user.emailVerified && policy.allowlist.length > 0) {
               if (env.email || !emailAllowed(user.email, policy.allowlist)) {
                 throw new APIError("FORBIDDEN", { message: "Email verification required" });
               }

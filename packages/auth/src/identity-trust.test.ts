@@ -391,7 +391,7 @@ describe("identity trust through auth endpoints", () => {
   });
 
   it("gates existing unverified sessions and auth mutations when the live allowlist is enabled", async () => {
-    const f = fixture({ delivery: false });
+    const f = fixture();
     const signedUp = await f.signup();
     const cookie = signedUp.headers.get("set-cookie")!.split(";")[0]!;
     const { token } = (await signedUp.json()) as { token: string };
@@ -404,21 +404,21 @@ describe("identity trust through auth endpoints", () => {
     ).toBeNull();
     expect((await f.request("/update-user", { name: "Changed" }, token)).status).toBe(401);
     expect((await f.signin()).status).toBe(403);
-    f.data.user![0]!.emailVerified = true;
+    await f.verify();
     expect((await f.signin()).status).toBe(200);
   });
 
   it("does not leak request-local verification settings when signup policy changes", async () => {
-    const f = fixture({ delivery: false });
+    const f = fixture({ allowlist: "@example.test" });
+    expect(await (await f.signup()).json()).toMatchObject({ token: null });
+    f.policy.signupAllowlist = "";
     expect(await (await f.signup("open@example.test")).json()).toMatchObject({
       token: expect.any(String),
     });
+    expect(f.messages).toHaveLength(1);
     f.policy.signupAllowlist = "@example.test";
-    expect((await f.signup("restricted@example.test")).status).toBe(400);
-    f.policy.signupAllowlist = "";
-    expect(await (await f.signup("open-again@example.test")).json()).toMatchObject({
-      token: expect.any(String),
-    });
+    expect(await (await f.signup("restricted@example.test")).json()).toMatchObject({ token: null });
+    expect(f.messages).toHaveLength(2);
   });
 
   it("reserves internal messaging emails across registration, recovery and email changes", async () => {
@@ -433,10 +433,7 @@ describe("identity trust through auth endpoints", () => {
       expect((await f.request("/send-verification-email", { email })).status).toBe(400);
     }
     expect(f.data.user).toHaveLength(0);
-    expect(f.messages).toHaveLength(0);
-    await f.signup();
-    await f.verify();
-    const { token } = (await (await f.signin()).json()) as { token: string };
+    const { token } = (await (await f.signup()).json()) as { token: string };
     expect(
       (await f.request("/change-email", { newEmail: "msg-taken@messaging.invalid" }, token)).status,
     ).toBe(400);
@@ -444,66 +441,7 @@ describe("identity trust through auth endpoints", () => {
     f.data.user![0]!.email = "msg-taken@messaging.invalid";
     expect(await (await f.request("/get-session", undefined, token)).json()).toBeNull();
     expect((await f.request("/update-user", { name: "Changed" }, token)).status).toBe(401);
-  });
-
-  it("requires mailbox proof for open registration once the deployment can send email", async () => {
-    const f = fixture();
-    const response = await f.signup();
-    expect(response.status).toBe(200);
-    expect(response.headers.get("set-cookie")).toBeNull();
-    expect(await response.json()).toMatchObject({ token: null, user: { emailVerified: false } });
-    expect(f.data.session).toHaveLength(0);
-    expect(bootstrapUserSpace).not.toHaveBeenCalled();
-    expect((await f.signin()).status).toBe(403);
-    await f.verify();
-    const signedIn = await f.signin();
-    expect(signedIn.status).toBe(200);
-    expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
-  });
-
-  it("answers signup for a registered email exactly like a new one", async () => {
-    const f = fixture();
-    const first = await f.signup();
-    const again = await f.signup();
-    expect(again.status).toBe(first.status);
-    expect(again.headers.get("set-cookie")).toBeNull();
-    type Body = { token: unknown; user: Record<string, unknown> };
-    const firstBody = (await first.json()) as Body;
-    const againBody = (await again.json()) as Body;
-    expect(againBody.token).toBeNull();
-    // Postgres returns a null image; the offline adapter omits it.
-    expect(Object.keys(againBody.user).sort()).toEqual(
-      Object.keys({ image: null, ...firstBody.user }).sort(),
-    );
-    expect(againBody.user.id).not.toBe(firstBody.user.id);
-    expect(f.data.user).toHaveLength(1);
-    expect(f.messages).toHaveLength(1);
-  });
-
-  it("stops resolving unverified sessions once the deployment can send email", async () => {
-    const f = fixture();
-    const now = new Date();
-    f.data.user!.push({
-      id: "legacy-user",
-      name: "Legacy",
-      email: "legacy@example.test",
-      emailVerified: false,
-      createdAt: now,
-      updatedAt: now,
-    });
-    f.data.session!.push({
-      id: "legacy-session",
-      token: "legacy-session-token",
-      userId: "legacy-user",
-      expiresAt: new Date(now.getTime() + 60_000),
-      createdAt: now,
-      updatedAt: now,
-    });
-    expect(
-      await f.auth.api.getSession({
-        headers: new Headers({ authorization: "Bearer legacy-session-token" }),
-      }),
-    ).toBeNull();
+    expect(f.messages).toHaveLength(0);
   });
 });
 
