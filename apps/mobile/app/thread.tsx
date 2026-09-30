@@ -136,6 +136,7 @@ import {
   getCachedResponseStreamingEnabled,
   subscribeResponseStreaming,
 } from "../lib/response-streaming";
+import { secretDestinationLabel } from "../lib/secret-destination";
 import {
   type ThreadScrollAction,
   ThreadScrollBehavior,
@@ -3380,7 +3381,7 @@ function AskBlock({
       </Text>
       {secretInput && ask.credential ? (
         <Text style={{ color: tokens.mutedForeground, fontSize: 13.5 }}>
-          {ask.credential.origin}
+          {secretDestinationLabel(ask.credential)}
         </Text>
       ) : null}
       {ask.detail && !secretInput ? (

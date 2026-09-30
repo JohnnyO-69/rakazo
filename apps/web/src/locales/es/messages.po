@@ -87,6 +87,10 @@ msgstr "Pantalla de {0}"
 msgid "{botName}’s computer"
 msgstr "Computadora de {botName}"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "{commandVariable} is reserved and cannot be used as a command variable. Choose another name."
+msgstr ""
+
 #: src/lib/relative-time.ts
 #: src/pages/ActivityList.tsx
 msgid "{days}d ago"
@@ -242,6 +246,10 @@ msgstr "Agrega una URL de servidor HTTPS."
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Add another"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Add credential"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -548,6 +556,10 @@ msgstr ""
 msgid "Available after the routine is saved"
 msgstr "Disponible después de guardar la rutina"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Available to this bot's shell commands as {commandVariable}"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Avatar Studio"
 msgstr "Estudio de avatares"
@@ -570,8 +582,17 @@ msgstr "Volver a iniciar sesión"
 msgid "Base URL"
 msgstr "URL base"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Basic auth"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Basic auth ({username})"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Bearer token"
 msgstr "Token Bearer"
 
@@ -646,6 +667,7 @@ msgstr "No se puede alcanzar el servidor."
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
 msgstr "Cancelar"
@@ -872,6 +894,11 @@ msgstr "Próximamente"
 #: src/pages/McpServersOverlay.tsx
 msgid "Command"
 msgstr "Comando"
+
+#: src/components/AskCard.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Command variable"
+msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Complete"
@@ -1209,6 +1236,10 @@ msgstr ""
 msgid "Could not load commands"
 msgstr ""
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not load credentials."
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not load integrations"
@@ -1288,6 +1319,10 @@ msgstr "No se pudo quitar el grupo"
 msgid "Could not remove rule"
 msgstr "No se pudo quitar la regla"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not remove the credential"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not rename connection"
 msgstr ""
@@ -1353,6 +1388,10 @@ msgstr "No se pudo guardar ese modelo de habla"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not save that voice"
 msgstr "No se pudo guardar esa voz"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not save the credential"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
@@ -1486,6 +1525,10 @@ msgstr "Credencial"
 msgid "credential saved"
 msgstr "credencial guardada"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Credentials"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "Las credenciales se cifran y nunca se envían al modelo."
@@ -1501,6 +1544,10 @@ msgstr "Expresión cron"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Current password"
 msgstr "Contraseña actual"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Custom header"
+msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Customer support"
@@ -1737,6 +1784,10 @@ msgstr "Correo"
 msgid "Engage when... Ignore..."
 msgstr ""
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Enter a username and password"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Enter a whole number from 1 to {MAX_MODEL_CONTEXT_WINDOW} for the context limit."
@@ -1963,8 +2014,13 @@ msgstr "Cuelga y luego ingresa el código en pantalla."
 msgid "header"
 msgstr "Encabezado"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Header \"{header}\""
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Header name"
 msgstr "Nombre del encabezado"
 
@@ -2125,6 +2181,10 @@ msgstr "Conservar memorias"
 msgid "key"
 msgstr "Clave"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Keys and passwords this bot can use. A site credential works only on its saved site, and a command variable is available to the bot's shell commands. Values are encrypted and never shown again."
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Knowledge"
 msgstr "Conocimientos"
@@ -2239,6 +2299,10 @@ msgstr "Cerrar sesión"
 #: src/pages/shell/bot-panel.tsx
 msgid "Low"
 msgstr "Bajo"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
+msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -2462,6 +2526,7 @@ msgstr "Silenciar"
 #: src/pages/Auth.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Name"
@@ -2556,6 +2621,10 @@ msgstr ""
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "Aún no hay apps de chat vinculadas."
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "No credentials saved for this bot."
+msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "No exceptions. Actions run automatically."
@@ -2794,6 +2863,7 @@ msgstr "Aparcar"
 #: src/components/AskCard.tsx
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Auth.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Password"
 msgstr "Contraseña"
 
@@ -3002,6 +3072,7 @@ msgstr ""
 #: src/components/ApprovalRulesSettings.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/ScratchpadSection.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Remove"
 msgstr "Quitar"
 
@@ -3009,6 +3080,10 @@ msgstr "Quitar"
 #: src/pages/Shell.tsx
 msgid "Remove {0}"
 msgstr "Quitar {0}"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Remove {secretName}? This bot will no longer be able to use it."
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove Git event"
@@ -3065,6 +3140,10 @@ msgstr "Reemplazar clave de API"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Replace key"
 msgstr "Reemplazar clave"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Replace value"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Reply"
@@ -3219,6 +3298,14 @@ msgstr ""
 msgid "Save"
 msgstr "Guardar"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Save credential"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Save new value"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/ExternalConversationSettings.tsx
@@ -3250,6 +3337,7 @@ msgstr ""
 #: src/pages/GroupPanel.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Saving…"
 msgstr "Guardando…"
@@ -3437,6 +3525,10 @@ msgstr "Inicia sesión en Rakazo"
 #: src/pages/Welcome.tsx
 msgid "Sign up"
 msgstr "Registrarse"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Site"
+msgstr ""
 
 #. placeholder {0}: skill.name
 #: src/pages/Shell.tsx
@@ -3627,6 +3719,10 @@ msgstr "La API no volvió. Actualiza esta página."
 msgid "The selected memory provider is not available in this build."
 msgstr "El proveedor de memoria seleccionado no está disponible en esta build."
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "These saved settings can't be read. Remove it and add it again."
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Thinking"
 msgstr "Pensando"
@@ -3736,6 +3832,10 @@ msgstr "Token de Treg"
 msgid "Try again"
 msgstr "Intentarlo de nuevo"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Type"
+msgstr ""
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Type without recording"
 msgstr ""
@@ -3807,6 +3907,10 @@ msgstr ""
 msgid "Updated"
 msgstr "Actualizado"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Updated {updated}"
+msgstr ""
+
 #: src/pages/SettingsOverlay.tsx
 msgid "Updates"
 msgstr "Actualizaciones"
@@ -3858,7 +3962,12 @@ msgid "Use this model"
 msgstr "Usar este modelo"
 
 #: src/components/AskCard.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Username"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Value"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -3900,6 +4009,10 @@ msgstr "Esperando…"
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
 msgstr "Webhook"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Website login"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
