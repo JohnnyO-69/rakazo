@@ -77,6 +77,22 @@ describe("screen proxy", () => {
     expect(onFailure).toHaveBeenCalledTimes(1);
     expect(onFailure).toHaveBeenCalledWith("invalid_authority_response");
   });
+  it("reports a dropped authority body as unavailable", async () => {
+    const response = new Response("{}", { status: 200 });
+    vi.spyOn(response, "json").mockRejectedValueOnce(new Error("aborted"));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    const onFailure = vi.fn();
+    expect(
+      await resolveNovncTarget(
+        "/novnc/session/view/token/vnc.html",
+        "secret",
+        "http://api.example",
+        onFailure,
+      ),
+    ).toBeNull();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledWith("authority_unavailable");
+  });
 
   it("closes an active stream on revocation and stops checking closed streams", async () => {
     vi.useFakeTimers();

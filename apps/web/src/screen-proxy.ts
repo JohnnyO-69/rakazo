@@ -40,8 +40,10 @@ export async function resolveNovncTarget(
     let target: unknown;
     try {
       target = await response.json();
-    } catch {
-      onFailure?.("invalid_authority_response");
+    } catch (error) {
+      onFailure?.(
+        error instanceof SyntaxError ? "invalid_authority_response" : "authority_unavailable",
+      );
       return null;
     }
     if (isScreenProxyTarget(target)) return target;
