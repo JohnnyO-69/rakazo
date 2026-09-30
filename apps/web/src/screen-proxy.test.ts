@@ -29,12 +29,19 @@ describe("screen proxy", () => {
       .mockResolvedValueOnce(new Response(null, { status: 403 }))
       .mockRejectedValueOnce(new Error("offline"));
     vi.stubGlobal("fetch", fetch);
+    const failures: string[] = [];
     const resolve = () =>
-      resolveNovncTarget("/novnc/session/view/token/websockify", "secret", "http://api.example");
+      resolveNovncTarget(
+        "/novnc/session/view/token/websockify",
+        "secret",
+        "http://api.example",
+        (reason) => failures.push(reason),
+      );
     expect(await resolve()).toEqual(target);
     expect(await resolve()).toBeNull();
     expect(await resolve()).toBeNull();
     expect(fetch).toHaveBeenCalledTimes(3);
+    expect(failures).toEqual(["authority_rejected", "authority_unavailable"]);
     expect(fetch.mock.calls[0]?.[1]).toMatchObject({
       redirect: "error",
       headers: { authorization: "Bearer secret" },
@@ -45,13 +52,16 @@ describe("screen proxy", () => {
       "fetch",
       vi.fn().mockResolvedValue(Response.json({ hostname: "screen.example", port: "443" })),
     );
+    const onFailure = vi.fn();
     expect(
       await resolveNovncTarget(
         "/novnc/session/view/token/vnc.html",
         "secret",
         "http://api.example",
+        onFailure,
       ),
     ).toBeNull();
+    expect(onFailure).toHaveBeenCalledWith("invalid_authority_response");
   });
 
   it("closes an active stream on revocation and stops checking closed streams", async () => {
