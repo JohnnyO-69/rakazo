@@ -524,6 +524,10 @@ async function installBundledRenderer(
     const forward = () => {
       return targetSession.fetch(request, forwardedRendererRequestInit(request, webUrl.origin));
     };
+    // Mode can change on the same origin/session; only managed "new" keeps the overlay.
+    if (partition !== "local-server-settings" && currentSetup?.mode !== "new") {
+      return forward();
+    }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return forward();
     }
