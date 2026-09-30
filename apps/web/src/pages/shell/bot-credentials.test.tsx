@@ -258,6 +258,39 @@ describe("BotCredentialsSection", () => {
     expect(botSecrets.list).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the add form open when save succeeds but list reload fails", async () => {
+    botSecrets.put.mockResolvedValue(rows[0]);
+    botSecrets.list.mockResolvedValueOnce(rows).mockRejectedValueOnce(new Error("list failed"));
+    await render();
+    await click("credential-add");
+    await type("credential-name", "api2");
+    await type("credential-origin", "https://api.example.com");
+    await type("credential-value", FAKE_VALUE);
+    await click("credential-add-save");
+
+    expect(botSecrets.put).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="credential-add-form"]')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "Could not load credentials.",
+    );
+    expect(container.innerHTML).not.toContain(FAKE_VALUE);
+  });
+
+  it("clears a typed replace value when opening remove on another row", async () => {
+    await render();
+    await click("credential-replace-api");
+    await type("credential-replace-value", FAKE_VALUE);
+    expect(byTestId<HTMLInputElement>("credential-replace-value").value).toBe(FAKE_VALUE);
+    await click("credential-remove-custom");
+    expect(container.querySelector('[data-testid="credential-replace-value"]')).toBeNull();
+    expect(container.textContent).toContain("Remove custom?");
+    // Protected value must not linger in any live input.
+    const leaked = Array.from(container.querySelectorAll("input, textarea")).some((input) =>
+      (input as HTMLInputElement).value.includes(FAKE_VALUE),
+    );
+    expect(leaked).toBe(false);
+  });
+
   it("removes only after an explicit confirm", async () => {
     await render();
     await click("credential-remove-api");

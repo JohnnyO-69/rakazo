@@ -11,6 +11,7 @@ export {
   forgetBotSecret,
   getBotSecretMetadata,
   listBotSecretMetadata,
+  normalizeSecretDestination,
   storeBotSecret,
 } from "./bot-secrets.js";
 export * from "./box-emulator.js";

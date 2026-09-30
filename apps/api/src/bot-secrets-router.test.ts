@@ -287,11 +287,42 @@ describe("botSecrets router", () => {
     );
     expect([...byName.keys()].sort()).toEqual(["Bad Name", "alpha", "middle", "omega"]);
     expect(byName.get("alpha")?.auth).toEqual({ type: "bearer" });
-    expect(byName.get("Bad Name")?.auth).toEqual({ type: "bearer" });
+    // Invalid stored names stay listable/removable but are not replaceable.
+    expect(byName.get("Bad Name")?.auth).toBeNull();
     expect(byName.get("middle")?.auth).toBeNull();
     expect(byName.get("omega")?.auth).toEqual({ type: "header", name: "X-Api-Key" });
     expect(result.text).not.toContain("cookie");
     expect(result.text).not.toContain("ciphertext");
+  });
+
+  it("lists a private-HTTP origin as remove-only when the opt-in is off", async () => {
+    vi.stubEnv("RAKAZO_SECRETS_ALLOW_PRIVATE_HTTP", "");
+    const created = new Date("2026-08-01T00:00:00.000Z");
+    const { call } = botSecretDeps([
+      {
+        id: "row-lan",
+        userId: "user-1",
+        spaceId: "space-1",
+        botId: "bot-1",
+        name: "router",
+        origin: "http://192.168.1.20:8080",
+        auth: { type: "bearer" },
+        ciphertext: "enc:lan",
+        createdAt: created,
+        updatedAt: created,
+      },
+    ]);
+    const result = await call("list", { botId: "bot-1" });
+    expect(result.status).toBe(200);
+    expect(result.body.json).toEqual([
+      {
+        name: "router",
+        origin: "http://192.168.1.20:8080",
+        auth: null,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ]);
   });
 
   it("removes a non-regex stored name for the owned bot and rejects another user's bot", async () => {
