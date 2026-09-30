@@ -141,6 +141,7 @@ export class DesktopSandboxProvider implements SandboxProvider {
       cwd,
       boundedSandboxCommandTimeoutMs(request.timeoutMs),
       context.signal,
+      request.env,
     );
     if (result.stdout) yield { type: "stdout", data: result.stdout };
     if (result.stderr) yield { type: "stderr", data: result.stderr };
@@ -693,11 +694,12 @@ function runCommand(
   cwd: string,
   timeoutMs: number,
   signal: AbortSignal,
+  requestEnv?: Record<string, string>,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd,
-      env: process.env,
+      env: { ...process.env, ...(requestEnv ?? {}) },
       detached: process.platform !== "win32",
     });
     let stdout = "";

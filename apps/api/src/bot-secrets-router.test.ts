@@ -2,7 +2,8 @@ import { RPCHandler } from "@orpc/server/fetch";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRouter, type RouterDeps } from "./router.js";
+import type { RouterDeps } from "./router.js";
+import { createRouter } from "./router.js";
 
 // Offline boundary: a fake Prisma client and secret store drive the real router handlers,
 // the real repos.getBot ownership check, and the real storeBotSecret validation.
