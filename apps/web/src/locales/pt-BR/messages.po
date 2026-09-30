@@ -3954,7 +3954,7 @@ msgstr "Onde os bots devem ser executados?"
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
 msgid "Working…"
-msgstr "Funcionando"
+msgstr "Trabalhando…"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"
