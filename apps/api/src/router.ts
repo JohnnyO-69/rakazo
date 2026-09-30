@@ -56,6 +56,8 @@ import {
   displayBotWorkspacePath,
   enqueueTakeoverContinuation,
   expireComputerControl,
+  forgetBotSecret,
+  getBotSecretMetadata,
   hasActiveComputerControl,
   isAutoReviewCheckerConfigured,
   isComputerScreenUnavailable,
@@ -63,6 +65,7 @@ import {
   isScratchpadStatus,
   kickModelCredentialRefresh,
   listAvailablePiCatalog,
+  listBotSecretMetadata,
   listPiCatalog,
   listScratchpadItems,
   McpOAuthBroker,
@@ -93,6 +96,7 @@ import {
   scriptedCatalogEntry,
   selectDefaultCredentialId,
   serializeModelSecret,
+  storeBotSecret,
   takeoverLeaseMs,
   toComputerRef,
   touchRunningComputer,
@@ -105,6 +109,7 @@ import type { Auth } from "@rakazo/auth";
 import type {
   Actor,
   Bot,
+  BotSecretMetadata,
   ComputerReleaseReason,
   ComputerStatus,
   McpServer,
@@ -115,6 +120,7 @@ import type {
 import {
   ATTACHMENT_MAX_BYTES,
   appContract,
+  BotSecretAuth,
   ComputerCommandSchema,
   foldComputerCommands,
   IntegrationProviderIdSchema,
@@ -580,6 +586,55 @@ function mapSpaceLifecycleError(error: unknown): unknown {
     return new ORPCError("BAD_REQUEST", { message: error.message });
   }
   return error;
+}
+
+const BOT_SECRET_INPUT_ERRORS = [
+  "Invalid credential destination",
+  "Invalid credential length",
+  "Credential cannot be used with this authentication method",
+  "Remove the existing credential before changing its destination",
+  "Credential limit reached",
+];
+
+/** Map credential validation failures to a bad request without echoing the submitted value. */
+function mapBotSecretStoreError(error: unknown): unknown {
+  if (error instanceof ORPCError) return error;
+  if (
+    error instanceof Error &&
+    BOT_SECRET_INPUT_ERRORS.some((prefix) => error.message.startsWith(prefix))
+  ) {
+    return new ORPCError("BAD_REQUEST", { message: error.message });
+  }
+  // Login decoding failures: a JSON parse message can quote the submitted value, so never forward it.
+  if (error instanceof SyntaxError || (error instanceof Error && error.name === "ZodError")) {
+    return new ORPCError("BAD_REQUEST", {
+      message: "A website login needs a username and password",
+    });
+  }
+  return error;
+}
+
+function botSecretScope(actor: Actor, botId: string) {
+  return { userId: actor.userId, spaceId: actor.spaceId, botId };
+}
+
+function botSecretMetadataDto(row: {
+  name: string;
+  origin: string;
+  auth: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}): BotSecretMetadata {
+  // A stored auth that no longer passes the schema is reported as unreadable rather than
+  // failing validation of the whole response. The raw value is never forwarded.
+  const auth = BotSecretAuth.safeParse(row.auth);
+  return {
+    name: row.name,
+    origin: row.origin,
+    auth: auth.success ? auth.data : null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 const BOT_INTRO_PROMPT =
@@ -4986,6 +5041,42 @@ export function createRouter(deps: RouterDeps) {
       remove: authed.agentSecrets.remove.handler(async ({ context, input }) =>
         deleteAgentSecret({ prisma: deps.prisma, secrets: deps.secrets }, context.actor, input.id),
       ),
+    },
+    botSecrets: {
+      list: authed.botSecrets.list.handler(async ({ context, input }) => {
+        const bot = await repos.getBot(context.actor, input.botId);
+        const rows = await listBotSecretMetadata(
+          deps.prisma,
+          botSecretScope(context.actor, bot.id),
+        );
+        return rows.map(botSecretMetadataDto);
+      }),
+      put: authed.botSecrets.put.handler(async ({ context, input }) => {
+        const bot = await repos.getBot(context.actor, input.botId);
+        const scope = botSecretScope(context.actor, bot.id);
+        let row: Awaited<ReturnType<typeof getBotSecretMetadata>>;
+        try {
+          row = await deps.prisma.$transaction(async (tx) => {
+            await storeBotSecret({
+              tx,
+              secretStore: deps.secrets,
+              scope,
+              destination: input.destination,
+              plaintext: input.value,
+            });
+            return getBotSecretMetadata(tx, scope, input.destination.name);
+          });
+        } catch (error) {
+          throw mapBotSecretStoreError(error);
+        }
+        if (!row) throw new ORPCError("CONFLICT", { message: "Credential was not saved" });
+        return botSecretMetadataDto(row);
+      }),
+      remove: authed.botSecrets.remove.handler(async ({ context, input }) => {
+        const bot = await repos.getBot(context.actor, input.botId);
+        await forgetBotSecret(deps.prisma, botSecretScope(context.actor, bot.id), input.name);
+        return { ok: true as const };
+      }),
     },
     approvalRules: {
       list: authed.approvalRules.list.handler(async ({ context }) => {
