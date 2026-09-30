@@ -115,4 +115,38 @@ describe("mobile appearance", () => {
     expect(mobileTokens().secondaryForeground).not.toBe(darkInk);
     expect(mobileTokens().secondary).not.toBe(mobileTokens().primary);
   });
+
+  it("keeps the latest native scheme and stored preference when writes overlap", async () => {
+    const { UI_APPEARANCE_STORAGE_KEY } = await import("@rakazo/ui-tokens");
+    const { setItemAsync } = await import("expo-secure-store");
+    const { getCachedAppearancePreference, setAppearancePreference } = await import("./appearance");
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let writes = 0;
+    vi.mocked(setItemAsync).mockImplementation(async (key: string, value: string) => {
+      writes += 1;
+      if (writes === 1) await firstWrite;
+      store.set(key, value);
+    });
+
+    try {
+      const first = setAppearancePreference("light");
+      const second = setAppearancePreference("dark");
+      expect(getCachedAppearancePreference()).toBe("dark");
+      expect(colorSchemeOverride).toBe("dark");
+
+      releaseFirst();
+      await Promise.all([first, second]);
+
+      expect(colorSchemeOverride).toBe("dark");
+      expect(getCachedAppearancePreference()).toBe("dark");
+      expect(store.get(UI_APPEARANCE_STORAGE_KEY)).toBe("dark");
+    } finally {
+      vi.mocked(setItemAsync).mockImplementation(async (key: string, value: string) => {
+        store.set(key, value);
+      });
+    }
+  });
 });

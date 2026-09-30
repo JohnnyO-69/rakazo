@@ -12,6 +12,7 @@ import { Appearance, type ColorSchemeName } from "react-native";
 export type { AppearancePreference, ResolvedAppearance };
 
 let memoryPreference: AppearancePreference | null = null;
+let writeGeneration = 0;
 const listeners = new Set<() => void>();
 
 function systemAppearance(scheme?: ColorSchemeName | null): ResolvedAppearance {
@@ -38,13 +39,10 @@ export async function setAppearancePreference(
   preference: AppearancePreference,
 ): Promise<AppearancePreference> {
   memoryPreference = preference;
-  try {
-    await SecureStore.setItemAsync(UI_APPEARANCE_STORAGE_KEY, preference);
-  } catch {
-    // Keep the in-memory preference when SecureStore is unavailable.
-  }
+  const generation = ++writeGeneration;
   applyNativeColorScheme(preference);
   notify();
+  await persistAppearancePreference(preference, generation);
   return preference;
 }
 
@@ -71,6 +69,22 @@ export function subscribeAppearance(listener: () => void): () => void {
 
 function notify() {
   for (const listener of listeners) listener();
+}
+
+async function persistAppearancePreference(
+  preference: AppearancePreference,
+  generation: number,
+): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(UI_APPEARANCE_STORAGE_KEY, preference);
+  } catch {
+    // Keep the in-memory preference when SecureStore is unavailable.
+    return;
+  }
+  if (generation === writeGeneration) return;
+  const latest = memoryPreference;
+  if (latest === null) return;
+  await persistAppearancePreference(latest, writeGeneration);
 }
 
 // Native surfaces (alerts, action sheets, the keyboard, iOS platform colors) follow the
