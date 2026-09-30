@@ -63,6 +63,20 @@ describe("screen proxy", () => {
     ).toBeNull();
     expect(onFailure).toHaveBeenCalledWith("invalid_authority_response");
   });
+  it("reports invalid JSON as an invalid authority response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
+    const onFailure = vi.fn();
+    expect(
+      await resolveNovncTarget(
+        "/novnc/session/view/token/vnc.html",
+        "secret",
+        "http://api.example",
+        onFailure,
+      ),
+    ).toBeNull();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledWith("invalid_authority_response");
+  });
 
   it("closes an active stream on revocation and stops checking closed streams", async () => {
     vi.useFakeTimers();

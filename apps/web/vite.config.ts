@@ -247,6 +247,7 @@ function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string,
         : net.connect(target.port, target.hostname);
     let upgraded = false;
     let closed = false;
+    let closeInitiator: "client" | "upstream" | "revoked" | undefined;
     const logClose = (side: "client" | "upstream") => {
       if (closed) return;
       closed = true;
@@ -255,7 +256,7 @@ function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string,
         ...bindings,
         "screen.upgraded": upgraded,
         "screen.duration_ms": durationMs,
-        "screen.closed_by": side,
+        "screen.closed_by": closeInitiator ?? side,
       };
       if (!upgraded || durationMs < 5_000) screenLog.warn("screen.proxy.websocket_closed", details);
       else screenLog.info("screen.proxy.websocket_closed", details);
@@ -264,6 +265,7 @@ function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string,
       async () => Boolean(await resolveNovncTarget(req.url, secret, api)),
       () => {
         screenLog.warn("screen.proxy.websocket_revoked", bindings);
+        closeInitiator ??= "revoked";
         socket.destroy();
         upstream.destroy();
       },
@@ -350,6 +352,7 @@ function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string,
         "screen.side": "upstream",
         "error.code": socketErrorCode(error),
       });
+      closeInitiator ??= "upstream";
       socket.destroy();
     });
     socket.on("error", (error) => {
@@ -358,6 +361,7 @@ function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string,
         "screen.side": "client",
         "error.code": socketErrorCode(error),
       });
+      closeInitiator ??= "client";
       upstream.destroy();
     });
   });
