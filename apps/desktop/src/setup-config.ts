@@ -143,8 +143,9 @@ export function probeFailureMessage(error: unknown): string {
 }
 
 /** Packaged shell overlays its web bundle only on the managed loopback stack. */
-export function servesBundledRenderer(targetUrl: string): boolean {
+export function servesBundledRenderer(targetUrl: string, managedLocalStack: boolean): boolean {
   try {
+    if (!managedLocalStack) return false;
     const url = new URL(targetUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") return false;
     return isLoopbackHost(url.hostname);

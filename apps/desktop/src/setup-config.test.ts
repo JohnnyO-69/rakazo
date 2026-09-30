@@ -177,19 +177,21 @@ describe("startup target", () => {
 
 describe("bundled renderer eligibility", () => {
   it("overlays the bundle only for the managed loopback stack", () => {
-    expect(servesBundledRenderer(DEFAULT_LOCAL_WEB_URL)).toBe(true);
-    expect(servesBundledRenderer("http://localhost:5173")).toBe(true);
-    expect(servesBundledRenderer("http://127.0.0.1:5173/app")).toBe(true);
-    expect(servesBundledRenderer("http://[::1]:45173")).toBe(true);
-    expect(servesBundledRenderer("https://127.0.0.1:45173")).toBe(true);
-    expect(servesBundledRenderer("http://rakazo.localhost:5173")).toBe(true);
-    expect(servesBundledRenderer("https://rakazo.example.com")).toBe(false);
-    expect(servesBundledRenderer("https://rakazo.example.com:8443")).toBe(false);
-    expect(servesBundledRenderer("http://192.168.1.20:3100")).toBe(false);
-    expect(servesBundledRenderer("http://10.0.0.8:3100")).toBe(false);
-    expect(servesBundledRenderer("http://rakazo.local:3100")).toBe(false);
-    expect(servesBundledRenderer("data:text/html,<p>fixture</p>")).toBe(false);
-    expect(servesBundledRenderer("nonsense")).toBe(false);
+    expect(servesBundledRenderer(DEFAULT_LOCAL_WEB_URL, true)).toBe(true);
+    expect(servesBundledRenderer("http://localhost:5173", true)).toBe(true);
+    expect(servesBundledRenderer("http://127.0.0.1:5173/app", true)).toBe(true);
+    expect(servesBundledRenderer("http://[::1]:45173", true)).toBe(true);
+    expect(servesBundledRenderer("https://127.0.0.1:45173", true)).toBe(true);
+    expect(servesBundledRenderer("http://rakazo.localhost:5173", true)).toBe(true);
+    expect(servesBundledRenderer(DEFAULT_LOCAL_WEB_URL, false)).toBe(false);
+    expect(servesBundledRenderer("http://127.0.0.1:3100", false)).toBe(false);
+    expect(servesBundledRenderer("https://rakazo.example.com", true)).toBe(false);
+    expect(servesBundledRenderer("https://rakazo.example.com:8443", true)).toBe(false);
+    expect(servesBundledRenderer("http://192.168.1.20:3100", true)).toBe(false);
+    expect(servesBundledRenderer("http://10.0.0.8:3100", true)).toBe(false);
+    expect(servesBundledRenderer("http://rakazo.local:3100", true)).toBe(false);
+    expect(servesBundledRenderer("data:text/html,<p>fixture</p>", true)).toBe(false);
+    expect(servesBundledRenderer("nonsense", true)).toBe(false);
   });
 });
 
