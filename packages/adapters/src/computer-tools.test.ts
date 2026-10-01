@@ -165,7 +165,7 @@ describe("computer tool bridge", () => {
     ]);
   });
 
-  it("lets a mixed batch run after the visual guard engages", () => {
+  it("blocks a scroll padded with waits and still runs typing", () => {
     const observation = computerObservation(Uint8Array.from([1, 2, 3]), {
       mimeType: "image/png",
       width: 1280,
@@ -178,22 +178,28 @@ describe("computer tool bridge", () => {
     for (let index = 0; index < MAX_CONSECUTIVE_UNCHANGED_VISUAL_ACTIONS; index += 1) {
       streak = advanceUnchangedVisualGuard(streak, observation.frameId, scroll).streak;
     }
-    const mixed = parseComputerActions([
+    const withType = parseComputerActions([
       { kind: "scroll", direction: "down", amount: 3 },
       { kind: "type", text: "hello" },
     ]);
+    const withWait = parseComputerActions([
+      { kind: "scroll", direction: "down", amount: 3 },
+      { kind: "wait", ms: 100 },
+    ]);
+    const withTwoWaits = parseComputerActions([
+      { kind: "scroll", direction: "down", amount: 3 },
+      { kind: "wait", ms: 100 },
+      { kind: "wait", ms: 100 },
+    ]);
 
-    expect(computerVisualActionKey(mixed)).toBe(scroll);
+    expect(computerVisualActionKey(withType)).toBe(scroll);
+    expect(computerVisualActionKey(withWait)).toBe(scroll);
     expect(unchangedVisualActionBlocked(streak, scrollActions)).toBe(true);
-    expect(unchangedVisualActionBlocked(streak, mixed)).toBe(false);
+    expect(unchangedVisualActionBlocked(streak, withWait)).toBe(true);
+    expect(unchangedVisualActionBlocked(streak, withTwoWaits)).toBe(true);
+    expect(unchangedVisualActionBlocked(streak, withType)).toBe(false);
     expect(
-      unchangedVisualActionBlocked(
-        streak,
-        parseComputerActions([
-          { kind: "scroll", direction: "down", amount: 3 },
-          { kind: "wait", ms: 100 },
-        ]),
-      ),
+      unchangedVisualActionBlocked(streak, parseComputerActions([{ kind: "type", text: "hello" }])),
     ).toBe(false);
   });
 

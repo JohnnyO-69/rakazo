@@ -127,9 +127,11 @@ export function computerVisualActionKey(actions: readonly ComputerAction[]): str
   return JSON.stringify(visual);
 }
 
-/** True when every action is scroll, pointer, or key. Typing and waiting still need to run. */
-export function isPureVisualComputerBatch(actions: readonly ComputerAction[]): boolean {
-  return actions.length > 0 && actions.every((action) => VISUAL_COMPUTER_ACTIONS.has(action.kind));
+/** Typing and other non-wait actions still need to run. A wait does not. */
+function batchEscapesVisualGuard(actions: readonly ComputerAction[]): boolean {
+  return actions.some(
+    (action) => action.kind !== "wait" && !VISUAL_COMPUTER_ACTIONS.has(action.kind),
+  );
 }
 
 /**
@@ -153,12 +155,12 @@ export function advanceUnchangedVisualGuard(
   };
 }
 
-/** Refuse another identical visual-only batch. Mixed batches still run. */
+/** Refuse a matching visual batch. Waits do not exempt it; typing does. */
 export function unchangedVisualActionBlocked(
   streak: UnchangedVisualStreak,
   actions: readonly ComputerAction[],
 ): boolean {
-  if (!isPureVisualComputerBatch(actions)) return false;
+  if (batchEscapesVisualGuard(actions)) return false;
   const actionKey = computerVisualActionKey(actions);
   return (
     actionKey !== undefined &&
