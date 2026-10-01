@@ -148,6 +148,13 @@ import { CallCard } from "../components/call/CallCard";
 import { VoiceChatCard } from "../components/call/VoiceChatCard";
 import { ComputerWorkspace } from "../components/computer/ComputerWorkspace";
 import { MessageHoverMetadata } from "../components/MessageHoverMetadata";
+import {
+  LIVE_TOOL_STEP_WINDOW,
+  StandaloneToolActivity,
+  ToolActivityDisclosure,
+  ToolOnlyNarration,
+  ToolSteps,
+} from "../components/ToolActivityDisclosure";
 import { SkillDraftCard } from "../components/teach/SkillDraftCard";
 import { TeachCaptureOverlay } from "../components/teach/TeachCaptureOverlay";
 import { TeachComputerOverlayControl } from "../components/teach/TeachComputerOverlay";
@@ -188,6 +195,12 @@ import {
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { quoteDraftForSelection } from "../lib/quote-selection";
 import { getResponseStreamingEnabled, subscribeResponseStreaming } from "../lib/response-streaming";
+import type { Panel, RightPanelState } from "../lib/right-panel-state";
+import {
+  readRightPanelState,
+  rightPanelStorageKey,
+  writeRightPanelState,
+} from "../lib/right-panel-state";
 import { rosterWorkStatusLabel } from "../lib/roster-status";
 import { clearSpaceSelection, rpc, selectedSpaceId, selectSpace } from "../lib/rpc";
 import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../lib/run-error-storage";
@@ -209,6 +222,14 @@ import {
   threadRunError,
   userHoldsComputerControl,
 } from "../lib/thread-events";
+import { getToolActivityEnabled, subscribeToolActivity } from "../lib/tool-activity-preference";
+import {
+  isToolOnlyNarration,
+  messageHasVisibleBlocks,
+  renderableMessageBlocks,
+  shouldRenderToolCard,
+  toolStepCount,
+} from "../lib/tool-activity-view";
 import {
   transcriptCanSnapAfterFrame,
   transcriptIsNearEnd,
@@ -219,6 +240,7 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
+import { ResizableSidePanel } from "./ResizableSidePanel";
 import {
   draftFromRoutine,
   emptyRoutineDraft,
@@ -271,15 +293,6 @@ const PluginsOverlay = lazy(() =>
 const McpServersOverlay = lazy(() =>
   import("./McpServersOverlay").then((module) => ({ default: module.McpServersOverlay })),
 );
-
-type Panel =
-  | "computer"
-  | "settings"
-  | "routine"
-  | "create"
-  | "create-group"
-  | "group-settings"
-  | null;
 
 type PendingAttachment = {
   id: string;
@@ -411,6 +424,11 @@ export function ShellPage() {
   );
   const streamResponsesRef = useRef(streamResponses);
   streamResponsesRef.current = streamResponses;
+  const showToolActivity = useSyncExternalStore(
+    subscribeToolActivity,
+    getToolActivityEnabled,
+    () => true,
+  );
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [replyTarget, setReplyTarget] = useState<ThreadMessage | null>(null);
   const [replyQuote, setReplyQuote] = useState<string | null>(null);
@@ -419,7 +437,28 @@ export function ShellPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [panel, setPanel] = useState<Panel>(null);
+  const [panel, setPanelState] = useState<Panel>(null);
+  const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
+  const panelStorageKeyRef = useRef<string | null>(null);
+  const observedPanelKey = useRef<string | null>(null);
+  const explicitPanelTarget = useRef<string | null>(null);
+  const pendingPanelRestore = useRef<RightPanelState | null>(null);
+  const pendingExplicitPanel = useRef(false);
+  const panelSearch = useRef({ searchParams, setSearchParams });
+  panelSearch.current = { searchParams, setSearchParams };
+  const setPanel = useCallback((next: Panel | ((current: Panel) => Panel)) => {
+    // A user navigation wins over a saved routine still waiting for its list.
+    pendingPanelRestore.current = null;
+    pendingExplicitPanel.current = panelStorageKeyRef.current === null;
+    setRestoredPanelKey(panelStorageKeyRef.current);
+    setPanelState(next);
+    const currentSearch = panelSearch.current;
+    if (currentSearch.searchParams.has("routine")) {
+      const params = new URLSearchParams(currentSearch.searchParams);
+      params.delete("routine");
+      currentSearch.setSearchParams(params, { replace: true });
+    }
+  }, []);
   const [peerConversation, setPeerConversation] = useState<{
     peerBotId: string;
     peerBotName: string;
@@ -708,6 +747,12 @@ export function ShellPage() {
     [active?.id, groupId, inGroup, pendingAttachments],
   );
   const activeRoutines = !inGroup && routinesBotId === active?.id ? routines : [];
+  const panelTarget = inGroup ? activeGroup?.id : active?.id;
+  const panelStorageKey =
+    userId && bootstrapMe?.spaceId && panelTarget
+      ? rightPanelStorageKey(userId, bootstrapMe.spaceId, inGroup ? "group" : "bot", panelTarget)
+      : null;
+  panelStorageKeyRef.current = panelStorageKey;
   const activeTaughtSkills = taughtSkillsBotId === active?.id ? taughtSkills : [];
   const recordingSkill = activeTaughtSkills.find((skill) => skill.status === "recording") ?? null;
   const routeBotId = useRef<string | undefined>(botId);
@@ -1684,6 +1729,15 @@ export function ShellPage() {
     }
   }
 
+  // The routine panel copies a routine's data into local draft state at click time
+  // rather than deriving it from `active`, so it goes stale across a bot switch —
+  // without this, Save on bot B could silently update bot A's routine.
+  useEffect(() => {
+    setEditingRoutine(null);
+    setDeleteRoutineTarget(null);
+    setPanelState((current) => (current === "routine" ? null : current));
+  }, [active?.id]);
+
   useEffect(() => {
     const messageId = searchParams.get("m");
     const routineId = searchParams.get("routine");
@@ -2487,14 +2541,61 @@ export function ShellPage() {
     }
   }, [panel]);
 
-  // The routine panel copies a routine's data into local draft state at click time
-  // rather than deriving it from `active`, so it goes stale across a bot switch —
-  // without this, Save on bot B could silently update bot A's routine.
   useEffect(() => {
-    setEditingRoutine(null);
-    setDeleteRoutineTarget(null);
-    setPanel((current) => (current === "routine" ? null : current));
-  }, [active?.id]);
+    if (!panelStorageKey) return;
+    if (observedPanelKey.current !== panelStorageKey) {
+      observedPanelKey.current = panelStorageKey;
+      if (pendingExplicitPanel.current || explicitPanelTarget.current === panelStorageKey) {
+        pendingExplicitPanel.current = false;
+        explicitPanelTarget.current = null;
+        pendingPanelRestore.current = null;
+        setRestoredPanelKey(panelStorageKey);
+        return;
+      }
+      explicitPanelTarget.current = null;
+      // Reload starts with panel=null so storage restores. In-session chat switches used to
+      // keep computer/settings open; only routine was cleared (handled above). Carry is
+      // session-only — do not write the carried panel onto the destination's saved prefs.
+      if (panel === "computer" || panel === "settings" || panel === "group-settings") {
+        const carried = panel === "computer" ? "computer" : inGroup ? "group-settings" : "settings";
+        pendingPanelRestore.current = null;
+        if (carried !== panel) setPanelState(carried);
+        setRestoredPanelKey(null);
+        return;
+      }
+      pendingPanelRestore.current = readRightPanelState(panelStorageKey);
+    }
+    const saved = pendingPanelRestore.current;
+    if (!saved) return;
+    // Explicit routine links take precedence over a local layout preference.
+    if (searchParams.has("routine")) {
+      pendingPanelRestore.current = null;
+      return;
+    }
+    if (saved.panel === "routine" && saved.routineId && routinesBotId !== active?.id) return;
+    let next = saved.panel;
+    if (next === "routine") {
+      const routine = saved.routineId
+        ? routines.find((item) => item.id === saved.routineId)
+        : undefined;
+      if (saved.routineId && !routine) next = "computer";
+      setEditingRoutine(routine ?? null);
+      setRoutineDraft(routine ? draftFromRoutine(routine) : emptyRoutineDraft());
+      setRoutineWebhookSecret(null);
+    }
+    pendingPanelRestore.current = null;
+    setPanelState(next);
+    setRestoredPanelKey(panelStorageKey);
+  }, [panelStorageKey, active?.id, inGroup, panel, routinesBotId, routines, searchParams]);
+
+  useEffect(() => {
+    // Do not gate writes on ?routine= staying in the URL — a stuck/failed routine
+    // list would freeze layout prefs. Deep-link handling uses setPanelState for the
+    // bot-switch close so restoredPanelKey stays unset until an intentional setPanel.
+    if (!panelStorageKey || restoredPanelKey !== panelStorageKey || pendingPanelRestore.current)
+      return;
+    writeRightPanelState(panelStorageKey, panel, editingRoutine?.id);
+  }, [panelStorageKey, restoredPanelKey, panel, editingRoutine?.id]);
 
   useEffect(() => {
     const threadKey = inGroup ? groupId : active?.id;
@@ -3461,6 +3562,7 @@ export function ShellPage() {
             onScrollRequestHandled={clearScrollRequest}
             artifactTarget={transcriptArtifactTarget}
             messages={transcriptMessages}
+            showToolActivity={showToolActivity}
             olderCursor={activeSnapshot?.olderCursor ?? null}
             loadingOlder={loadingOlder}
             answerableAskMessageId={answerableAskMessageId}
@@ -3563,17 +3665,13 @@ export function ShellPage() {
 
       <CallCard onSettings={() => openSettings("voice")} />
 
-      <aside
-        data-testid="side-panel"
-        data-panel={panel ?? "closed"}
-        className={`absolute inset-y-0 end-0 z-20 flex min-h-0 shrink-0 flex-col overflow-hidden bg-background transition-[width] duration-150 ease-out md:relative ${
-          panel && (active || activeGroup || panel === "create")
-            ? "w-full max-w-[384px] border-s border-sidebar-border md:w-[384px] md:max-w-none"
-            : "pointer-events-none w-0"
-        }`}
+      <ResizableSidePanel
+        botsSidebarCollapsed={botsSidebarCollapsed}
+        open={Boolean(panel && (active || activeGroup || panel === "create"))}
+        panel={panel ?? "closed"}
       >
         {panel && (active || activeGroup || panel === "create") ? (
-          <div className="rk-scroll h-full w-full overflow-y-auto px-5 py-[17px] md:w-[384px]">
+          <div className="rk-scroll h-full w-full overflow-y-auto px-5 py-[17px]">
             {panel !== "routine" &&
             panel !== "create" &&
             panel !== "create-group" &&
@@ -3934,7 +4032,7 @@ export function ShellPage() {
             ) : null}
           </div>
         ) : null}
-      </aside>
+      </ResizableSidePanel>
 
       <Suspense fallback={null}>
         {contextChat && botMenu ? (
@@ -3997,8 +4095,21 @@ export function ShellPage() {
               setBotMenu(null);
             }}
             onEdit={() => {
+              const destKey =
+                userId && bootstrapMe?.spaceId
+                  ? rightPanelStorageKey(
+                      userId,
+                      bootstrapMe.spaceId,
+                      contextBot ? "bot" : "group",
+                      contextChat.id,
+                    )
+                  : null;
+              explicitPanelTarget.current = destKey;
+              pendingPanelRestore.current = null;
               navigate(contextBot ? `/app/${contextBot.id}` : `/app/g/${contextGroup!.id}`);
-              setPanel(contextBot ? "settings" : "group-settings");
+              // Mark the destination key restored so we do not write settings onto the source chat.
+              setPanelState(contextBot ? "settings" : "group-settings");
+              setRestoredPanelKey(destKey);
               setBotMenu(null);
             }}
             onDuplicate={() => {
@@ -4524,6 +4635,7 @@ const Transcript = memo(function Transcript({
   onScrollRequestHandled,
   artifactTarget,
   messages,
+  showToolActivity,
   olderCursor,
   loadingOlder,
   answerableAskMessageId,
@@ -4552,6 +4664,7 @@ const Transcript = memo(function Transcript({
   onScrollRequestHandled: () => void;
   artifactTarget: ArtifactTarget;
   messages: ThreadMessage[];
+  showToolActivity: boolean;
   olderCursor: number | null;
   loadingOlder: boolean;
   answerableAskMessageId: string | null;
@@ -4842,7 +4955,7 @@ const Transcript = memo(function Transcript({
             );
           }
           const message = item.message;
-          if (!message.blocks.some((block) => !isToolActivityBlock(block))) return null;
+          if (!messageHasVisibleBlocks(message.blocks, showToolActivity)) return null;
           const peerReceipt = isPeerReceiptBlocks(message.blocks);
           const messageReactions = reactionView.reactions.get(message.id);
           return (
@@ -4915,6 +5028,7 @@ const Transcript = memo(function Transcript({
                     speaking={speakingMessageId === message.id}
                     onSpeak={() => onSpeak(message)}
                     onOpenComputer={onOpenComputer}
+                    showToolActivity={showToolActivity}
                   />
                   {peerReceipt ? null : (
                     <MessageHoverActions
@@ -6064,6 +6178,7 @@ const MessageView = memo(function MessageView({
   speaking,
   onSpeak,
   onOpenComputer,
+  showToolActivity,
 }: {
   artifactTarget: ArtifactTarget;
   canAnswer: boolean;
@@ -6084,6 +6199,7 @@ const MessageView = memo(function MessageView({
   speaking: boolean;
   onSpeak: () => void;
   onOpenComputer: (botId?: string) => void;
+  showToolActivity: boolean;
 }) {
   const { t } = useLingui();
   const isNarration =
@@ -6094,7 +6210,7 @@ const MessageView = memo(function MessageView({
     );
   const isLive = message.id.startsWith("progress:");
   const quoteMessageId = message.id.includes(":") ? undefined : message.id;
-  const visibleNarrationBlocks = message.blocks.filter((block) => !isToolActivityBlock(block));
+  const visibleNarrationBlocks = renderableMessageBlocks(message.blocks, showToolActivity);
   const parentJumpId = replyPreview?.id ?? replyToMessageId;
   const speakerBot = message.botId ? peerBot?.(message.botId) : undefined;
   const speakerColorDef = useMemo(
@@ -6145,6 +6261,14 @@ const MessageView = memo(function MessageView({
   );
   if (isNarration) {
     if (visibleNarrationBlocks.length === 0) return null;
+    if (isToolOnlyNarration(message.blocks, showToolActivity)) {
+      return (
+        <>
+          {messageContext}
+          <ToolOnlyNarration blocks={visibleNarrationBlocks} live={isLive} />
+        </>
+      );
+    }
     return (
       <>
         {messageContext}
@@ -6155,6 +6279,22 @@ const MessageView = memo(function MessageView({
             dir="auto"
           >
             {visibleNarrationBlocks.map((block, i) => {
+              if (block.kind === "steps") {
+                return (
+                  <ToolActivityDisclosure
+                    key={i}
+                    live={isLive}
+                    stepCount={toolStepCount(block.steps)}
+                    durationMs={block.durationMs}
+                  >
+                    <ToolSteps
+                      steps={block.steps}
+                      currentIndex={isLive ? block.steps.length - 1 : undefined}
+                      limit={isLive ? LIVE_TOOL_STEP_WINDOW : undefined}
+                    />
+                  </ToolActivityDisclosure>
+                );
+              }
               if (block.kind === "text" || block.kind === "progress") {
                 return (
                   <div
@@ -6186,6 +6326,17 @@ const MessageView = memo(function MessageView({
     <>
       {messageContext}
       {message.blocks.map((block, i) => {
+        if (block.kind === "steps" && shouldRenderToolCard(block, showToolActivity)) {
+          return (
+            <StandaloneToolActivity
+              key={i}
+              live={isLive}
+              steps={block.steps}
+              stepCount={toolStepCount(block.steps)}
+              durationMs={block.durationMs}
+            />
+          );
+        }
         if (isToolActivityBlock(block)) return null;
         if (block.kind === "handoff") {
           const from = memberName?.(block.fromBotId) ?? t`bot`;
