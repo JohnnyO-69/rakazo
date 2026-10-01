@@ -203,7 +203,15 @@ import {
   resolveBotWorkspacePath,
   teamBotWorkspaceDirectory,
 } from "./computer-support.js";
-import { observationToolResult, parseComputerActions } from "./computer-tools.js";
+import type { UnchangedVisualStreak } from "./computer-tools.js";
+import {
+  advanceUnchangedVisualGuard,
+  computerVisualActionKey,
+  observationToolResult,
+  parseComputerActions,
+  unchangedVisualActionBlocked,
+  unchangedVisualLoopToolResult,
+} from "./computer-tools.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
@@ -1777,6 +1785,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let hasStreamedText = false;
         let toolCallStreak: ToolCallStreak = { key: undefined, count: 0 };
         let lastComputerFrameId: string | undefined;
+        let unchangedVisualStreak: UnchangedVisualStreak = { count: 0 };
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
@@ -1828,8 +1837,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const formatObservation = (
           observation: Awaited<ReturnType<SandboxProvider["observe"]>>,
           note?: string,
+          visualActionKey?: string,
         ) => {
-          const result = observationToolResult(observation, note, lastComputerFrameId);
+          const guard = advanceUnchangedVisualGuard(
+            unchangedVisualStreak,
+            observation.frameId,
+            visualActionKey,
+          );
+          unchangedVisualStreak = guard.streak;
+          const result = observationToolResult(
+            observation,
+            note,
+            lastComputerFrameId,
+            visualActionKey ? { unchangedVisualCount: guard.streak.count } : undefined,
+          );
           lastComputerFrameId = observation.frameId;
           return result;
         };
@@ -2463,12 +2484,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (await getActiveTeachingSession(deps.prisma, run.spaceId, run.botId)) {
               return { error: "Teaching is in progress. Stop teaching before using the computer." };
             }
+            const actions = parseComputerActions(args.actions);
+            const visualActionKey = computerVisualActionKey(actions);
+            if (unchangedVisualActionBlocked(unchangedVisualStreak, visualActionKey)) {
+              return finish(unchangedVisualLoopToolResult(unchangedVisualStreak));
+            }
             workspaceCheckpoint.markDirty();
             return computerScreenToolResult(async () => {
               const result = await deps.sandbox.act(
                 computer,
                 {
-                  actions: parseComputerActions(args.actions),
+                  actions,
                   observe: args.observe !== false,
                   settleMs: Number(args.settle_ms ?? 350),
                 },
@@ -2478,6 +2504,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? formatObservation(
                     result.observation,
                     `completed ${result.completed} computer action${result.completed === 1 ? "" : "s"}`,
+                    visualActionKey,
                   )
                 : { ok: true, completed: result.completed };
             }, finish);
