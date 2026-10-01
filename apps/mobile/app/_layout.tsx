@@ -52,8 +52,8 @@ export default function Layout() {
   }, [resolved]);
 
   useEffect(() => {
-    if (appearanceReady) void SplashScreen.hideAsync().catch(() => undefined);
-  }, [appearanceReady]);
+    if (appearanceReady && ready) void SplashScreen.hideAsync().catch(() => undefined);
+  }, [appearanceReady, ready]);
 
   useEffect(() => {
     void Promise.all([
