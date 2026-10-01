@@ -101,10 +101,10 @@ and authentication type and never its value. From there you can add a credential
 on the same destination, or remove one after confirming. Remove deletes the saved value immediately.
 The Electron desktop app hosts the same web UI, so it has the same section.
 
-Mobile has no credential settings screen. A bot's credential request card still works in the
-thread, including website logins, so a bot can obtain a value on the phone; listing, adding,
-replacing and removing saved credentials is web and desktop only. Manage them there, or ask the bot
-to `forget_secret` the name.
+Mobile does not host that web settings shell, so it has no credential management screen.
+The thread credential card still works on the phone, including website logins, and that is how a
+bot obtains a value there. Listing, replacing, and removing saved credentials stays on the web
+section. Asking the bot to `forget_secret` a name only removes it; it does not list or replace one.
 
 Two-factor codes, CAPTCHA and passkeys still use `request_takeover`, as does any site where you prefer to sign in yourself.
 

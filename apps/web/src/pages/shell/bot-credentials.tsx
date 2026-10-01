@@ -69,8 +69,10 @@ export function BotCredentialsSection({ botId }: { botId: string }) {
     try {
       setSecrets(await rpc.botSecrets.list({ botId }));
       setLoadFailed(false);
+      return true;
     } catch {
       setLoadFailed(true);
+      return false;
     }
   }
 
@@ -120,7 +122,10 @@ export function BotCredentialsSection({ botId }: { botId: string }) {
     setBusy(true);
     try {
       await rpc.botSecrets.put({ botId, destination, value: plaintext });
-      await refresh();
+      if (!(await refresh())) {
+        setError(t`Could not load credentials.`);
+        return false;
+      }
       return true;
     } catch (err) {
       setError(readError(err, t`Could not save the credential`));
@@ -155,7 +160,10 @@ export function BotCredentialsSection({ botId }: { botId: string }) {
     try {
       await rpc.botSecrets.remove({ botId, name: secretName });
       setConfirmingRemove(null);
-      await refresh();
+      if (!(await refresh())) {
+        setSecrets((prev) => prev?.filter((row) => row.name !== secretName) ?? null);
+        setError(t`Could not load credentials.`);
+      }
     } catch (err) {
       setError(readError(err, t`Could not remove the credential`));
     } finally {
@@ -363,6 +371,7 @@ export function BotCredentialsSection({ botId }: { botId: string }) {
                       data-testid={`credential-remove-${secret.name}`}
                       disabled={busy}
                       onClick={() => {
+                        clearProtectedFields();
                         setReplacing(null);
                         setConfirmingRemove(secret.name);
                       }}

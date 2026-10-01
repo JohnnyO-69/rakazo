@@ -72,6 +72,7 @@ import {
   mapScratchpadItem,
   modelCredentialAuthKindsForSpace,
   modelCredentialDto,
+  normalizeSecretDestination,
   parseModelSecret,
   pickReusableConnection,
   planLiveConnectionSync,
@@ -626,13 +627,21 @@ function botSecretMetadataDto(row: {
   createdAt: Date;
   updatedAt: Date;
 }): BotSecretMetadata {
-  // A stored auth that no longer passes the schema is reported as unreadable rather than
-  // failing validation of the whole response. The raw value is never forwarded.
-  const auth = BotSecretAuth.safeParse(row.auth);
+  // Unreadable or no-longer-storable destinations become auth:null so the owner UI stays remove-only.
+  const parsed = BotSecretAuth.safeParse(row.auth);
+  let auth: BotSecretMetadata["auth"] = null;
+  if (parsed.success) {
+    try {
+      normalizeSecretDestination({ name: row.name, origin: row.origin, auth: parsed.data });
+      auth = parsed.data;
+    } catch {
+      auth = null;
+    }
+  }
   return {
     name: row.name,
     origin: row.origin,
-    auth: auth.success ? auth.data : null,
+    auth,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
