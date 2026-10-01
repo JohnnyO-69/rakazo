@@ -127,6 +127,11 @@ export function computerVisualActionKey(actions: readonly ComputerAction[]): str
   return JSON.stringify(visual);
 }
 
+/** True when every action is scroll, pointer, or key. Typing and waiting still need to run. */
+export function isPureVisualComputerBatch(actions: readonly ComputerAction[]): boolean {
+  return actions.length > 0 && actions.every((action) => VISUAL_COMPUTER_ACTIONS.has(action.kind));
+}
+
 /**
  * Counts identical visual actions that keep the same frame. A new frame clears the streak.
  * Observations without a visual action leave an in-progress streak in place.
@@ -148,15 +153,41 @@ export function advanceUnchangedVisualGuard(
   };
 }
 
+/** Refuse another identical visual-only batch. Mixed batches still run. */
 export function unchangedVisualActionBlocked(
   streak: UnchangedVisualStreak,
-  actionKey: string | undefined,
+  actions: readonly ComputerAction[],
 ): boolean {
+  if (!isPureVisualComputerBatch(actions)) return false;
+  const actionKey = computerVisualActionKey(actions);
   return (
     actionKey !== undefined &&
     actionKey === streak.actionKey &&
     streak.count >= MAX_CONSECUTIVE_UNCHANGED_VISUAL_ACTIONS
   );
+}
+
+const MUTATING_PAGE_BROWSER_TOOLS = new Set(["browser_navigate", "browser_act"]);
+
+function pageBrowserMutationSucceeded(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  const record = result as { error?: unknown; fallback?: unknown; ok?: unknown };
+  if (record.fallback === "computer_act") return false;
+  if (typeof record.error === "string" && record.error.length > 0) return false;
+  if (record.ok === false) return false;
+  return true;
+}
+
+/** A successful page mutation can change the live view without a new desktop frame. */
+export function unchangedVisualStreakAfterPageBrowser(
+  streak: UnchangedVisualStreak,
+  toolName: string,
+  result: unknown,
+): UnchangedVisualStreak {
+  if (!MUTATING_PAGE_BROWSER_TOOLS.has(toolName) || !pageBrowserMutationSucceeded(result)) {
+    return streak;
+  }
+  return { count: 0 };
 }
 
 export function unchangedVisualLoopToolResult(

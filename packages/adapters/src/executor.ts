@@ -211,6 +211,7 @@ import {
   parseComputerActions,
   unchangedVisualActionBlocked,
   unchangedVisualLoopToolResult,
+  unchangedVisualStreakAfterPageBrowser,
 } from "./computer-tools.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
@@ -2486,7 +2487,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             const actions = parseComputerActions(args.actions);
             const visualActionKey = computerVisualActionKey(actions);
-            if (unchangedVisualActionBlocked(unchangedVisualStreak, visualActionKey)) {
+            if (unchangedVisualActionBlocked(unchangedVisualStreak, actions)) {
               return finish(unchangedVisualLoopToolResult(unchangedVisualStreak));
             }
             workspaceCheckpoint.markDirty();
@@ -2950,30 +2951,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : name === "browser_snapshot"
                   ? browserSnapshotFromTool
                   : null;
-            return computerScreenToolResult(
-              async () =>
-                tool
-                  ? redactConnectorPayload(
-                      await tool(browser, computer, context, args),
-                      redactions(),
-                    )
-                  : browserActFromTool(browser, computer, context, args, {
-                      redactions,
-                      resolveSecretFill: async (step) => {
-                        const resolved = await resolveLoginFill({
-                          prisma: deps.prisma,
-                          secretStore: deps.secretStore,
-                          scope: run,
-                          name: step.secret,
-                          field: step.field,
-                        });
-                        if ("error" in resolved) return resolved;
-                        registerRunSecrets(resolved.redactions);
-                        return { text: resolved.text, origin: resolved.origin };
-                      },
-                    }),
-              finish,
-            );
+            return computerScreenToolResult(async () => {
+              const result = tool
+                ? redactConnectorPayload(await tool(browser, computer, context, args), redactions())
+                : await browserActFromTool(browser, computer, context, args, {
+                    redactions,
+                    resolveSecretFill: async (step) => {
+                      const resolved = await resolveLoginFill({
+                        prisma: deps.prisma,
+                        secretStore: deps.secretStore,
+                        scope: run,
+                        name: step.secret,
+                        field: step.field,
+                      });
+                      if ("error" in resolved) return resolved;
+                      registerRunSecrets(resolved.redactions);
+                      return { text: resolved.text, origin: resolved.origin };
+                    },
+                  });
+              unchangedVisualStreak = unchangedVisualStreakAfterPageBrowser(
+                unchangedVisualStreak,
+                name,
+                result,
+              );
+              return result;
+            }, finish);
           }
 
           if (name.startsWith("cloud_agent_")) {
