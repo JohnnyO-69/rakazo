@@ -803,6 +803,7 @@ function copyCommandWritesActivate(
   let targetDir: string | undefined;
   const sources: string[] = [];
   let hiddenSource = false;
+  let recursive = false;
   let options = true;
   for (let index = 0; index < args.length; index += 1) {
     const raw = args[index] ?? "";
@@ -819,6 +820,7 @@ function copyCommandWritesActivate(
         index += 1;
         value = index < args.length ? activateOperand(args[index] ?? "", words, env) : undefined;
       }
+      if (name === "--recursive" || name === "--archive") recursive = true;
       if (name === "--target-directory") {
         if (value === undefined) return true;
         targetDir = value;
@@ -828,6 +830,7 @@ function copyCommandWritesActivate(
     if (options && token?.startsWith("-") && token !== "-") {
       for (let cursor = 1; cursor < token.length; cursor += 1) {
         const letter = token[cursor] ?? "";
+        if (base === "cp" && (letter === "a" || letter === "r" || letter === "R")) recursive = true;
         if (!letters.includes(letter)) continue;
         const rest = token.slice(cursor + 1);
         let value: string | undefined;
@@ -854,10 +857,47 @@ function copyCommandWritesActivate(
   if (targetDir !== undefined) {
     if (hiddenSource) return true;
     const directory = targetDir;
+    if (transfersBinDirectory(base, recursive, true, directory, sources)) return true;
     return sources.some((source) => copiedIntoActivates(directory, source));
   }
   const destination = sources.at(-1);
+  if (
+    destination !== undefined &&
+    transfersBinDirectory(
+      base,
+      recursive,
+      isDirectoryDestination(destination),
+      destination,
+      sources.slice(0, -1),
+    )
+  ) {
+    return true;
+  }
   return destination !== undefined && isActivateWritePath(destination);
+}
+
+function lastPathComponent(path: string): string {
+  const stripped = path.replace(/\/+$/, "");
+  const collapsed = lexicalPath(stripped) ?? stripped;
+  const slash = collapsed.lastIndexOf("/");
+  return slash === -1 ? collapsed : collapsed.slice(slash + 1);
+}
+
+function isDirectoryDestination(path: string): boolean {
+  return path.endsWith("/") || lastPathComponent(path) === "." || lastPathComponent(path) === "..";
+}
+
+/** Moving or linking a directory named bin can plant bin/activate inside it. */
+function transfersBinDirectory(
+  base: string,
+  recursive: boolean,
+  destIsDirectory: boolean,
+  destination: string,
+  sources: readonly string[],
+): boolean {
+  if (base !== "mv" && base !== "ln" && !(base === "cp" && recursive)) return false;
+  if (lastPathComponent(destination) === "bin") return true;
+  return destIsDirectory && sources.some((source) => lastPathComponent(source) === "bin");
 }
 
 function copiedIntoActivates(directory: string, source: string): boolean {
@@ -1327,10 +1367,44 @@ function teeDestinationPaths(words: readonly string[]): string[] {
   return paths;
 }
 
+function resolveExecutionPath(cwd: string | undefined, command: string): string | undefined {
+  const joined =
+    command.startsWith("/") || cwd === undefined || cwd === ""
+      ? command
+      : `${cwd.replace(/\/$/, "")}/${command}`;
+  const collapsed = lexicalPath(joined);
+  if (collapsed === undefined) return undefined;
+  return normalizeWrittenPath(collapsed);
+}
+
+function nextHeredocCwd(cwd: string | undefined, args: readonly string[]): string | undefined {
+  let options = true;
+  let target: string | undefined;
+  let sawTarget = false;
+  for (const raw of args) {
+    const token = literalCommandToken(raw);
+    if (token === undefined) return undefined;
+    if (options && token === "--") {
+      options = false;
+      continue;
+    }
+    if (options && token.startsWith("-") && token !== "-") continue;
+    target = token;
+    sawTarget = true;
+    break;
+  }
+  if (!sawTarget || target === undefined || target === "-" || target.startsWith("~"))
+    return undefined;
+  if (target.startsWith("/")) return lexicalPath(target) ?? undefined;
+  if (cwd === undefined) return undefined;
+  return resolveExecutionPath(cwd, target);
+}
+
 function executesWrittenHeredoc(
   words: readonly string[],
   outputs: ReadonlySet<string>,
   bodyDynamic: boolean,
+  dir: { cwd: string | undefined },
 ): boolean {
   if (outputs.size === 0 || words.length === 0) return false;
   const index = primaryCommandIndex(words);
@@ -1338,14 +1412,18 @@ function executesWrittenHeredoc(
   const command = literalCommandToken(words[index] ?? "");
   if (!command) return bodyDynamic;
   const base = (command.split("/").at(-1) ?? command).toLowerCase();
-  if (base === "cd") return true;
-  const wrote = (raw: string) => {
+  if (base === "cd") {
+    dir.cwd = nextHeredocCwd(dir.cwd, words.slice(index + 1));
+    return false;
+  }
+  const matchesWritten = (raw: string) => {
     const token = literalCommandToken(raw);
-    return token !== undefined && outputs.has(normalizeWrittenPath(token));
+    if (token === undefined) return false;
+    const resolved = resolveExecutionPath(dir.cwd, token);
+    return resolved !== undefined && outputs.has(resolved);
   };
-  if (base === "chmod") return words.slice(index + 1).some((raw) => wrote(raw));
-  if (command.includes("/")) return true;
-  return outputs.has(normalizeWrittenPath(command));
+  if (base === "chmod") return words.slice(index + 1).some((raw) => matchesWritten(raw));
+  return matchesWritten(words[index] ?? "");
 }
 
 function braceExpansionHazard(raw: string): string | undefined {
@@ -1426,8 +1504,8 @@ function isShellOrSourceCommand(words: readonly string[]): boolean {
  * Returns a short refusal when the command is dynamic in a way the later
  * tokenizer cannot see (quotes hiding a substitution, a heredoc that is not
  * data for cat or tee, a quoted body that names a lifecycle command, a shell,
- * source, sudo, or busybox after that heredoc, a later cd or path execution
- * after a heredoc write, source of anything but a
+ * source, sudo, or busybox after that heredoc, a later command that runs a
+ * path that heredoc wrote, source of anything but a
  * literal activate path, or a write that can plant that activate script).
  */
 function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
@@ -1437,6 +1515,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
   const pending: PendingHeredoc[] = [];
   let heredocConsumed = false;
   let heredocDynamic = false;
+  const heredocDir: { cwd: string | undefined } = { cwd: "" };
   const heredocOutputs = new Set<string>();
   const pipelineWrites: string[] = [];
   let pipelineHasHeredoc = false;
@@ -1507,7 +1586,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
     if (
       heredocConsumed &&
       (isShellOrSourceCommand(words) ||
-        executesWrittenHeredoc(words, heredocOutputs, heredocDynamic))
+        executesWrittenHeredoc(words, heredocOutputs, heredocDynamic, heredocDir))
     ) {
       return "heredoc";
     }

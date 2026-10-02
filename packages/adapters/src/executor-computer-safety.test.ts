@@ -282,6 +282,11 @@ describe("computer lifecycle command guard", () => {
       "install -m 755 -t venv/bin /tmp/activate",
       "cp /tmp/evil venv/bin/./activate",
       "dd of=venv/bin/foo/../activate",
+      "mv /tmp/x/bin venv/bin",
+      "ln -s /tmp/x/bin venv/bin",
+      "cp -r /tmp/x/bin venv/bin",
+      "cp -a /tmp/x/bin venv/",
+      "mv -t venv /tmp/x/bin",
     ]) {
       expect(protectedComputerLifecycleRefusal(command), command).toBe("activate script");
     }
@@ -376,11 +381,14 @@ describe("computer lifecycle command guard", () => {
     ).toBeUndefined();
   });
 
-  it("refuses cd and a relative run after a heredoc write", () => {
+  it("refuses a relative run of a heredoc-written path after cd", () => {
     expect(
       protectedComputerLifecycleRefusal(
         "cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd sub\nchmod +x x.sh\n./x.sh",
       ),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd sub\n./x.sh"),
     ).toBe("heredoc");
     expect(
       protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\n./sub/x.sh"),
@@ -388,6 +396,15 @@ describe("computer lifecycle command guard", () => {
     expect(protectedComputerLifecycleRefusal('cat > sub/x.sh <<\'EOF\'\n"$cmd"\nEOF\n"$cmd"')).toBe(
       "heredoc",
     );
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nhello\nEOF\ncd /tmp"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd sub"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nhello\nEOF\n/usr/bin/git status"),
+    ).toBeUndefined();
     expect(
       protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\n\"$cmd\"\nEOF\necho after"),
     ).toBeUndefined();
