@@ -224,6 +224,16 @@ describe("reconcileStuckWork", () => {
 
   it("retries a pending reminder left behind when the worker stops", async () => {
     const run = candidate("waiting_takeover", 5);
+    const otherEpisode = {
+      id: "event-other-episode",
+      runId: run.id,
+      payload: {
+        notice: STUCK_WORK_NOTICE,
+        updatedAt: new Date(run.updatedAt.getTime() - 60_000).toISOString(),
+        state: "pending",
+        claimedAt: now.toISOString(),
+      },
+    };
     const stamps = [
       {
         runId: run.id,
@@ -234,6 +244,7 @@ describe("reconcileStuckWork", () => {
           claimedAt: new Date(now.getTime() - STUCK_NOTICE_CLAIM_TTL_MS - 1_000).toISOString(),
         },
       },
+      otherEpisode,
     ];
     const prisma = noticePrisma(run, stamps);
     const { jobs } = publisher();
@@ -243,6 +254,7 @@ describe("reconcileStuckWork", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(stamps).toEqual([
+      otherEpisode,
       expect.objectContaining({
         payload: {
           notice: STUCK_WORK_NOTICE,
@@ -466,10 +478,37 @@ describe("reconcileStuckWork", () => {
   });
 });
 
-function noticePrisma(
-  run: ReturnType<typeof candidate>,
-  stamps: Array<{ id?: string; runId: string | null; payload: unknown }>,
-) {
+type NoticeStamp = { id?: string; runId: string | null; payload: unknown };
+
+type NoticeDeleteWhere = {
+  id?: string;
+  runId?: string;
+  AND?: Array<{ payload?: { path?: string[]; equals?: unknown } }>;
+};
+
+function payloadValue(payload: unknown, path: string[]): unknown {
+  let current = payload;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function stampMatchesDelete(stamp: NoticeStamp, where: NoticeDeleteWhere | undefined): boolean {
+  if (!where) return false;
+  if (where.id) return stamp.id === where.id;
+  if (where.runId === undefined || stamp.runId !== where.runId) return false;
+  const clauses = where.AND ?? [];
+  if (clauses.length === 0) return false;
+  return clauses.every((clause) => {
+    const filter = clause.payload;
+    if (!filter?.path?.length) return false;
+    return payloadValue(stamp.payload, filter.path) === filter.equals;
+  });
+}
+
+function noticePrisma(run: ReturnType<typeof candidate>, stamps: NoticeStamp[]) {
   let nextId = 0;
   const prisma = {
     run: {
@@ -499,21 +538,11 @@ function noticePrisma(
         stamp.payload = args.data.payload;
         return stamp;
       }),
-      deleteMany: vi.fn(async (args?: { where?: { id?: string } }) => {
-        const id = args?.where?.id;
+      deleteMany: vi.fn(async (args?: { where?: NoticeDeleteWhere }) => {
         const before = stamps.length;
         for (let index = stamps.length - 1; index >= 0; index -= 1) {
           const stamp = stamps[index];
-          if (!stamp) continue;
-          if (id) {
-            if (stamp.id === id) stamps.splice(index, 1);
-            continue;
-          }
-          const state =
-            stamp.payload && typeof stamp.payload === "object"
-              ? (stamp.payload as { state?: unknown }).state
-              : undefined;
-          if (state === "pending") stamps.splice(index, 1);
+          if (stamp && stampMatchesDelete(stamp, args?.where)) stamps.splice(index, 1);
         }
         return { count: before - stamps.length };
       }),
