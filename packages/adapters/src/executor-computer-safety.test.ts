@@ -500,6 +500,12 @@ describe("computer lifecycle command guard", () => {
         "cat > /opt/tools/x.sh <<'EOF'\nhello\nEOF\ncd -\n/opt/tools/x.sh",
       ),
     ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd sub | cat\n./x.sh"),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd sub &\n./x.sh"),
+    ).toBe("heredoc");
   });
 
   it("refuses running a path a quoted heredoc just wrote", () => {

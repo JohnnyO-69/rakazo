@@ -2101,8 +2101,15 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
       }
     }
     simpleWrites.length = 0;
+    // A pipeline or background cd runs in a subshell, so the parent directory stays.
     const commandIndex = primaryCommandIndex(words);
-    if (commandIndex !== undefined && commandBaseAt(words, commandIndex) === "cd") {
+    if (
+      kind !== "pipe" &&
+      kind !== "background" &&
+      !inPipeline &&
+      commandIndex !== undefined &&
+      commandBaseAt(words, commandIndex) === "cd"
+    ) {
       heredocDir.cwd = nextHeredocCwd(heredocDir.cwd, words.slice(commandIndex + 1));
     }
     // Remember the write across a pending heredoc so a dangerous body can still
