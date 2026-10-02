@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { fetch as undiciFetch } from "undici";
 import { describe, expect, it, vi } from "vitest";
 import {
   classifySerenityEndpointTrust,
+  createSerenityPrivateLanFetch,
   MAX_SERENITY_FACT_BYTES,
   normalizeSerenityEndpoint,
   parseSerenityEndpoint,
@@ -285,7 +287,46 @@ describe("serenity SSRF fetch path", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/private-lan-fetch-reached/);
   });
+
+  it("drives the private-hostname dispatcher with a fetch from the same undici", async () => {
+    // A mismatched fetch throws invalid onRequestStart before the socket opens.
+    // Reaching ECONNREFUSED on the pinned address proves the package fetch
+    // accepted the Agent. Omit, builtin, and a captured builtin all pair.
+    expect(undiciFetch).not.toBe(globalThis.fetch);
+    const captured = globalThis.fetch;
+    for (const injected of [undefined, globalThis.fetch, captured] as const) {
+      const safeFetch = createSerenityPrivateLanFetch(injected, async () => [
+        { address: "127.0.0.1", family: 4 as const },
+      ]);
+      try {
+        const error = await safeFetch("https://serenity.example.test:59999/mcp", {
+          signal: AbortSignal.timeout(2_000),
+        }).then(
+          () => null,
+          (caught: unknown) => caught,
+        );
+        const text = causeText(error);
+        expect(text).not.toMatch(/onRequestStart/);
+        expect(text).toMatch(/ECONNREFUSED/);
+      } finally {
+        await safeFetch.close();
+      }
+    }
+  });
 });
+
+function causeText(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current instanceof Error && !seen.has(current) && parts.length < 8) {
+    seen.add(current);
+    parts.push(current.message);
+    if ("code" in current && typeof current.code === "string") parts.push(current.code);
+    current = current instanceof AggregateError ? current.errors[0] : current.cause;
+  }
+  return parts.join("\n");
+}
 
 type JsonRpcRequest = { id?: number; method: string; params?: { arguments?: unknown } };
 
