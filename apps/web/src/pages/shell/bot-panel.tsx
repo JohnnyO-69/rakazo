@@ -634,7 +634,11 @@ export function BotSettings({
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            onChange={(event) => setToolNameDraft(event.target.value)}
+            onChange={(event) => {
+              setToolNameDraft(event.target.value);
+              // This message is about the name being typed. Leave other save errors alone.
+              setError((current) => (current === t`Unknown tool` ? null : current));
+            }}
             onKeyDown={(event) => {
               if (event.key !== "Enter") return;
               event.preventDefault();

@@ -5241,7 +5241,8 @@ function secretGuidance(disabled?: ReadonlySet<string>): string[] {
   } else if (uses.length > 0) {
     clauses.push(`Use ${englishList(uses)}.`);
   }
-  if (clauses.length > 0) {
+  // Shell can still take a pasted credential after every secret tool is off.
+  if (clauses.length > 0 || builtinOffered(disabled, "shell")) {
     clauses.push("Never ask for a raw credential in chat or inject it into shell commands.");
   }
   return clauses;

@@ -1173,6 +1173,64 @@ describe("userTurnInstructions", () => {
     expect(text).toContain("destination_write");
     expect(text).toContain("Always put the complete final answer in your normal reply.");
   });
+
+  it("keeps the credential safeguard when secret tools are off and shell stays on", () => {
+    const instructions = userTurnInstructions({
+      ...base,
+      groupContext: undefined,
+      messagingContext: undefined,
+      redactedMemoryContext: undefined,
+      redactedScratchpadContext: undefined,
+      hasHistoricalContext: false,
+      agentEnvironmentInstruction: undefined,
+      botDirectory: undefined,
+      pluginLine: undefined,
+      agentSkillsLine: undefined,
+      taughtSkillsLine: undefined,
+      disabledBuiltinTools: new Set([
+        "request_secret",
+        "list_secrets",
+        "secret_request",
+        "forget_secret",
+      ]),
+    }).filter(Boolean);
+
+    const text = instructions.join("\n");
+    expect(text).toContain(
+      "Never ask for a raw credential in chat or inject it into shell commands.",
+    );
+    expect(text).not.toContain("request_secret");
+    expect(text).not.toContain("list_secrets");
+    expect(text).not.toContain("secret_request");
+    expect(text).not.toContain("forget_secret");
+  });
+
+  it("drops the credential safeguard when secret tools and shell are off", () => {
+    const instructions = userTurnInstructions({
+      ...base,
+      groupContext: undefined,
+      messagingContext: undefined,
+      redactedMemoryContext: undefined,
+      redactedScratchpadContext: undefined,
+      hasHistoricalContext: false,
+      agentEnvironmentInstruction: undefined,
+      botDirectory: undefined,
+      pluginLine: undefined,
+      agentSkillsLine: undefined,
+      taughtSkillsLine: undefined,
+      disabledBuiltinTools: new Set([
+        "request_secret",
+        "list_secrets",
+        "secret_request",
+        "forget_secret",
+        "shell",
+      ]),
+    }).filter(Boolean);
+
+    expect(instructions.join("\n")).not.toContain(
+      "Never ask for a raw credential in chat or inject it into shell commands.",
+    );
+  });
 });
 
 describe("dockerComputerToolInstruction", () => {

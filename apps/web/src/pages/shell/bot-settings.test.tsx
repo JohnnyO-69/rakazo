@@ -120,9 +120,15 @@ afterEach(() => {
   container.remove();
 });
 
-async function renderSettings(
-  onSave: (patch: { disabledBuiltinTools?: string[] }) => Promise<void>,
-) {
+type SavePatch = { disabledBuiltinTools?: string[] };
+
+function setField(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+async function renderSettings(onSave: (patch: SavePatch) => Promise<void>) {
   await act(async () => {
     root.render(
       <BotSettings
@@ -140,7 +146,7 @@ async function renderSettings(
 
 describe("BotSettings disabled tools", () => {
   it("omits the disabled-tool list from an unrelated save", async () => {
-    const onSave = vi.fn(async () => undefined);
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async () => undefined);
     await renderSettings(onSave);
 
     const save = [...container.querySelectorAll("button")].find(
@@ -157,7 +163,7 @@ describe("BotSettings disabled tools", () => {
   });
 
   it("sends the disabled-tool list when that list changes", async () => {
-    const onSave = vi.fn(async () => undefined);
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async () => undefined);
     await renderSettings(onSave);
 
     const toggle = container.querySelector<HTMLButtonElement>('[id$="-disabled-remember"]');
@@ -168,5 +174,45 @@ describe("BotSettings disabled tools", () => {
     await flush();
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ disabledBuiltinTools: [] }));
+  });
+
+  it("clears an unknown-tool error while the name is edited and keeps other errors", async () => {
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async () => {
+      throw new Error("Network failed");
+    });
+    await renderSettings(onSave);
+
+    const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]');
+    if (!input) throw new Error("Missing tool field");
+
+    await act(async () => {
+      setField(input, "not_a_tool");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain("Unknown tool");
+
+    await act(async () => {
+      setField(input, "web");
+    });
+    await flush();
+    expect(container.textContent).not.toContain("Unknown tool");
+
+    const save = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Save",
+    );
+    if (!save) throw new Error("Missing save button");
+    await act(async () => {
+      save.click();
+    });
+    await flush();
+    expect(container.textContent).toContain("Network failed");
+
+    await act(async () => {
+      setField(input, "web_search");
+    });
+    await flush();
+    expect(container.textContent).toContain("Network failed");
+    expect(container.textContent).not.toContain("Unknown tool");
   });
 });
