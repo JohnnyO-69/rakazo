@@ -338,14 +338,51 @@ describe("computer lifecycle command guard", () => {
       "sys''temctl re''start chromium",
       "rm -rf ~/.browser-''profiles/chromium",
       "pk'ill chromium",
-      "echo `date`",
-      "echo $((1))",
       "pk$ill chromium",
     ]) {
       expect(protectedComputerLifecycleRefusal(`cat > /tmp/x.sh <<'EOF'\n${body}\nEOF`), body).toBe(
         "heredoc",
       );
     }
+  });
+
+  it("allows quoted heredoc prose that does not name a lifecycle command", () => {
+    for (const body of [
+      "Don't restart the server",
+      "# Don't restart the server",
+      "$VAR",
+      '"Value: $VAR"',
+      "See `notes` for details",
+      "echo `date`",
+      "echo $((1))",
+    ]) {
+      expect(
+        protectedComputerLifecycleRefusal(`cat > notes.md <<'EOF'\n${body}\nEOF`),
+        body,
+      ).toBeUndefined();
+    }
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > notes.md <<'EOF'\nDon't restart the server\nEOF\necho after",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("refuses cd and a relative run after a heredoc write", () => {
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd sub\nchmod +x x.sh\n./x.sh",
+      ),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\n./sub/x.sh"),
+    ).toBe("heredoc");
+    expect(protectedComputerLifecycleRefusal('cat > sub/x.sh <<\'EOF\'\n"$cmd"\nEOF\n"$cmd"')).toBe(
+      "heredoc",
+    );
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\n\"$cmd\"\nEOF\necho after"),
+    ).toBeUndefined();
   });
 
   it("refuses running a path a quoted heredoc just wrote", () => {

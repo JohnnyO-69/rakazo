@@ -1135,6 +1135,11 @@ function quotedHeredocWords(body: string): string[] | undefined {
   let index = 0;
   while (index < body.length) {
     const character = body[index] ?? "";
+    if (!active && character === "#") {
+      const newline = body.indexOf("\n", index);
+      index = newline === -1 ? body.length : newline + 1;
+      continue;
+    }
     if (character === "'") {
       const end = body.indexOf("'", index + 1);
       if (end === -1) return undefined;
@@ -1217,10 +1222,7 @@ function quotedHeredocWords(body: string): string[] | undefined {
   return words;
 }
 
-/** A quoted body is not expanded, but it can still be a script that kills the desktop. */
-function quotedHeredocLifecycleHazard(body: string): boolean {
-  const words = quotedHeredocWords(body);
-  if (!words) return true;
+function wordsHaveLifecycleHazard(words: readonly string[]): boolean {
   let sawService = false;
   let sawServiceAction = false;
   for (const word of words) {
@@ -1233,6 +1235,55 @@ function quotedHeredocLifecycleHazard(body: string): boolean {
     if (/^(?:stop|restart|kill)$/.test(base)) sawServiceAction = true;
   }
   return sawService && sawServiceAction;
+}
+
+/** Drop quotes, backslashes, and `$`, and skip a `#` comment that starts a word. */
+function normalizedHeredocWords(body: string): string[] {
+  let text = "";
+  let quote: "'" | '"' | undefined;
+  let atWordStart = true;
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index] ?? "";
+    if (quote) {
+      if (character === quote) quote = undefined;
+      else if (character !== "\\" && character !== "$") {
+        text += character;
+        atWordStart = false;
+      }
+      continue;
+    }
+    if (atWordStart && character === "#") {
+      const newline = body.indexOf("\n", index);
+      index = newline === -1 ? body.length : newline;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === "\\" || character === "$") continue;
+    if (character === " " || character === "\t" || character === "\n") atWordStart = true;
+    else atWordStart = false;
+    text += character;
+  }
+  return text.split(/[\s;&|<>(){}]+/).filter((word) => word.length > 0);
+}
+
+/** A quoted body is data. Refuse only when a lifecycle word is still visible. */
+function quotedHeredocLifecycleHazard(body: string): boolean {
+  const words = quotedHeredocWords(body);
+  if (words && wordsHaveLifecycleHazard(words)) return true;
+  return wordsHaveLifecycleHazard(normalizedHeredocWords(body));
+}
+
+function quotedHeredocBodyIsDynamic(body: string): boolean {
+  if (body.includes("`")) return true;
+  for (let index = 0; index < body.length - 1; index += 1) {
+    if (body[index] !== "$") continue;
+    const next = body[index + 1] ?? "";
+    if (next === "(" || next === "{" || /[A-Za-z0-9_*@#?$!-]/.test(next)) return true;
+  }
+  return false;
 }
 
 /** `$name` or `${name}` only. Anything else can hide the word that runs. */
@@ -1277,18 +1328,24 @@ function teeDestinationPaths(words: readonly string[]): string[] {
   return paths;
 }
 
-function executesWrittenHeredoc(words: readonly string[], outputs: ReadonlySet<string>): boolean {
-  if (outputs.size === 0) return false;
+function executesWrittenHeredoc(
+  words: readonly string[],
+  outputs: ReadonlySet<string>,
+  bodyDynamic: boolean,
+): boolean {
+  if (outputs.size === 0 || words.length === 0) return false;
   const index = primaryCommandIndex(words);
-  if (index === undefined) return false;
+  if (index === undefined) return bodyDynamic;
   const command = literalCommandToken(words[index] ?? "");
-  if (!command) return false;
+  if (!command) return bodyDynamic;
   const base = (command.split("/").at(-1) ?? command).toLowerCase();
+  if (base === "cd") return true;
   const wrote = (raw: string) => {
     const token = literalCommandToken(raw);
     return token !== undefined && outputs.has(normalizeWrittenPath(token));
   };
   if (base === "chmod") return words.slice(index + 1).some((raw) => wrote(raw));
+  if (command.includes("/")) return true;
   return outputs.has(normalizeWrittenPath(command));
 }
 
@@ -1369,9 +1426,9 @@ function isShellOrSourceCommand(words: readonly string[]): boolean {
  * Drop comments and quoted heredoc bodies, and substitute literal assignments.
  * Returns a short refusal when the command is dynamic in a way the later
  * tokenizer cannot see (quotes hiding a substitution, a heredoc that is not
- * data for cat or tee, a quoted body that names a lifecycle command or cannot
- * be inspected, a shell, source, sudo, or busybox after that heredoc, a later
- * command that runs a path that heredoc wrote, source of anything but a
+ * data for cat or tee, a quoted body that names a lifecycle command, a shell,
+ * source, sudo, or busybox after that heredoc, a later cd or path execution
+ * after a heredoc write, source of anything but a
  * literal activate path, or a write that can plant that activate script).
  */
 function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
@@ -1380,6 +1437,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
   const usedKeys = new Set<string>();
   const pending: PendingHeredoc[] = [];
   let heredocConsumed = false;
+  let heredocDynamic = false;
   const heredocOutputs = new Set<string>();
   const pipelineWrites: string[] = [];
   let pipelineHasHeredoc = false;
@@ -1449,7 +1507,8 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
     if (activateWrite && pending.length === 0) return "activate script";
     if (
       heredocConsumed &&
-      (isShellOrSourceCommand(words) || executesWrittenHeredoc(words, heredocOutputs))
+      (isShellOrSourceCommand(words) ||
+        executesWrittenHeredoc(words, heredocOutputs, heredocDynamic))
     ) {
       return "heredoc";
     }
@@ -1627,6 +1686,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
         if (!body) return { reason: "heredoc" };
         if (heredoc.quoted) {
           if (quotedHeredocLifecycleHazard(body.content)) return { reason: "heredoc" };
+          if (quotedHeredocBodyIsDynamic(body.content)) heredocDynamic = true;
         } else {
           const hazard = heredocBodyHazard(body.content);
           if (hazard) return { reason: hazard };
