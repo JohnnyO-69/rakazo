@@ -91,11 +91,35 @@ describe("observeShellCommand", () => {
       },
     );
 
+    expect(seen[0]).not.toContain("super-");
     expect(seen.at(-1)).toBe("prefix [redacted] suffix\n");
     expect(observed.result.stdout).toBe("prefix [redacted] suffix\n");
     expect(observed.result.stdout).not.toContain("super-secret-token");
     releaseExit();
     await observed.completion;
+  });
+
+  it("redacts a secret split across stdout and stderr before it is joined", async () => {
+    const seen: string[] = [];
+    const observed = await observeShellCommand(
+      (async function* () {
+        yield { type: "stdout" as const, data: "pre SECR" };
+        yield { type: "stderr" as const, data: "ET123 post" };
+        yield { type: "exit" as const, code: 0 };
+      })(),
+      {
+        secrets: ["SECRET123"],
+        idleMs: 30,
+        onOutput: (snapshot) => {
+          seen.push(`${snapshot.stdout}${snapshot.stderr}`);
+        },
+      },
+    );
+
+    const joined = `${observed.result.stdout}${observed.result.stderr}`;
+    expect(joined).toBe("pre [redacted] post");
+    expect(joined).not.toContain("SECRET123");
+    expect(seen.every((line) => !line.includes("SECRET123"))).toBe(true);
   });
 });
 

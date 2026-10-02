@@ -132,7 +132,14 @@ describe("BotCredentialsSection", () => {
   });
 
   it("adds a header credential and clears the value, then refetches", async () => {
-    botSecrets.put.mockResolvedValue(rows[1]);
+    const savedHeader = rows[1];
+    if (!savedHeader) throw new Error("missing header fixture");
+    let resolvePut: (row: typeof savedHeader) => void = () => undefined;
+    botSecrets.put.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePut = resolve;
+      }),
+    );
     await render();
     await click("credential-add");
     await type("credential-name", "custom");
@@ -143,6 +150,13 @@ describe("BotCredentialsSection", () => {
     expect(byTestId<HTMLInputElement>("credential-value").type).toBe("password");
     expect(byTestId<HTMLInputElement>("credential-value").autocomplete).toBe("new-password");
     await click("credential-add-save");
+    expect(byTestId<HTMLInputElement>("credential-value").value).toBe("");
+    expect(container.innerHTML).not.toContain(FAKE_VALUE);
+
+    await act(async () => {
+      resolvePut(savedHeader);
+    });
+    await flush();
 
     expect(botSecrets.put).toHaveBeenCalledWith({
       botId: "bot-1",

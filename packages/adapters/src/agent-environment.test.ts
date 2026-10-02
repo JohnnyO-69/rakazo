@@ -3,6 +3,7 @@ import {
   decryptAgentEnvironment,
   formatAgentEnvironmentInstruction,
   redactAgentCommandResult,
+  redactShellStreams,
 } from "./agent-environment.js";
 
 describe("agent-environment", () => {
@@ -45,6 +46,28 @@ describe("agent-environment", () => {
       stdout: expect.not.stringContaining("super-secret"),
       stderr: expect.not.stringContaining("super-secret"),
       code: 1,
+    });
+  });
+
+  it("redacts a secret split across stdout and stderr", () => {
+    const output = redactAgentCommandResult({ stdout: "pre SECR", stderr: "ET123 post", code: 0 }, [
+      "SECRET123",
+    ]);
+    const joined = `${output.stdout}${output.stderr}`;
+    expect(joined).toBe("pre [redacted] post");
+    expect(joined).not.toContain("SECRET123");
+  });
+
+  it("withholds a secret prefix from a running view and emits it when finished", () => {
+    const secret = "super-secret-token";
+    expect(
+      redactShellStreams({ stdout: "prefix super-", stderr: "" }, [secret], {
+        withholdPartial: true,
+      }),
+    ).toEqual({ stdout: "prefix ", stderr: "" });
+    expect(redactShellStreams({ stdout: "prefix super-", stderr: "" }, [secret])).toEqual({
+      stdout: "prefix super-",
+      stderr: "",
     });
   });
 });

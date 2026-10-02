@@ -117,7 +117,11 @@ import {
   messageConnectedAgent,
   respondAgentConnection,
 } from "./agent-connections.js";
-import { decryptAgentEnvironment, formatAgentEnvironmentInstruction } from "./agent-environment.js";
+import {
+  decryptAgentEnvironment,
+  formatAgentEnvironmentInstruction,
+  redactShellStreams,
+} from "./agent-environment.js";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 import {
   approvalPausedToolResult,
@@ -2785,8 +2789,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
                 if (!publishTimer) publishTimer = setTimeout(send, 400);
               };
-              const commandOutput = (snapshot: { stdout: string; stderr: string }) =>
-                `${snapshot.stdout}${snapshot.stderr}`;
+              const commandOutput = (
+                snapshot: { stdout: string; stderr: string },
+                withholdPartial: boolean,
+              ) => {
+                const safe = redactShellStreams(snapshot, runSecrets, { withholdPartial });
+                return `${safe.stdout}${safe.stderr}`;
+              };
               const observed = await observeShellCommand(
                 deps.sandbox.execute(
                   computer,
@@ -2813,7 +2822,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 {
                   secrets: runSecrets,
                   onOutput: (snapshot) => {
-                    const output = commandOutput(snapshot);
+                    const output = commandOutput(snapshot, true);
                     if (output) publishRunning(output);
                   },
                 },
@@ -2825,12 +2834,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ...commandEvent,
                     status: "done",
                     exitCode: final.code,
-                    output: commandOutput(final).slice(-COMPUTER_COMMAND_OUTPUT_MAX_CHARS),
+                    output: commandOutput(final, false).slice(-COMPUTER_COMMAND_OUTPUT_MAX_CHARS),
                   });
                   return final;
                 });
                 void completion.catch(() => undefined);
-                publishRunning(commandOutput(observed.result), true);
+                publishRunning(commandOutput(observed.result, true), true);
                 const returned = await finish({
                   stdout: observed.result.stdout,
                   stderr: observed.result.stderr,
@@ -2847,7 +2856,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ...commandEvent,
                 status: "done",
                 exitCode: redacted.code,
-                output: commandOutput(redacted).slice(-COMPUTER_COMMAND_OUTPUT_MAX_CHARS),
+                output: commandOutput(redacted, false).slice(-COMPUTER_COMMAND_OUTPUT_MAX_CHARS),
               });
               return finish(redacted);
             } catch (error) {
