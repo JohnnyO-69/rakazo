@@ -1,7 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { isLocalMcpHost } from "@rakazo/contracts";
-import type { ResolveHostname } from "./network-address.js";
+import type { ResolvedAddress, ResolveHostname } from "./network-address.js";
 import { createPrivateNetworkFetch } from "./remote-mcp.js";
 import { readBodyCapped } from "./web-ssrf.js";
 
@@ -35,6 +35,11 @@ export interface SupermemoryConnectionConfig {
   apiKey: string;
   /** Test seam. Production resolves Compose DNS and pins the private answers. */
   resolveHostname?: ResolveHostname;
+  /**
+   * Private addresses already accepted for this host. The transport checks them
+   * again at request time and does not resolve the name.
+   */
+  pinnedAddresses?: ResolvedAddress[];
 }
 
 /** Base URLs are route prefixes, never credentials or request query/fragment state. */
@@ -64,6 +69,12 @@ function requestUrl(baseUrl: string, path: string): string {
 const defaultResolveHostname: ResolveHostname = (hostname) =>
   lookup(hostname, { all: true, verbatim: true });
 
+function resolverFor(config: SupermemoryConnectionConfig): ResolveHostname {
+  if (!config.pinnedAddresses) return config.resolveHostname ?? defaultResolveHostname;
+  const addresses = config.pinnedAddresses;
+  return async () => addresses;
+}
+
 function hostnameOf(url: URL): string {
   return url.hostname
     .replace(/^\[|\]$/g, "")
@@ -90,12 +101,62 @@ async function fetchSupermemory(
   init: RequestInit,
 ): Promise<Response> {
   if (!pinsPrivateDns(config.baseUrl)) return fetch(url, init);
-  const safe = createPrivateNetworkFetch(fetch, config.resolveHostname ?? defaultResolveHostname);
+  const safe = createPrivateNetworkFetch(fetch, resolverFor(config));
   try {
-    return await safe(url, init);
-  } finally {
-    await safe.close();
+    const response = await safe(url, init);
+    // Closing the pinned dispatcher waits until its response body settles.
+    // Hand the body to the caller first, and close when they read or cancel it.
+    return releaseTransportWithBody(response, () => safe.close());
+  } catch (error) {
+    await safe.close().catch(() => undefined);
+    throw error;
   }
+}
+
+function releaseTransportWithBody(response: Response, close: () => Promise<void>): Response {
+  let closed = false;
+  const release = () => {
+    if (closed) return;
+    closed = true;
+    void close().catch(() => undefined);
+  };
+  if (!response.body) {
+    release();
+    return response;
+  }
+  const reader = response.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await reader.read();
+        if (result.done) {
+          controller.close();
+          release();
+          return;
+        }
+        controller.enqueue(result.value);
+      } catch (error) {
+        release();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        release();
+      }
+    },
+  });
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+async function releaseUnreadBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 function requestSignal(signal?: AbortSignal): AbortSignal {
@@ -163,6 +224,7 @@ export async function searchSupermemory(
       signal: requestAbort,
     });
     if (!response.ok) {
+      await releaseUnreadBody(response);
       return { ok: false, error: `Supermemory search failed: ${response.status}` };
     }
     return {
@@ -252,10 +314,14 @@ export async function deleteSupermemoryContainer(
         signal: requestSignal(signal),
       },
     );
-    if (!response.ok) {
-      return { ok: false, error: `Supermemory container delete failed: ${response.status}` };
+    try {
+      if (!response.ok) {
+        return { ok: false, error: `Supermemory container delete failed: ${response.status}` };
+      }
+      return { ok: true };
+    } finally {
+      await releaseUnreadBody(response);
     }
-    return { ok: true };
   } catch (error) {
     return { ok: false, error: unreachableError(error) };
   }
@@ -279,10 +345,14 @@ export async function saveSupermemoryMemory(
       redirect: "error",
       signal: requestSignal(signal),
     });
-    if (!response.ok) {
-      return { ok: false, error: `Supermemory save failed: ${response.status}` };
+    try {
+      if (!response.ok) {
+        return { ok: false, error: `Supermemory save failed: ${response.status}` };
+      }
+      return { ok: true };
+    } finally {
+      await releaseUnreadBody(response);
     }
-    return { ok: true };
   } catch (error) {
     return { ok: false, error: unreachableError(error) };
   }
@@ -328,10 +398,14 @@ export async function probeSupermemory(
         signal: AbortSignal.timeout(SUPERMEMORY_TIMEOUT_MS),
       },
     );
-    if (!response.ok) {
-      return { ok: false, error: `Supermemory rejected the connection: ${response.status}` };
+    try {
+      if (!response.ok) {
+        return { ok: false, error: `Supermemory rejected the connection: ${response.status}` };
+      }
+      return { ok: true };
+    } finally {
+      await releaseUnreadBody(response);
     }
-    return { ok: true };
   } catch (error) {
     return { ok: false, error: unreachableError(error) };
   }

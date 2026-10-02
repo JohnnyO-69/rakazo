@@ -12,7 +12,7 @@ import type {
 import { isCloudMetadataHost, isLocalMcpHost } from "@rakazo/contracts";
 import type { ResolvedAddress, ResolveHostname } from "./network-address.js";
 import { isCloudMetadataAddress, isLinkLocalAddress, isPrivateAddress } from "./network-address.js";
-import { assertSafeRemoteUrl, isPrivateRemoteMcpHostname } from "./remote-mcp.js";
+import { isPrivateRemoteMcpHostname } from "./remote-mcp.js";
 import { MemoryProviderDeploymentOwnerRequiredError } from "./serenity-memory-provider.js";
 import type { SupermemoryConnectionConfig } from "./supermemory-client.js";
 import {
@@ -73,7 +73,33 @@ function assertSupermemoryLocalBaseUrlSync(baseUrl: string): void {
 /**
  * Local mode accepts loopback or a private-network host (Compose DNS, RFC1918, LAN suffixes).
  * Public hosts stay rejected. Private hosts require deployment-owner authorization.
+ * Returns the pinned addresses for a hostname, or undefined when the host needs no DNS pin.
  */
+async function pinSupermemoryPrivateHost(
+  baseUrl: string,
+  options: {
+    allowPrivateEndpoint?: boolean;
+    resolveHostname?: ResolveHostname;
+  } = {},
+): Promise<ResolvedAddress[] | undefined> {
+  assertSupermemoryLocalBaseUrlSync(baseUrl);
+  const host = hostnameOf(parseSupermemoryBaseUrl(baseUrl));
+  if (isLocalMcpHost(host)) return undefined;
+  if (options.allowPrivateEndpoint !== true) {
+    throw new MemoryProviderDeploymentOwnerRequiredError();
+  }
+  if (isIP(host) !== 0) return undefined;
+  const resolve = options.resolveHostname ?? defaultResolveHostname;
+  let addresses: ResolvedAddress[];
+  try {
+    addresses = await resolve(host);
+  } catch {
+    throw new Error(LOCAL_NETWORK_ERROR);
+  }
+  assertPrivateLanAddresses(addresses);
+  return addresses.map((entry) => ({ address: entry.address, family: entry.family }));
+}
+
 export async function assertSupermemoryLocalBaseUrl(
   baseUrl: string,
   options: {
@@ -81,27 +107,7 @@ export async function assertSupermemoryLocalBaseUrl(
     resolveHostname?: ResolveHostname;
   } = {},
 ): Promise<void> {
-  assertSupermemoryLocalBaseUrlSync(baseUrl);
-  const host = hostnameOf(parseSupermemoryBaseUrl(baseUrl));
-  if (isLocalMcpHost(host)) return;
-  if (options.allowPrivateEndpoint !== true) {
-    throw new MemoryProviderDeploymentOwnerRequiredError();
-  }
-  const resolve = options.resolveHostname ?? defaultResolveHostname;
-  if (isIP(host) === 0) {
-    let addresses: ResolvedAddress[];
-    try {
-      addresses = await resolve(host);
-    } catch {
-      throw new Error(LOCAL_NETWORK_ERROR);
-    }
-    assertPrivateLanAddresses(addresses);
-  }
-  try {
-    await assertSafeRemoteUrl(baseUrl, resolve, { allowPrivateEndpoint: true });
-  } catch {
-    throw new Error(isBlockedSupermemoryHost(host) ? BLOCKED_TARGET_ERROR : LOCAL_NETWORK_ERROR);
-  }
+  await pinSupermemoryPrivateHost(baseUrl, options);
 }
 
 function isSupermemoryCloudBaseUrl(baseUrl: string): boolean {
@@ -141,11 +147,13 @@ export async function prepareSupermemoryConnection(
   options?: { allowPrivateEndpoint?: boolean; resolveHostname?: ResolveHostname },
 ): Promise<{ settings: Record<string, string>; credentials: Record<string, string> }> {
   const { mode, baseUrl, apiKey } = parseSupermemoryConnection(settings, credentials);
-  if (mode === "local") await assertSupermemoryLocalBaseUrl(baseUrl, options);
+  const pinnedAddresses =
+    mode === "local" ? await pinSupermemoryPrivateHost(baseUrl, options) : undefined;
   const probe = await probeSupermemory({
     baseUrl,
     apiKey,
     resolveHostname: options?.resolveHostname,
+    ...(pinnedAddresses ? { pinnedAddresses } : {}),
   });
   if (!probe.ok) throw new Error(probe.error);
   return { settings: { mode, baseUrl }, credentials: { apiKey } };
@@ -184,16 +192,39 @@ function recallContainerTags(request: SemanticMemoryRecallRequest, spaceId: stri
 }
 
 export class SupermemoryMemoryProvider implements SemanticMemoryProvider {
+  private pinnedAddresses?: ResolvedAddress[];
+  private hostReady = false;
+  private pinTask?: Promise<void>;
+
   constructor(private readonly connection: SupermemoryConnectionConfig) {}
 
   private async localBaseUrlBlock(): Promise<string | null> {
     if (isSupermemoryCloudBaseUrl(this.connection.baseUrl)) return null;
+    // One successful check per provider. Repeating it would let a DNS blip block
+    // a host this provider already reached, and multi-tag recall would redo it.
+    if (this.hostReady) return null;
+    this.pinTask ??= this.resolvePin();
     try {
-      await assertSupermemoryLocalBaseUrl(this.connection.baseUrl, { allowPrivateEndpoint: true });
+      await this.pinTask;
+      this.hostReady = true;
       return null;
     } catch (error) {
+      this.pinTask = undefined;
       return error instanceof Error ? error.message : BLOCKED_TARGET_ERROR;
     }
+  }
+
+  private async resolvePin(): Promise<void> {
+    const pinned = await pinSupermemoryPrivateHost(this.connection.baseUrl, {
+      allowPrivateEndpoint: true,
+      resolveHostname: this.connection.resolveHostname,
+    });
+    if (pinned) this.pinnedAddresses = pinned;
+  }
+
+  private connectionForRequest(): SupermemoryConnectionConfig {
+    if (!this.pinnedAddresses) return this.connection;
+    return { ...this.connection, pinnedAddresses: this.pinnedAddresses };
   }
 
   describe() {
@@ -219,7 +250,7 @@ export class SupermemoryMemoryProvider implements SemanticMemoryProvider {
     const result = await searchSupermemoryContainers(
       request.query,
       recallContainerTags(request, context.spaceId),
-      this.connection,
+      this.connectionForRequest(),
       request.limit,
       context.signal,
     );
@@ -248,7 +279,7 @@ export class SupermemoryMemoryProvider implements SemanticMemoryProvider {
     const result = await saveSupermemoryMemoryToContainers(
       request.content,
       tags,
-      this.connection,
+      this.connectionForRequest(),
       context.signal,
     );
     return result.ok ? { ok: true, value: undefined } : result;
@@ -264,7 +295,7 @@ export class SupermemoryMemoryProvider implements SemanticMemoryProvider {
       [...new Set(request.generations)].map((generation) =>
         deleteSupermemoryContainer(
           historyContainerTag(request.botId, generation),
-          this.connection,
+          this.connectionForRequest(),
           context.signal,
         ),
       ),

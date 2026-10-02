@@ -1,5 +1,6 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ResolveHostname } from "./network-address.js";
 import { MemoryProviderDeploymentOwnerRequiredError } from "./serenity-memory-provider.js";
 import {
   prepareSupermemoryConnection,
@@ -175,17 +176,19 @@ describe("Supermemory local base URL", () => {
   it("accepts a Compose service name that resolves to a private address", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
+    const resolveHostname = vi.fn(privateResolver);
 
     const prepared = await prepareSupermemoryConnection(
       { mode: "local", baseUrl: "http://supermemory:6767" },
       credentials,
-      { allowPrivateEndpoint: true, resolveHostname: privateResolver },
+      { allowPrivateEndpoint: true, resolveHostname },
     );
 
     expect(prepared.settings).toEqual({ mode: "local", baseUrl: "http://supermemory:6767" });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       "http://supermemory:6767/v3/container-tags/list",
     );
+    expect(resolveHostname).toHaveBeenCalledOnce();
   });
 
   it("accepts Docker Desktop and private-suffix hosts that resolve privately", async () => {
@@ -282,5 +285,80 @@ describe("Supermemory local base URL", () => {
 
     expect(resolveHostname).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Supermemory private host reuse", () => {
+  function privateProvider(resolveHostname: ResolveHostname) {
+    return new SupermemoryMemoryProvider({
+      baseUrl: "http://supermemory:6767",
+      apiKey: "sm_test_key",
+      resolveHostname,
+    });
+  }
+
+  it("resolves a private hostname once for multi-tag recall, save, and purge", async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const resolveHostname = vi.fn(privateResolver);
+    const memory = privateProvider(resolveHostname);
+
+    await expect(
+      memory.recall({ query: "project", scope: "shared", botId: "bot-1", limit: 5 }, context),
+    ).resolves.toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(resolveHostname).toHaveBeenCalledOnce();
+
+    resolveHostname.mockRejectedValue(new Error("dns blip"));
+    await expect(
+      memory.recall({ query: "project", scope: "isolated", botId: "bot-1", limit: 1 }, context),
+    ).resolves.toMatchObject({ ok: true });
+    await memory.save(
+      {
+        content: "Use metric units.",
+        scope: "isolated",
+        botId: "bot-1",
+        source: { kind: "durable" },
+      },
+      context,
+    );
+    await memory.purgeHistory({ botId: "bot-1", generations: [1] }, context);
+
+    expect(resolveHostname).toHaveBeenCalledOnce();
+  });
+
+  it("retries a private hostname after a failed lookup", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const resolveHostname = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("eai_again"))
+      .mockResolvedValue([{ address: "172.18.0.4", family: 4 as const }]);
+    const memory = privateProvider(resolveHostname);
+
+    await expect(
+      memory.recall({ query: "project", scope: "isolated", botId: "bot-1", limit: 1 }, context),
+    ).resolves.toEqual({
+      ok: false,
+      error: "Local mode requires a loopback or private-network address.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(
+      memory.recall({ query: "project", scope: "isolated", botId: "bot-1", limit: 1 }, context),
+    ).resolves.toMatchObject({ ok: true });
+    expect(resolveHostname).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
