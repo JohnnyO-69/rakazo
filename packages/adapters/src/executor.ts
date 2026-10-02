@@ -493,9 +493,40 @@ function isLiteralActivatePath(text: string): boolean {
   return /(?:^|\/)bin\/activate$/.test(text);
 }
 
+/**
+ * Collapse repeated slashes and `.` / `..` without reading the filesystem.
+ * Undefined when a relative `..` escapes the path that is visible here.
+ */
+function lexicalPath(path: string): string | undefined {
+  if (path.includes("\0")) return undefined;
+  const absolute = path.startsWith("/");
+  const stack: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (stack.length === 0) {
+        if (absolute) continue;
+        return undefined;
+      }
+      stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+  if (absolute) return `/${stack.join("/")}`;
+  return stack.join("/");
+}
+
+/** A write can plant `bin/activate`, or the destination cannot be normalized. */
+function isActivateWritePath(path: string): boolean {
+  const normalized = lexicalPath(path);
+  if (normalized === undefined) return true;
+  return isLiteralActivatePath(normalized);
+}
+
 /** Refuse planting a script that `source …/bin/activate` would later run unchecked. */
 export function protectedActivateScriptWriteRefusal(path: string): string | undefined {
-  return isLiteralActivatePath(path) ? "activate script" : undefined;
+  return isActivateWritePath(path) ? "activate script" : undefined;
 }
 
 function unresolvedVariableReason(name: string): string {
@@ -716,7 +747,7 @@ function isActivateWriteTarget(
   const text = activateOperand(raw, words, env);
   if (text === undefined) return false;
   if (op === ">&" && /^\d+$/.test(text)) return false;
-  return isLiteralActivatePath(text);
+  return isActivateWritePath(text);
 }
 
 function commandWritesActivateScript(
@@ -731,21 +762,112 @@ function commandWritesActivateScript(
   if (base === "dd") {
     return args.some((raw) => {
       const token = literalCommandToken(raw);
-      return Boolean(token?.startsWith("of=") && isLiteralActivatePath(token.slice("of=".length)));
+      return Boolean(token?.startsWith("of=") && isActivateWritePath(token.slice("of=".length)));
     });
   }
-  if (base !== "tee" && !ACTIVATE_DESTINATION_COMMANDS.has(base)) return false;
-  const operands: string[] = [];
-  for (const raw of args) {
-    const token = literalCommandToken(raw);
-    if (token === "--" || (token?.startsWith("-") && token !== "-")) continue;
-    const value = activateOperand(raw, words, env);
-    if (value === undefined) continue;
-    operands.push(value);
+  if (base === "tee") {
+    return args.some((raw) => {
+      const token = literalCommandToken(raw);
+      if (token === "--" || (token?.startsWith("-") && token !== "-")) return false;
+      const value = activateOperand(raw, words, env);
+      return value !== undefined && isActivateWritePath(value);
+    });
   }
-  if (base === "tee") return operands.some((token) => isLiteralActivatePath(token));
-  const destination = operands.at(-1);
-  return destination !== undefined && isLiteralActivatePath(destination);
+  if (!ACTIVATE_DESTINATION_COMMANDS.has(base)) return false;
+  return copyCommandWritesActivate(base, args, words, env);
+}
+
+const COPY_ARGUMENT_LETTERS: Record<string, string> = {
+  cp: "tS",
+  install: "gmotS",
+  ln: "tS",
+  mv: "tS",
+};
+
+const COPY_LONG_ARGUMENTS = new Set([
+  "--group",
+  "--mode",
+  "--owner",
+  "--strip-program",
+  "--suffix",
+  "--target-directory",
+]);
+
+/** `cp -t dir file` writes `dir/file`, not `file`. The same `-t` form applies to install, ln, and mv. */
+function copyCommandWritesActivate(
+  base: string,
+  args: readonly string[],
+  words: readonly string[],
+  env: ReadonlyMap<string, string>,
+): boolean {
+  const letters = COPY_ARGUMENT_LETTERS[base] ?? "t";
+  let targetDir: string | undefined;
+  const sources: string[] = [];
+  let hiddenSource = false;
+  let options = true;
+  for (let index = 0; index < args.length; index += 1) {
+    const raw = args[index] ?? "";
+    const token = literalCommandToken(raw);
+    if (options && token === "--") {
+      options = false;
+      continue;
+    }
+    if (options && token?.startsWith("--")) {
+      const eq = token.indexOf("=");
+      const name = eq === -1 ? token : token.slice(0, eq);
+      let value = eq === -1 ? undefined : token.slice(eq + 1);
+      if (COPY_LONG_ARGUMENTS.has(name) && eq === -1) {
+        index += 1;
+        value = index < args.length ? activateOperand(args[index] ?? "", words, env) : undefined;
+      }
+      if (name === "--target-directory") {
+        if (value === undefined) return true;
+        targetDir = value;
+      }
+      continue;
+    }
+    if (options && token?.startsWith("-") && token !== "-") {
+      for (let cursor = 1; cursor < token.length; cursor += 1) {
+        const letter = token[cursor] ?? "";
+        if (!letters.includes(letter)) continue;
+        const rest = token.slice(cursor + 1);
+        let value: string | undefined;
+        if (rest.length > 0) value = rest;
+        else if (index + 1 < args.length) {
+          index += 1;
+          value = activateOperand(args[index] ?? "", words, env);
+        }
+        if (letter === "t") {
+          if (value === undefined) return true;
+          targetDir = value;
+        }
+        break;
+      }
+      continue;
+    }
+    const value = token === undefined ? activateOperand(raw, words, env) : token;
+    if (value === undefined) {
+      hiddenSource = true;
+      continue;
+    }
+    sources.push(value);
+  }
+  if (targetDir !== undefined) {
+    if (hiddenSource) return true;
+    const directory = targetDir;
+    return sources.some((source) => copiedIntoActivates(directory, source));
+  }
+  const destination = sources.at(-1);
+  return destination !== undefined && isActivateWritePath(destination);
+}
+
+function copiedIntoActivates(directory: string, source: string): boolean {
+  const stripped = source.replace(/\/+$/, "");
+  const slash = stripped.lastIndexOf("/");
+  const name = slash === -1 ? stripped : stripped.slice(slash + 1);
+  if (name === "" || name === "." || name === "..") return isActivateWritePath(directory);
+  const prefix = directory.endsWith("/") ? directory : `${directory}/`;
+  return isActivateWritePath(`${prefix}${name}`);
 }
 
 function printfAssignedName(args: readonly string[]): string | null | undefined {
@@ -765,8 +887,9 @@ function printfAssignedName(args: readonly string[]): string | null | undefined 
 
 /**
  * Variables a command may assign outside a plain assignment list.
- * `clear` drops every tracked literal: the target was not a fixed name, or a
- * sourced script can assign anything. Undefined means this command cannot.
+ * `clear` drops every tracked literal: the target was not a fixed name, a
+ * nameref can retarget one, or a sourced script can assign anything.
+ * Undefined means this command cannot.
  */
 function externalAssignments(
   words: readonly string[],
@@ -793,10 +916,22 @@ function externalAssignments(
   if (base === "read") names.push("REPLY");
   if (base === "mapfile" || base === "readarray") names.push("MAPFILE");
   if (base === "getopts") names.push("OPTARG", "OPTIND");
+  const namerefCommand =
+    base === "declare" || base === "local" || base === "readonly" || base === "typeset";
+  let options = true;
+  let nameref = false;
   for (const raw of args) {
     const token = literalCommandToken(raw);
     if (token === undefined) return { clear: true, names };
-    if (token.startsWith("-")) continue;
+    if (options && token === "--") {
+      options = false;
+      continue;
+    }
+    if (options && token.startsWith("-")) {
+      // `-n` retargets a later assignment. Drop every literal instead of following it.
+      if (namerefCommand && !token.startsWith("--") && token.slice(1).includes("n")) nameref = true;
+      continue;
+    }
     const parsed = parseAssignment(raw);
     if (parsed) {
       names.push(parsed.name);
@@ -805,6 +940,7 @@ function externalAssignments(
     const name = identifierFromToken(token);
     if (name) names.push(name);
   }
+  if (nameref) return { clear: true, names: [] };
   return { clear: false, names };
 }
 

@@ -221,6 +221,25 @@ describe("computer lifecycle command guard", () => {
     }
   });
 
+  it("clears every tracked literal when a nameref can retarget one", () => {
+    for (const command of [
+      "dir=echo; declare -n alias=dir; alias=pkill; $dir chromium",
+      "dir=echo; typeset -n alias=dir; alias=pkill; $dir chromium",
+      "dir=echo; local -n alias=dir; alias=pkill; $dir chromium",
+      "dir=echo; readonly -n alias=dir; alias=pkill; $dir chromium",
+      "dir=echo; declare -xn alias=dir; alias=pkill; $dir chromium",
+      'dir=/tmp/app; declare -n alias=other; echo "$dir"',
+    ]) {
+      expect(protectedComputerLifecycleRefusal(command), command).toBe("unresolved variable $dir");
+    }
+    expect(
+      protectedComputerLifecycleRefusal('dir=/tmp/app; declare -p; echo "$dir"'),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal('dir=/tmp/app; declare -- -n; echo "$dir"'),
+    ).toBeUndefined();
+  });
+
   it("does not substitute expansions after IFS changes", () => {
     expect(protectedComputerLifecycleRefusal("IFS=X; dir=pkillXchromium; $dir")).toBe(
       "unresolved variable $dir",
@@ -247,6 +266,22 @@ describe("computer lifecycle command guard", () => {
       "mv /tmp/evil venv/bin/activate",
       "install /tmp/evil venv/bin/activate",
       "dd of=venv/bin/activate",
+      "echo hi > venv/bin/./activate",
+      "echo hi > venv/bin/foo/../activate",
+      "echo hi > venv/bin//activate",
+      "cp -t venv/bin /tmp/activate",
+      "cp -tvenv/bin /tmp/activate",
+      "cp --target-directory venv/bin /tmp/activate",
+      "cp --target-directory=venv/bin /tmp/activate",
+      "cp -t venv/bin/./ /tmp/activate",
+      "mv -t venv/bin /tmp/activate",
+      "mv --target-directory=venv/bin /tmp/activate",
+      "ln -t venv/bin /tmp/activate",
+      "install -t venv/bin /tmp/activate",
+      "install --target-directory=venv/bin /tmp/activate",
+      "install -m 755 -t venv/bin /tmp/activate",
+      "cp /tmp/evil venv/bin/./activate",
+      "dd of=venv/bin/foo/../activate",
     ]) {
       expect(protectedComputerLifecycleRefusal(command), command).toBe("activate script");
     }
@@ -254,10 +289,25 @@ describe("computer lifecycle command guard", () => {
       undefined,
     );
     expect(protectedComputerLifecycleRefusal("cp venv/bin/activate /tmp/backup")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("cp -t /backup venv/bin/activate")).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("mv --target-directory=/backup venv/bin/activate"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("install -t /backup venv/bin/activate"),
+    ).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("ln -t /backup venv/bin/activate")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal('dest=notes.md; printf x > "$dest"')).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("source venv/bin/activate")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("source venv/bin/./activate")).toBe("source");
     expect(protectedActivateScriptWriteRefusal("venv/bin/activate")).toBe("activate script");
     expect(protectedActivateScriptWriteRefusal("./bin/activate")).toBe("activate script");
     expect(protectedActivateScriptWriteRefusal("/tmp/v/bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("venv/bin/./activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("venv/bin/foo/../activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("//tmp//v/bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("../venv/bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("foo/../../bin/activate")).toBe("activate script");
     expect(protectedActivateScriptWriteRefusal("notes.md")).toBeUndefined();
     expect(protectedActivateScriptWriteRefusal("venv/bin/activate.fish")).toBeUndefined();
   });
