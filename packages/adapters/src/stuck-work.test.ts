@@ -5,9 +5,9 @@ import type { JobPublisher, NotificationProvider } from "@rakazo/adapter-kit";
 import { STUCK_WORK_NOTICE, stuckWorkStatusMessage } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ExpoPushProvider, savePushToken } from "./expo-push.js";
+import { deletePushToken, ExpoPushProvider, savePushToken } from "./expo-push.js";
 import { createJobReconciler } from "./job-reconciler.js";
-import { reconcileStuckWork } from "./stuck-work.js";
+import { reconcileStuckWork, STUCK_NOTICE_CLAIM_TTL_MS } from "./stuck-work.js";
 
 const now = new Date("2026-09-28T16:00:00.000Z");
 const dirs: string[] = [];
@@ -105,10 +105,14 @@ describe("reconcileStuckWork", () => {
       expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
     );
     expect(stamps).toEqual([
-      {
+      expect.objectContaining({
         runId: run.id,
-        payload: { notice: STUCK_WORK_NOTICE, updatedAt: run.updatedAt.toISOString() },
-      },
+        payload: {
+          notice: STUCK_WORK_NOTICE,
+          updatedAt: run.updatedAt.toISOString(),
+          state: "delivered",
+        },
+      }),
     ]);
   });
 
@@ -172,11 +176,103 @@ describe("reconcileStuckWork", () => {
     await reconcileStuckWork({ prisma, jobs, notifications: push, now, batchSize: 100 });
 
     expect(stamps).toEqual([
+      expect.objectContaining({
+        runId: run.id,
+        payload: {
+          notice: STUCK_WORK_NOTICE,
+          updatedAt: run.updatedAt.toISOString(),
+          state: "delivered",
+        },
+      }),
+    ]);
+  });
+
+  it("drops the claim when the token is removed before Expo accepts the push", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-stuck-push-"));
+    dirs.push(dataDir);
+    const run = candidate("waiting_takeover", 5);
+    const stamps: Array<{ id?: string; runId: string | null; payload: unknown }> = [];
+    const prisma = noticePrisma(run, stamps);
+    const { jobs } = publisher();
+    const push = new ExpoPushProvider(dataDir);
+    await savePushToken(dataDir, run.userId, "ExponentPushToken[test]");
+    const fetchMock = vi.fn(async () => Response.json({ data: { status: "ok", id: "ticket" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const hasPushRecipient = push.hasPushRecipient.bind(push);
+    push.hasPushRecipient = async (userId) => {
+      const registered = await hasPushRecipient(userId);
+      if (registered) await deletePushToken(dataDir, userId);
+      return registered;
+    };
+
+    await reconcileStuckWork({ prisma, jobs, notifications: push, now, batchSize: 100 });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stamps).toHaveLength(0);
+
+    await savePushToken(dataDir, run.userId, "ExponentPushToken[later]");
+    push.hasPushRecipient = hasPushRecipient;
+    await reconcileStuckWork({ prisma, jobs, notifications: push, now, batchSize: 100 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(stamps).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({ state: "delivered" }),
+      }),
+    ]);
+  });
+
+  it("retries a pending reminder left behind when the worker stops", async () => {
+    const run = candidate("waiting_takeover", 5);
+    const stamps = [
       {
         runId: run.id,
-        payload: { notice: STUCK_WORK_NOTICE, updatedAt: run.updatedAt.toISOString() },
+        payload: {
+          notice: STUCK_WORK_NOTICE,
+          updatedAt: run.updatedAt.toISOString(),
+          state: "pending",
+          claimedAt: new Date(now.getTime() - STUCK_NOTICE_CLAIM_TTL_MS - 1_000).toISOString(),
+        },
       },
+    ];
+    const prisma = noticePrisma(run, stamps);
+    const { jobs } = publisher();
+    const { provider, send } = notifications();
+
+    await reconcileStuckWork({ prisma, jobs, notifications: provider, now, batchSize: 100 });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(stamps).toEqual([
+      expect.objectContaining({
+        payload: {
+          notice: STUCK_WORK_NOTICE,
+          updatedAt: run.updatedAt.toISOString(),
+          state: "delivered",
+        },
+      }),
     ]);
+  });
+
+  it("does not send a second reminder while a claim is still in flight", async () => {
+    const run = candidate("waiting_input", 5);
+    const pending = {
+      runId: run.id,
+      payload: {
+        notice: STUCK_WORK_NOTICE,
+        updatedAt: run.updatedAt.toISOString(),
+        state: "pending",
+        claimedAt: now.toISOString(),
+      },
+    };
+    const stamps = [pending];
+    const prisma = noticePrisma(run, stamps);
+    const { jobs } = publisher();
+    const { provider, send } = notifications();
+
+    await reconcileStuckWork({ prisma, jobs, notifications: provider, now, batchSize: 100 });
+
+    expect(send).not.toHaveBeenCalled();
+    expect(stamps).toEqual([pending]);
   });
 
   it("retries the four-hour reminder when the push fails", async () => {
@@ -196,10 +292,14 @@ describe("reconcileStuckWork", () => {
 
     expect(send).toHaveBeenCalledTimes(2);
     expect(stamps).toEqual([
-      {
+      expect.objectContaining({
         runId: run.id,
-        payload: { notice: STUCK_WORK_NOTICE, updatedAt: run.updatedAt.toISOString() },
-      },
+        payload: {
+          notice: STUCK_WORK_NOTICE,
+          updatedAt: run.updatedAt.toISOString(),
+          state: "delivered",
+        },
+      }),
     ]);
   });
 
@@ -368,8 +468,9 @@ describe("reconcileStuckWork", () => {
 
 function noticePrisma(
   run: ReturnType<typeof candidate>,
-  stamps: Array<{ runId: string | null; payload: unknown }>,
+  stamps: Array<{ id?: string; runId: string | null; payload: unknown }>,
 ) {
+  let nextId = 0;
   const prisma = {
     run: {
       findMany: vi.fn(async () => [run]),
@@ -380,16 +481,41 @@ function noticePrisma(
       })),
     },
     event: {
-      findMany: vi.fn(async () => stamps.map((stamp) => ({ ...stamp }))),
+      findMany: vi.fn(async () => stamps.map((stamp) => stamp)),
       findFirst: vi.fn(async () => stamps.find((stamp) => stamp.runId === run.id) ?? null),
       create: vi.fn(async (args: { data: { runId?: string; payload: unknown } }) => {
-        stamps.push({ runId: args.data.runId ?? null, payload: args.data.payload });
-        return { seq: stamps.length };
+        nextId += 1;
+        const stamp = {
+          id: `event-${nextId}`,
+          runId: args.data.runId ?? null,
+          payload: args.data.payload,
+        };
+        stamps.push(stamp);
+        return { id: stamp.id, seq: stamps.length };
       }),
-      deleteMany: vi.fn(async () => {
-        const count = stamps.length;
-        stamps.splice(0, stamps.length);
-        return { count };
+      update: vi.fn(async (args: { where: { id: string }; data: { payload: unknown } }) => {
+        const stamp = stamps.find((item) => item.id === args.where.id);
+        if (!stamp) throw new Error("missing notice");
+        stamp.payload = args.data.payload;
+        return stamp;
+      }),
+      deleteMany: vi.fn(async (args?: { where?: { id?: string } }) => {
+        const id = args?.where?.id;
+        const before = stamps.length;
+        for (let index = stamps.length - 1; index >= 0; index -= 1) {
+          const stamp = stamps[index];
+          if (!stamp) continue;
+          if (id) {
+            if (stamp.id === id) stamps.splice(index, 1);
+            continue;
+          }
+          const state =
+            stamp.payload && typeof stamp.payload === "object"
+              ? (stamp.payload as { state?: unknown }).state
+              : undefined;
+          if (state === "pending") stamps.splice(index, 1);
+        }
+        return { count: before - stamps.length };
       }),
     },
     thread: { update: vi.fn(async () => ({ nextEventSeq: stamps.length + 1 })) },
