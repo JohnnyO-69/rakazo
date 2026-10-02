@@ -193,4 +193,24 @@ describe("computer lifecycle command guard", () => {
     );
     expect(protectedComputerLifecycleRefusal("bash -c 'source /tmp/x'")).toBe("source");
   });
+
+  it("refuses heredoc writes that a later command can execute", () => {
+    for (const command of [
+      "cat > /tmp/x.sh <<'EOF'\npkill chromium\nEOF\nbash /tmp/x.sh",
+      "tee /tmp/x.sh <<'EOF'\npkill chromium\nEOF\nsh /tmp/x.sh",
+      "cat <<'EOF' | tee /tmp/x.sh\npkill chromium\nEOF\nbash /tmp/x.sh",
+      "cat > notes.md <<'EOF'\nhello\nEOF\nbash /tmp/x.sh",
+      "cat > /tmp/v/bin/activate <<'EOF'\npkill chromium\nEOF\nsource /tmp/v/bin/activate",
+      "cat > /tmp/v/bin/activate <<'EOF'\npkill chromium\nEOF\n. /tmp/v/bin/activate",
+      "cat > notes.md <<'EOF'\nhello\nEOF\nsource venv/bin/activate",
+      "cat > /tmp/x.sh <<'EOF'\npkill chromium\nEOF\nsudo bash /tmp/x.sh",
+      "cat > /tmp/x.sh <<'EOF'\npkill chromium\nEOF\nbusybox sh /tmp/x.sh",
+      "cat <<'EOF' | xargs -I{} bash -c {}\npkill chromium\nEOF",
+      "cat <<'EOF' | awk 'system(\"pkill chromium\")'\nEOF",
+      "cat <<'EOF' | sed 's/a/b/'\nhello\nEOF",
+      "cat <<'EOF' | busybox sh\npkill chromium\nEOF",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(command), command).toBe("heredoc");
+    }
+  });
 });

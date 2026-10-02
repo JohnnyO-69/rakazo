@@ -458,6 +458,8 @@ const HEREDOC_INTERPRETERS = new Set([
   "tcsh",
   "zsh",
 ]);
+/** Stdin sinks. Any other heredoc consumer can run the body. */
+const HEREDOC_DATA_SINKS = new Set(["cat", "tee"]);
 const COMMAND_WRAPPERS = new Set([
   "builtin",
   "command",
@@ -796,24 +798,36 @@ function freshLiteralKey(source: string, used: Set<string>): string {
   return key;
 }
 
-function namesFeedInterpreter(names: readonly string[]): boolean {
-  // sudo and busybox can hide the real program. An empty name is a dynamic command word.
-  return names.some(
-    (name) => name === "" || name === "sudo" || name === "busybox" || isHeredocInterpreter(name),
+function isHeredocDataSinkPipeline(names: readonly string[]): boolean {
+  return names.length > 0 && names.every((name) => HEREDOC_DATA_SINKS.has(name));
+}
+
+/** Shell, source, or a wrapper that can hide them. Used after a heredoc was consumed. */
+function isShellOrSourceCommand(words: readonly string[]): boolean {
+  const base = commandBasename(words);
+  if (!base) return false;
+  return (
+    base === "source" ||
+    base === "." ||
+    base === "sudo" ||
+    base === "busybox" ||
+    isHeredocInterpreter(base)
   );
 }
 
 /**
  * Drop comments and quoted heredoc bodies, and substitute literal assignments.
  * Returns a short refusal when the command is dynamic in a way the later
- * tokenizer cannot see (quotes hiding a substitution, a heredoc fed to an
- * interpreter, or source of anything but a literal activate path).
+ * tokenizer cannot see (quotes hiding a substitution, a heredoc that is not
+ * data for cat or tee, a shell, source, sudo, or busybox after that heredoc,
+ * or source of anything but a literal activate path).
  */
 function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
   const env = new Map<string, string>();
   const literals: Record<string, string> = {};
   const usedKeys = new Set<string>();
   const pending: PendingHeredoc[] = [];
+  let heredocConsumed = false;
   let pipelineNames: string[] = [];
   let commandWords: string[] = [];
   let out = "";
@@ -843,6 +857,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
     finishWord();
     const words = commandWords;
     commandWords = [];
+    if (heredocConsumed && isShellOrSourceCommand(words)) return "heredoc";
     const guaranteedBefore = guaranteed;
     if (isUnsafeSource(words)) return "source";
     const base = commandBasename(words);
@@ -1001,7 +1016,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
         index += 1;
         continue;
       }
-      if (pending.some((heredoc) => namesFeedInterpreter(heredoc.names ?? []))) {
+      if (pending.some((heredoc) => !isHeredocDataSinkPipeline(heredoc.names ?? []))) {
         return { reason: "heredoc" };
       }
       let cursor = index + 1;
@@ -1016,6 +1031,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
         cursor = body.end;
       }
       pending.length = 0;
+      heredocConsumed = true;
       out += "\n";
       atWordStart = true;
       index = cursor;
