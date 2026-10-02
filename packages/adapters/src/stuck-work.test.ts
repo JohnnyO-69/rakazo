@@ -234,6 +234,7 @@ describe("reconcileStuckWork", () => {
         claimedAt: now.toISOString(),
       },
     };
+    const expectedOtherEpisode = structuredClone(otherEpisode);
     const stamps = [
       {
         runId: run.id,
@@ -254,7 +255,7 @@ describe("reconcileStuckWork", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(stamps).toEqual([
-      otherEpisode,
+      expectedOtherEpisode,
       expect.objectContaining({
         payload: {
           notice: STUCK_WORK_NOTICE,
