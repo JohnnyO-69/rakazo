@@ -1,11 +1,21 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { JobPublisher, NotificationProvider } from "@rakazo/adapter-kit";
 import { STUCK_WORK_NOTICE, stuckWorkStatusMessage } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ExpoPushProvider, savePushToken } from "./expo-push.js";
 import { createJobReconciler } from "./job-reconciler.js";
 import { reconcileStuckWork } from "./stuck-work.js";
 
 const now = new Date("2026-09-28T16:00:00.000Z");
+const dirs: string[] = [];
+
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 function age(hours: number) {
   return new Date(now.getTime() - hours * 60 * 60 * 1000);
@@ -139,6 +149,34 @@ describe("reconcileStuckWork", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(stamps).toHaveLength(1);
+  });
+
+  it("does not stamp a reminder until Expo has a token to deliver it", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-stuck-push-"));
+    dirs.push(dataDir);
+    const run = candidate("waiting_takeover", 5);
+    const stamps: Array<{ runId: string | null; payload: unknown }> = [];
+    const prisma = noticePrisma(run, stamps);
+    const { jobs } = publisher();
+    const push = new ExpoPushProvider(dataDir);
+
+    await reconcileStuckWork({ prisma, jobs, notifications: push, now, batchSize: 100 });
+
+    expect(stamps).toHaveLength(0);
+
+    await savePushToken(dataDir, run.userId, "ExponentPushToken[test]");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ data: { status: "ok", id: "ticket" } })),
+    );
+    await reconcileStuckWork({ prisma, jobs, notifications: push, now, batchSize: 100 });
+
+    expect(stamps).toEqual([
+      {
+        runId: run.id,
+        payload: { notice: STUCK_WORK_NOTICE, updatedAt: run.updatedAt.toISOString() },
+      },
+    ]);
   });
 
   it("retries the four-hour reminder when the push fails", async () => {
@@ -347,6 +385,11 @@ function noticePrisma(
       create: vi.fn(async (args: { data: { runId?: string; payload: unknown } }) => {
         stamps.push({ runId: args.data.runId ?? null, payload: args.data.payload });
         return { seq: stamps.length };
+      }),
+      deleteMany: vi.fn(async () => {
+        const count = stamps.length;
+        stamps.splice(0, stamps.length);
+        return { count };
       }),
     },
     thread: { update: vi.fn(async () => ({ nextEventSeq: stamps.length + 1 })) },

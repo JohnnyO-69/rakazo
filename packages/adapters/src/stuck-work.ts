@@ -14,6 +14,7 @@ import {
 import type { Prisma, PrismaClient, ThreadEvents } from "@rakazo/db";
 import { appendEventInTransaction, expireStuckRun, withTransactionRetry } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { ExpoPushProvider } from "./expo-push.js";
 
 type StuckCursor = { at: Date; id: string };
 
@@ -35,7 +36,8 @@ type StuckCandidate = {
  * Lives on the job reconciler so a second scheduler is not required. The notice
  * stamp is a thread.meta event keyed to this episode's updatedAt, so answering
  * or reclaiming the run (which bumps updatedAt) can remind again later. It is
- * written only after a push is accepted, so a failed or skipped push can retry.
+ * claimed before the push and removed when that push is not delivered, so a
+ * failed push can retry and a successful one is not sent again.
  */
 export async function reconcileStuckWork(deps: {
   prisma: PrismaClient;
@@ -152,25 +154,13 @@ async function remindStuckRun(
   },
   run: StuckCandidate,
 ) {
-  // A skipped push (notices off, or no provider) must stay unmarked so turning
-  // notices on later can still remind during this same wait.
+  // A skipped push (notices off, no provider, or no push token yet) stays unmarked
+  // so a later sweep can still remind during this same wait.
   if (!deps.notifications || !noticesEnabled(run)) return;
-  const open = await withTransactionRetry(() =>
-    deps.prisma.$transaction((tx) => stuckEpisodeOpen(tx, run)),
-  );
-  if (!open) return;
-  const reminder = stuckWorkReminder(run.status, run.bot.name);
-  const sent = await sendStuckNotice(deps.notifications, run, {
-    kind: reminder.kind,
-    title: reminder.title,
-    body: reminder.body,
-    botId: run.botId,
-    threadId: run.threadId,
-  });
-  if (!sent) return;
-  await withTransactionRetry(() =>
+  if (!(await pushCanDeliver(deps.notifications, run.userId))) return;
+  const claimed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
-      if (!(await stuckEpisodeOpen(tx, run))) return;
+      if (!(await stuckEpisodeOpen(tx, run))) return false;
       await appendEventInTransaction(tx, {
         spaceId: run.spaceId,
         threadId: run.threadId,
@@ -179,8 +169,42 @@ async function remindStuckRun(
         runId: run.id,
         payload: { notice: STUCK_WORK_NOTICE, updatedAt: run.updatedAt.toISOString() },
       });
+      return true;
     }),
   );
+  if (!claimed) return;
+  const reminder = stuckWorkReminder(run.status, run.bot.name);
+  const sent = await sendStuckNotice(deps.notifications, run, {
+    kind: reminder.kind,
+    title: reminder.title,
+    body: reminder.body,
+    botId: run.botId,
+    threadId: run.threadId,
+  });
+  if (sent) return;
+  await withTransactionRetry(() => deps.prisma.$transaction((tx) => clearStuckNotice(tx, run)));
+}
+
+async function pushCanDeliver(
+  notifications: NotificationProvider,
+  userId: string,
+): Promise<boolean> {
+  if (!(notifications instanceof ExpoPushProvider)) return true;
+  return notifications.hasPushRecipient(userId);
+}
+
+async function clearStuckNotice(tx: Prisma.TransactionClient, run: StuckCandidate) {
+  await tx.$queryRaw`SELECT id FROM threads WHERE id = ${run.threadId} FOR UPDATE`;
+  await tx.event.deleteMany({
+    where: {
+      runId: run.id,
+      type: "thread.meta",
+      AND: [
+        { payload: { path: ["notice"], equals: STUCK_WORK_NOTICE } },
+        { payload: { path: ["updatedAt"], equals: run.updatedAt.toISOString() } },
+      ],
+    },
+  });
 }
 
 async function stuckEpisodeOpen(
