@@ -1596,24 +1596,222 @@ function splicePieces(body: string, depth = 0): SplicePiece[] | undefined {
   return finish();
 }
 
+function kmpFailure(target: string): number[] {
+  const failure = Array<number>(target.length).fill(0);
+  let matched = 0;
+  for (let index = 1; index < target.length; index += 1) {
+    while (matched > 0 && target[index] !== target[matched]) matched = failure[matched - 1] ?? 0;
+    if (target[index] === target[matched]) {
+      matched += 1;
+      failure[index] = matched;
+    }
+  }
+  return failure;
+}
+
+function kmpStep(
+  state: number,
+  character: string,
+  target: string,
+  failure: readonly number[],
+): number {
+  let next = state;
+  while (next > 0 && (next === target.length || target[next] !== character)) {
+    next = failure[next - 1] ?? 0;
+  }
+  if (target[next] === character) next += 1;
+  return next;
+}
+
+function foldedSplice(piece: SplicePiece): { segments: string[]; holes: string[][] } {
+  return {
+    segments: piece.segments.map((segment) => segment.toLowerCase()),
+    holes: piece.holes.map((inserts) => inserts.map((insert) => insert.toLowerCase())),
+  };
+}
+
+/** Some combination of the visible hole texts is exactly `target`. */
+function spliceEquals(
+  segments: readonly string[],
+  holes: readonly (readonly string[])[],
+  target: string,
+): boolean {
+  let positions = new Set<number>();
+  const first = segments[0] ?? "";
+  if (target.startsWith(first)) positions.add(first.length);
+  for (let hole = 0; hole < holes.length; hole += 1) {
+    const segment = segments[hole + 1] ?? "";
+    const next = new Set<number>();
+    for (const position of positions) {
+      for (const insert of holes[hole] ?? [""]) {
+        if (!target.startsWith(insert, position)) continue;
+        const after = position + insert.length;
+        if (target.startsWith(segment, after)) next.add(after + segment.length);
+      }
+    }
+    positions = next;
+    if (positions.size === 0) return false;
+  }
+  return positions.has(target.length);
+}
+
+/**
+ * Walks every combination without building it. `contains` is a hit anywhere;
+ * `ends` means some combination ends with `target`.
+ */
+function scanSpliceTarget(
+  segments: readonly string[],
+  holes: readonly (readonly string[])[],
+  target: string,
+): { contains: boolean; ends: boolean } {
+  const failure = kmpFailure(target);
+  let states = new Set<number>([0]);
+  let contains = false;
+  const apply = (text: string) => {
+    for (const character of text) {
+      const next = new Set<number>();
+      for (const state of states) {
+        const stepped = kmpStep(state, character, target, failure);
+        if (stepped === target.length) contains = true;
+        next.add(stepped);
+      }
+      states = next;
+    }
+  };
+  apply(segments[0] ?? "");
+  for (let index = 0; index < holes.length; index += 1) {
+    const start = states;
+    const merged = new Set<number>();
+    for (const insert of holes[index] ?? [""]) {
+      states = new Set(start);
+      apply(insert);
+      for (const state of states) merged.add(state);
+    }
+    states = merged;
+    apply(segments[index + 1] ?? "");
+  }
+  return { contains, ends: states.has(target.length) };
+}
+
+const X_LOCK_PREFIX = "/tmp/.x";
+const X_LOCK_SUFFIX = "-lock";
+
+function consumeXLock(states: Set<string>, text: string): boolean {
+  for (const character of text) {
+    const next = new Set<string>();
+    for (const key of states) {
+      const parts = key.split(",");
+      const pre = Number(parts[0] ?? 0);
+      const digit = Number(parts[1] ?? 0);
+      const lock = Number(parts[2] ?? 0);
+      const add = (prefix: number, seenDigit: number, lockPos: number) => {
+        next.add(`${prefix},${seenDigit},${lockPos}`);
+      };
+      const expected = X_LOCK_SUFFIX[lock];
+      if (lock > 0) {
+        if (expected !== undefined && character === expected) add(pre, digit, lock + 1);
+      } else if (pre === X_LOCK_PREFIX.length) {
+        if (/\d/.test(character)) add(pre, 1, 0);
+        else if (digit === 1 && character === "-") add(pre, 1, 1);
+      } else if (character === X_LOCK_PREFIX[pre]) {
+        add(pre + 1, 0, 0);
+      }
+      if (character === "/") add(1, 0, 0);
+      else add(0, 0, 0);
+    }
+    if ([...next].some((key) => key.endsWith(`,${X_LOCK_SUFFIX.length}`))) return true;
+    states.clear();
+    for (const key of next) states.add(key);
+  }
+  return false;
+}
+
+/** `/tmp/.x<digits>-lock` assembled from the visible pieces. */
+function spliceContainsXLock(
+  segments: readonly string[],
+  holes: readonly (readonly string[])[],
+): boolean {
+  let states = new Set<string>(["0,0,0"]);
+  if (consumeXLock(states, segments[0] ?? "")) return true;
+  for (let index = 0; index < holes.length; index += 1) {
+    const start = new Set(states);
+    const merged = new Set<string>();
+    for (const insert of holes[index] ?? [""]) {
+      const clone = new Set(start);
+      if (consumeXLock(clone, insert)) return true;
+      for (const state of clone) merged.add(state);
+    }
+    states = merged;
+    if (consumeXLock(states, segments[index + 1] ?? "")) return true;
+  }
+  return false;
+}
+
+function basenamePossible(
+  segments: readonly string[],
+  holes: readonly (readonly string[])[],
+  name: string,
+): boolean {
+  return spliceEquals(segments, holes, name) || scanSpliceTarget(segments, holes, `/${name}`).ends;
+}
+
+/**
+ * The candidate list is capped. A dropped combination still counts when the
+ * visible pieces can form a lifecycle word; a dash-joined command substitution
+ * cannot, so ordinary script text stays allowed.
+ */
+function overflowLifecycle(piece: SplicePiece): {
+  hazard: boolean;
+  service: boolean;
+  action: boolean;
+} {
+  const { segments, holes } = foldedSplice(piece);
+  const none = { hazard: false, service: false, action: false };
+  if (holes.length === 0) return none;
+  for (const name of ["kill", "pkill", "killall", "xkill"]) {
+    if (basenamePossible(segments, holes, name))
+      return { hazard: true, service: false, action: false };
+  }
+  for (const snippet of [".browser-profiles", "--user-data-dir", "/tmp/.x11-unix"]) {
+    if (scanSpliceTarget(segments, holes, snippet).contains) {
+      return { hazard: true, service: false, action: false };
+    }
+  }
+  if (spliceContainsXLock(segments, holes)) return { hazard: true, service: false, action: false };
+  return {
+    hazard: false,
+    service: ["systemctl", "service"].some((name) => basenamePossible(segments, holes, name)),
+    action: ["stop", "restart", "kill"].some((name) => basenamePossible(segments, holes, name)),
+  };
+}
+
 function splicedLifecycleHazard(body: string): boolean {
   const pieces = splicePieces(body);
   if (!pieces) return false;
   const words: string[] = [];
   let serviceAffix = false;
+  let overflowService = false;
+  let overflowAction = false;
   for (const piece of pieces) {
     const produced = pieceCandidates(piece);
-    if (produced.overflow && piece.segments.some((segment) => segment.length > 0)) return true;
     words.push(...produced.words);
+    if (produced.overflow) {
+      const extra = overflowLifecycle(piece);
+      if (extra.hazard) return true;
+      if (extra.service) overflowService = true;
+      if (extra.action) overflowAction = true;
+    }
     const kind = spliceAffixKind(piece);
     if (kind === "solo") return true;
     if (kind === "service") serviceAffix = true;
   }
   if (wordsHaveLifecycleHazard(words)) return true;
-  if (!serviceAffix) return false;
-  return words.some((word) =>
-    /^(?:stop|restart|kill)$/.test((word.split("/").at(-1) ?? "").toLowerCase()),
-  );
+  const sawAction =
+    overflowAction ||
+    words.some((word) =>
+      /^(?:stop|restart|kill)$/.test((word.split("/").at(-1) ?? "").toLowerCase()),
+    );
+  return (serviceAffix || overflowService) && sawAction;
 }
 
 function quotedHeredocBodyIsDynamic(body: string): boolean {
@@ -1668,6 +1866,15 @@ function teeDestinationPaths(words: readonly string[]): string[] {
   return paths;
 }
 
+function pathTail(path: string): string | undefined {
+  const base = normalizeWrittenPath(path)
+    .split("/")
+    .filter((part) => part.length > 0)
+    .at(-1);
+  if (base === undefined || base === "." || base === "..") return undefined;
+  return base;
+}
+
 function resolveExecutionPath(cwd: string | undefined, command: string): string | undefined {
   const joined =
     command.startsWith("/") || cwd === undefined || cwd === ""
@@ -1720,20 +1927,12 @@ function executesWrittenHeredoc(
     const resolved = resolveExecutionPath(dir.cwd, token);
     if (resolved !== undefined && outputs.has(resolved)) return true;
     // `cd -` leaves the directory unknown, so a later relative name can still be the file.
-    if (dir.cwd !== undefined) return false;
-    const base = normalizeWrittenPath(token)
-      .split("/")
-      .filter((part) => part.length > 0)
-      .at(-1);
-    if (base === undefined || base === "." || base === "..") return false;
+    // An absolute path that did not match is a different file.
+    if (dir.cwd !== undefined || token.startsWith("/")) return false;
+    const name = pathTail(token);
+    if (name === undefined) return false;
     for (const output of outputs) {
-      if (
-        output
-          .split("/")
-          .filter((part) => part.length > 0)
-          .at(-1) === base
-      )
-        return true;
+      if (pathTail(output) === name) return true;
     }
     return false;
   };

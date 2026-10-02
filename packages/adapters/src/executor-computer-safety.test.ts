@@ -309,6 +309,8 @@ describe("computer lifecycle command guard", () => {
     ]) {
       expect(protectedComputerLifecycleRefusal(command), command).toBe("activate script");
     }
+    expect(protectedComputerLifecycleRefusal("mv /tmp/notes.txt /tmp/bin")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("mv /tmp/notes.txt venv/bin")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("mv /tmp/x/bin /tmp/backup")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("ln -s /tmp/x/bin /tmp/backup")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("mv /tmp/notes.txt /tmp/bin")).toBeUndefined();
@@ -381,7 +383,10 @@ describe("computer lifecycle command guard", () => {
       "$(printf pk)ill chromium",
       "sys$(printf tem)ctl restart chromium",
       "p$(date)ill chromium",
-      "p$(printf k)ill chromium\n${x:-y}",
+      `p$(printf k)ill chromium\n\${x:-y}`,
+      "$(printf p)$(printf k)$(printf i)$(printf l)$(printf l) chromium",
+      "$(printf s)$(printf y)$(printf s)$(printf t)$(printf e)$(printf m)$(printf c)$(printf t)$(printf l) restart chromium",
+      "rm -f $(printf /)$(printf t)$(printf m)$(printf p)$(printf /)$(printf .)$(printf x)$(printf 1)-lock",
     ]) {
       expect(protectedComputerLifecycleRefusal(`cat > /tmp/x.sh <<'EOF'\n${body}\nEOF`), body).toBe(
         "heredoc",
@@ -398,6 +403,11 @@ describe("computer lifecycle command guard", () => {
     ).toBeUndefined();
     expect(
       protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nsys$(date)ctl status\nEOF"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > notes.md <<'EOF'\necho \"$(date)-$(whoami)-$(hostname)-$(pwd)-$(id)-$(uname)\"\nEOF",
+      ),
     ).toBeUndefined();
   });
 
@@ -479,6 +489,16 @@ describe("computer lifecycle command guard", () => {
     ).toBeUndefined();
     expect(
       protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd -\n./x.sh"),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd -\n/opt/tools/x.sh",
+      ),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > /opt/tools/x.sh <<'EOF'\nhello\nEOF\ncd -\n/opt/tools/x.sh",
+      ),
     ).toBe("heredoc");
   });
 
