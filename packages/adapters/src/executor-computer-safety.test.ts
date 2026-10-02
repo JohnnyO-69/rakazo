@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isProtectedComputerLifecycleCommand } from "./executor.js";
+import {
+  desktopProtectionGuardMessage,
+  isProtectedComputerLifecycleCommand,
+  protectedComputerLifecycleRefusal,
+} from "./executor.js";
 
 describe("computer lifecycle command guard", () => {
   it("rejects commands that can destroy a graphical bot's desktop", () => {
@@ -79,5 +83,114 @@ describe("computer lifecycle command guard", () => {
     "function f { . /tmp/script.sh; }; f",
   ])("continues blocking executable sourcing and lifecycle operations: %s", (command) => {
     expect(isProtectedComputerLifecycleCommand(command)).toBe(true);
+  });
+
+  it("names the trigger that the desktop-protection guard refused", () => {
+    expect(protectedComputerLifecycleRefusal("pkill chromium")).toBe("protected command pkill");
+    expect(protectedComputerLifecycleRefusal("kill -9 1234")).toBe("protected command kill");
+    expect(protectedComputerLifecycleRefusal("systemctl restart chromium")).toBe(
+      "systemctl restart",
+    );
+    expect(protectedComputerLifecycleRefusal("service chromium restart")).toBe("service restart");
+    expect(protectedComputerLifecycleRefusal("rm -rf ~/.browser-profiles/chromium")).toBe(
+      "browser profile path",
+    );
+    expect(protectedComputerLifecycleRefusal("rm -f /tmp/.X1-lock")).toBe("X11 path");
+    expect(protectedComputerLifecycleRefusal('rm -rf "$TARGET/.browser-profiles/chromium"')).toBe(
+      "unresolved variable $TARGET",
+    );
+    expect(protectedComputerLifecycleRefusal('for f in *.log; do wc -l "$f"; done')).toBe(
+      "unresolved variable $f",
+    );
+    expect(protectedComputerLifecycleRefusal('echo "built at $(date)"')).toBe(
+      "command substitution",
+    );
+    expect(protectedComputerLifecycleRefusal("echo `date`")).toBe("backtick");
+    expect(protectedComputerLifecycleRefusal("( cd app && npm test )")).toBe("subshell");
+    expect(protectedComputerLifecycleRefusal("python <<'EOF'\nprint(1)\nEOF")).toBe("heredoc");
+    expect(protectedComputerLifecycleRefusal("source /tmp/kill-chrome.sh")).toBe("source");
+    expect(protectedComputerLifecycleRefusal("eval 'ls'")).toBe("eval");
+    expect(protectedComputerLifecycleRefusal('bash <<< "pkill chromium"')).toBe("herestring");
+    expect(desktopProtectionGuardMessage("unresolved variable $f")).toBe(
+      "This command was not run: desktop-protection guard: unresolved variable $f. Shell access is still available. Do not stop or restart browser or desktop processes.",
+    );
+  });
+
+  it("allows comments, literal assignments, activate scripts, and quoted heredoc data", () => {
+    for (const command of [
+      "ls ~/workspace # check output",
+      "echo foo # not a command\npwd",
+      "echo foo#bar\npwd",
+      'dir=/home/rakazo/workspace/app; ls "$dir"',
+      'dir=/home/rakazo/workspace/app && ls "$dir"',
+      "dir='/tmp/My Dir'; ls \"$dir\"",
+      "source venv/bin/activate",
+      "source venv/bin/activate && pytest",
+      ". ./bin/activate",
+      "command source venv/bin/activate",
+      "cat > notes.md <<'EOF'\nhello\nEOF",
+      "cat > notes.md <<'EOF'\npkill chromium\n$(date)\nEOF\necho after",
+      'tee notes.md <<"EOF"\n# heading\nEOF',
+      "cat <<'EOF' | tee notes.md\nhello\nEOF",
+      "echo 'built at $(date)'",
+      "ls # $(pkill chromium)",
+      "bash -c 'source venv/bin/activate'",
+      "source 'venv/bin/activate'",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(command), command).toBeUndefined();
+    }
+  });
+
+  it("keeps computed variables, variable source paths, and interpreter heredocs closed", () => {
+    expect(protectedComputerLifecycleRefusal('dir=/tmp/$USER; ls "$dir"')).toBe(
+      "unresolved variable $dir",
+    );
+    expect(protectedComputerLifecycleRefusal('dir=$(pwd); ls "$dir"')).toBe("command substitution");
+    expect(protectedComputerLifecycleRefusal('dir=/tmp; other="$dir"; ls "$other"')).toBe(
+      "unresolved variable $other",
+    );
+    expect(protectedComputerLifecycleRefusal('dir=/tmp ls "$dir"')).toBe(
+      "unresolved variable $dir",
+    );
+    expect(
+      protectedComputerLifecycleRefusal('dir=/tmp/.browser-profiles; rm -rf "$dir/chromium"'),
+    ).toBe("browser profile path");
+    expect(protectedComputerLifecycleRefusal('dir=venv/bin/activate; source "$dir"')).toBe(
+      "source",
+    );
+    expect(protectedComputerLifecycleRefusal('source "$VENV/bin/activate"')).toBe("source");
+    expect(protectedComputerLifecycleRefusal("source venv/bin/activate.fish")).toBe("source");
+    expect(protectedComputerLifecycleRefusal("bash <<'EOF'\npwd\nEOF")).toBe("heredoc");
+    expect(protectedComputerLifecycleRefusal("sh <<'EOF'\npwd\nEOF")).toBe("heredoc");
+    expect(protectedComputerLifecycleRefusal("cat <<'EOF' | bash\npwd\nEOF")).toBe("heredoc");
+    expect(protectedComputerLifecycleRefusal("cat <<'EOF' | python3\nprint(1)\nEOF")).toBe(
+      "heredoc",
+    );
+    expect(protectedComputerLifecycleRefusal("node <<'EOF'\nconsole.log(1)\nEOF")).toBe("heredoc");
+    expect(protectedComputerLifecycleRefusal("cat <<EOF\n$(pkill chromium)\nEOF")).toBe(
+      "command substitution",
+    );
+    expect(protectedComputerLifecycleRefusal("echo ok # comment\npkill chromium")).toBe(
+      "protected command pkill",
+    );
+    expect(protectedComputerLifecycleRefusal("echo foo#bar\npkill chromium")).toBe(
+      "protected command pkill",
+    );
+    expect(protectedComputerLifecycleRefusal("dir=pkill; $dir chromium")).toBe(
+      "protected command pkill",
+    );
+    expect(protectedComputerLifecycleRefusal("dir='pkill chromium'; $dir")).toBe(
+      "protected command pkill",
+    );
+    expect(protectedComputerLifecycleRefusal("dir='pkill chromium'; bash -c \"$dir\"")).toBe(
+      "protected command pkill",
+    );
+    expect(protectedComputerLifecycleRefusal("dir='rm -rf ~/.browser-profiles'; $dir")).toBe(
+      "browser profile path",
+    );
+    expect(protectedComputerLifecycleRefusal("ls # $(pkill)\npkill chromium")).toBe(
+      "protected command pkill",
+    );
+    expect(protectedComputerLifecycleRefusal("bash -c 'source /tmp/x'")).toBe("source");
   });
 });

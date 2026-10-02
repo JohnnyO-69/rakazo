@@ -429,8 +429,680 @@ const SAFE_SHELL_CONTROL_OPS = new Set([
   "<&",
   "&>",
 ]);
+/** Commands whose stdin heredoc is code, not data. Versioned names are matched separately. */
+const HEREDOC_INTERPRETERS = new Set([
+  "ash",
+  "bash",
+  "bun",
+  "csh",
+  "dash",
+  "deno",
+  "elixir",
+  "fish",
+  "julia",
+  "ksh",
+  "lua",
+  "node",
+  "nodejs",
+  "perl",
+  "php",
+  "powershell",
+  "pwsh",
+  "pypy",
+  "pypy3",
+  "python",
+  "python2",
+  "python3",
+  "ruby",
+  "sh",
+  "tcsh",
+  "zsh",
+]);
+const COMMAND_WRAPPERS = new Set([
+  "builtin",
+  "command",
+  "env",
+  "exec",
+  "nice",
+  "nohup",
+  "stdbuf",
+  "time",
+]);
+const LITERAL_KEY_PREFIX = "RKZLIT";
 
-function shellCFlagProgram(words: string[], interpreterIndex: number): string | undefined {
+type ShellSeparator = "pipe" | "and" | "or" | "seq" | "background";
+type PreparedDesktopCommand =
+  | { command: string; literals: Readonly<Record<string, string>> }
+  | { reason: string };
+type AssignmentEntry = { name: string; value: string | null };
+type PendingHeredoc = {
+  delimiter: string;
+  quoted: boolean;
+  stripTabs: boolean;
+  names?: string[];
+};
+
+function isHeredocInterpreter(name: string): boolean {
+  if (HEREDOC_INTERPRETERS.has(name)) return true;
+  return /^(?:python|ruby|perl|php|node)[\d.]+$/.test(name);
+}
+
+function isLiteralActivatePath(text: string): boolean {
+  return /(?:^|\/)bin\/activate$/.test(text);
+}
+
+function unresolvedVariableReason(name: string): string {
+  const trimmed = name.replaceAll(/[\r\n]/g, "").slice(0, 48);
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) return `unresolved variable $${trimmed}`;
+  return `unresolved variable \${${trimmed}}`;
+}
+
+/** Quote-removed literal, or undefined when the word expands, globs, or runs a command. */
+function literalCommandToken(raw: string): string | undefined {
+  let text = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (quote === "'") {
+      if (character === "'") quote = undefined;
+      else text += character;
+      continue;
+    }
+    if (character === "\\") {
+      const next = raw[index + 1];
+      if (next === undefined || next === "$" || next === "`") return undefined;
+      text += next;
+      index += 1;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === '"') quote = undefined;
+      else if (character === "$" || character === "`") return undefined;
+      else text += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === "$" || character === "`" || character === "*" || character === "?") {
+      return undefined;
+    }
+    text += character;
+  }
+  if (quote) return undefined;
+  return text;
+}
+
+function literalAssignmentValue(raw: string): string | undefined {
+  let value = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (quote === "'") {
+      if (character === "'") quote = undefined;
+      else value += character;
+      continue;
+    }
+    if (character === "\\") {
+      const next = raw[index + 1];
+      if (next === undefined) return undefined;
+      const quotedLiteralEscape =
+        quote === '"' &&
+        next !== '"' &&
+        next !== "\\" &&
+        next !== "$" &&
+        next !== "`" &&
+        next !== "\n";
+      value += quotedLiteralEscape ? `\\${next}` : next;
+      index += 1;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === '"') quote = undefined;
+      else if (character === "$" || character === "`") return undefined;
+      else value += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === "$" || character === "`") return undefined;
+    value += character;
+  }
+  if (quote) return undefined;
+  return value;
+}
+
+function parseAssignment(raw: string): AssignmentEntry | undefined {
+  if (raw.startsWith("'") || raw.startsWith('"')) return undefined;
+  const append = /^([A-Za-z_][A-Za-z0-9_]*)\+=/.exec(raw);
+  if (append?.[1]) return { name: append[1], value: null };
+  const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(raw);
+  if (!match?.[1]) return undefined;
+  const value = literalAssignmentValue(raw.slice(match[0].length));
+  return { name: match[1], value: value ?? null };
+}
+
+function assignmentEntries(words: readonly string[]): AssignmentEntry[] | undefined {
+  if (words.length === 0) return undefined;
+  let index = 0;
+  if (literalCommandToken(words[0] ?? "") === "export") index = 1;
+  if (index >= words.length) return undefined;
+  const entries: AssignmentEntry[] = [];
+  for (; index < words.length; index += 1) {
+    const parsed = parseAssignment(words[index] ?? "");
+    if (!parsed) return undefined;
+    entries.push(parsed);
+  }
+  return entries;
+}
+
+function isRawAssignment(raw: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*(?:\+?=)/.test(raw);
+}
+
+function primaryCommandIndex(words: readonly string[]): number | undefined {
+  let index = 0;
+  while (index < words.length) {
+    const raw = words[index] ?? "";
+    if (isRawAssignment(raw)) {
+      index += 1;
+      continue;
+    }
+    const text = literalCommandToken(raw);
+    if (text === undefined) return undefined;
+    if (text === "!") {
+      index += 1;
+      continue;
+    }
+    const base = text.split("/").at(-1) ?? text;
+    if (COMMAND_WRAPPERS.has(base)) {
+      index += 1;
+      while (
+        index < words.length &&
+        (literalCommandToken(words[index] ?? "") ?? "").startsWith("-")
+      ) {
+        index += 1;
+      }
+      continue;
+    }
+    return index;
+  }
+  return undefined;
+}
+
+function commandBasename(words: readonly string[]): string | undefined {
+  if (words.length === 0 || assignmentEntries(words)) return undefined;
+  const commandIndex = primaryCommandIndex(words);
+  if (commandIndex === undefined) return "";
+  const text = literalCommandToken(words[commandIndex] ?? "");
+  if (!text) return "";
+  return (text.split("/").at(-1) ?? "").toLowerCase();
+}
+
+function isUnsafeSource(words: readonly string[]): boolean {
+  const commandIndex = primaryCommandIndex(words);
+  if (commandIndex === undefined) return false;
+  const primary = literalCommandToken(words[commandIndex] ?? "");
+  // Only the exact builtins. A variable path can hide an arbitrary script.
+  if (primary !== "source" && primary !== ".") return false;
+  const argument = words[commandIndex + 1];
+  if (argument === undefined) return true;
+  const text = literalCommandToken(argument);
+  if (text === undefined) return true;
+  return !isLiteralActivatePath(text);
+}
+
+function readHeredocDelimiter(
+  source: string,
+  start: number,
+): { end: number; delimiter: string; quoted: boolean } | undefined {
+  let index = start;
+  while (source[index] === " " || source[index] === "\t") index += 1;
+  const first = source[index];
+  if (first === undefined || first === "\n" || first === "#") return undefined;
+  let delimiter = "";
+  let quoted = false;
+  let quote: "'" | '"' | undefined;
+  while (index < source.length) {
+    const character = source[index];
+    if (quote) {
+      if (character === quote) quote = undefined;
+      else delimiter += character;
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quoted = true;
+      quote = character;
+      index += 1;
+      continue;
+    }
+    if (character === "\\") {
+      const next = source[index + 1];
+      if (next === undefined || next === "\n") return undefined;
+      quoted = true;
+      delimiter += next;
+      index += 2;
+      continue;
+    }
+    if (character !== undefined && /[\s|&;<>()]/.test(character)) break;
+    delimiter += character ?? "";
+    index += 1;
+  }
+  if (quote || delimiter.length === 0) return undefined;
+  return { end: index, delimiter, quoted };
+}
+
+function readHeredocBody(
+  source: string,
+  start: number,
+  delimiter: string,
+  stripTabs: boolean,
+): { end: number; content: string } | undefined {
+  let index = start;
+  while (index <= source.length) {
+    const lineEnd = source.indexOf("\n", index);
+    const end = lineEnd === -1 ? source.length : lineEnd;
+    const compared = stripTabs
+      ? source.slice(index, end).replace(/^\t+/, "")
+      : source.slice(index, end);
+    if (compared === delimiter) {
+      return {
+        end: lineEnd === -1 ? source.length : lineEnd + 1,
+        content: source.slice(start, index),
+      };
+    }
+    if (lineEnd === -1) return undefined;
+    index = lineEnd + 1;
+  }
+  return undefined;
+}
+
+/** Unquoted heredoc bodies expand even inside quote characters. */
+function heredocBodyHazard(body: string): string | undefined {
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (character === "\\") {
+      const next = body[index + 1];
+      if (next === "$" || next === "`" || next === "\\" || next === "\n") {
+        index += 1;
+        continue;
+      }
+    }
+    if (character === "`") return "backtick";
+    if (character === "$" && body[index + 1] === "(") {
+      return body[index + 2] === "(" ? "arithmetic expansion" : "command substitution";
+    }
+  }
+  return undefined;
+}
+
+function braceExpansionHazard(raw: string): string | undefined {
+  if (raw.includes("`")) return "backtick";
+  for (let index = 0; index < raw.length - 1; index += 1) {
+    if (raw[index] !== "$" || raw[index + 1] !== "(") continue;
+    return raw[index + 2] === "(" ? "arithmetic expansion" : "command substitution";
+  }
+  return undefined;
+}
+
+function readExpansion(
+  source: string,
+  start: number,
+): { end: number; name: string; raw: string; simple: boolean } | undefined {
+  if (source[start] !== "$") return undefined;
+  const next = source[start + 1];
+  if (next === undefined || next === "(") return undefined;
+  if (next === "{") {
+    let depth = 1;
+    let cursor = start + 2;
+    while (cursor < source.length && depth > 0) {
+      if (source[cursor] === "{" && source[cursor - 1] === "$") depth += 1;
+      else if (source[cursor] === "}") depth -= 1;
+      if (depth > 0) cursor += 1;
+    }
+    if (depth !== 0) return undefined;
+    const inner = source.slice(start + 2, cursor);
+    return {
+      end: cursor + 1,
+      name: inner,
+      raw: source.slice(start, cursor + 1),
+      simple: /^[A-Za-z_][A-Za-z0-9_]*$/.test(inner),
+    };
+  }
+  if (/[A-Za-z_]/.test(next)) {
+    let cursor = start + 2;
+    while (cursor < source.length && /[A-Za-z0-9_]/.test(source[cursor] ?? "")) cursor += 1;
+    const name = source.slice(start + 1, cursor);
+    return { end: cursor, name, raw: source.slice(start, cursor), simple: true };
+  }
+  if (/[0-9*@#?$!-]/.test(next)) {
+    return { end: start + 2, name: next, raw: source.slice(start, start + 2), simple: false };
+  }
+  return undefined;
+}
+
+function freshLiteralKey(source: string, used: Set<string>): string {
+  let serial = used.size;
+  let key = `${LITERAL_KEY_PREFIX}${serial}`;
+  while (source.includes(key) || used.has(key)) {
+    serial += 1;
+    key = `${LITERAL_KEY_PREFIX}${serial}`;
+  }
+  used.add(key);
+  return key;
+}
+
+function namesFeedInterpreter(names: readonly string[]): boolean {
+  // sudo and busybox can hide the real program. An empty name is a dynamic command word.
+  return names.some(
+    (name) => name === "" || name === "sudo" || name === "busybox" || isHeredocInterpreter(name),
+  );
+}
+
+/**
+ * Drop comments and quoted heredoc bodies, and substitute literal assignments.
+ * Returns a short refusal when the command is dynamic in a way the later
+ * tokenizer cannot see (quotes hiding a substitution, a heredoc fed to an
+ * interpreter, or source of anything but a literal activate path).
+ */
+function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
+  const env = new Map<string, string>();
+  const literals: Record<string, string> = {};
+  const usedKeys = new Set<string>();
+  const pending: PendingHeredoc[] = [];
+  let pipelineNames: string[] = [];
+  let commandWords: string[] = [];
+  let out = "";
+  let rawWord = "";
+  let quote: "'" | '"' | undefined;
+  let wordQuoted = false;
+  let atWordStart = true;
+  let redirectNext = false;
+  let guaranteed = true;
+  let inPipeline = false;
+  let index = 0;
+
+  const finishWord = () => {
+    if (rawWord.length === 0 && !wordQuoted) return;
+    const raw = rawWord;
+    rawWord = "";
+    wordQuoted = false;
+    atWordStart = true;
+    if (redirectNext) {
+      redirectNext = false;
+      return;
+    }
+    commandWords.push(raw);
+  };
+
+  const endSimple = (kind: ShellSeparator): string | undefined => {
+    finishWord();
+    const words = commandWords;
+    commandWords = [];
+    const guaranteedBefore = guaranteed;
+    if (isUnsafeSource(words)) return "source";
+    const base = commandBasename(words);
+    if (base !== undefined) pipelineNames.push(base);
+    const pipeMember = inPipeline || kind === "pipe";
+    if (!pipeMember && kind !== "background") {
+      const entries = assignmentEntries(words);
+      if (entries) {
+        for (const entry of entries) {
+          // A non-guaranteed write must not replace a value this command might still use.
+          if (!guaranteedBefore || entry.value === null) env.delete(entry.name);
+          else env.set(entry.name, entry.value);
+        }
+      }
+    } else if (kind === "background") {
+      for (const entry of assignmentEntries(words) ?? []) env.delete(entry.name);
+    }
+    if (kind === "pipe") {
+      inPipeline = true;
+      guaranteed = false;
+      return undefined;
+    }
+    for (const heredoc of pending) {
+      if (!heredoc.names) heredoc.names = [...pipelineNames];
+    }
+    pipelineNames = [];
+    inPipeline = false;
+    if (kind === "and") {
+      const stable = assignmentEntries(words)?.every((entry) => entry.value !== null) ?? false;
+      guaranteed = guaranteedBefore && stable && !pipeMember;
+    } else if (kind === "or" || kind === "background") guaranteed = false;
+    else guaranteed = true;
+    return undefined;
+  };
+
+  const appendExpansion = (): string | undefined => {
+    const next = source[index + 1];
+    if (next === "(") {
+      return source[index + 2] === "(" ? "arithmetic expansion" : "command substitution";
+    }
+    const expansion = readExpansion(source, index);
+    if (!expansion) {
+      out += "$";
+      rawWord += "$";
+      index += 1;
+      atWordStart = false;
+      return undefined;
+    }
+    rawWord += expansion.raw;
+    if (!expansion.simple) {
+      const hazard = braceExpansionHazard(expansion.raw);
+      if (hazard) return hazard;
+      out += expansion.raw;
+    } else {
+      const value = env.get(expansion.name);
+      if (value === undefined) out += expansion.raw;
+      else {
+        const key = freshLiteralKey(source, usedKeys);
+        literals[key] = value;
+        out += `$${key}`;
+      }
+    }
+    index = expansion.end;
+    atWordStart = false;
+    return undefined;
+  };
+
+  while (index < source.length) {
+    const character = source[index];
+    if (quote === "'") {
+      out += character ?? "";
+      rawWord += character ?? "";
+      if (character === "'") quote = undefined;
+      index += 1;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === "\\") {
+        const next = source[index + 1];
+        out += character ?? "";
+        rawWord += character ?? "";
+        if (next !== undefined) {
+          out += next;
+          rawWord += next;
+          index += 2;
+          continue;
+        }
+      } else if (character === '"') {
+        quote = undefined;
+        out += character;
+        rawWord += character;
+      } else if (character === "`") return { reason: "backtick" };
+      else if (character === "$") {
+        const reason = appendExpansion();
+        if (reason) return { reason };
+        continue;
+      } else {
+        out += character ?? "";
+        rawWord += character ?? "";
+      }
+      index += 1;
+      continue;
+    }
+    if (character === "\\") {
+      const next = source[index + 1];
+      if (next === "\n") {
+        index += 2;
+        continue;
+      }
+      out += "\\";
+      rawWord += "\\";
+      atWordStart = false;
+      if (next !== undefined) {
+        out += next;
+        rawWord += next;
+        index += 2;
+        continue;
+      }
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      wordQuoted = true;
+      atWordStart = false;
+      out += character;
+      rawWord += character;
+      index += 1;
+      continue;
+    }
+    if (character === "#" && atWordStart) {
+      while (index < source.length && source[index] !== "\n") index += 1;
+      continue;
+    }
+    if (character === "#") {
+      // shell-quote treats a mid-word # as a comment and drops the rest of the string.
+      out += "\\#";
+      rawWord += "#";
+      atWordStart = false;
+      index += 1;
+      continue;
+    }
+    if (character === " " || character === "\t") {
+      finishWord();
+      out += character;
+      atWordStart = true;
+      index += 1;
+      continue;
+    }
+    if (character === "\n") {
+      const separated = endSimple("seq");
+      if (separated) return { reason: separated };
+      if (pending.length === 0) {
+        out += "\n";
+        atWordStart = true;
+        index += 1;
+        continue;
+      }
+      if (pending.some((heredoc) => namesFeedInterpreter(heredoc.names ?? []))) {
+        return { reason: "heredoc" };
+      }
+      let cursor = index + 1;
+      for (const heredoc of pending) {
+        const body = readHeredocBody(source, cursor, heredoc.delimiter, heredoc.stripTabs);
+        if (!body) return { reason: "heredoc" };
+        if (!heredoc.quoted) {
+          const hazard = heredocBodyHazard(body.content);
+          if (hazard) return { reason: hazard };
+          out += body.content;
+        }
+        cursor = body.end;
+      }
+      pending.length = 0;
+      out += "\n";
+      atWordStart = true;
+      index = cursor;
+      continue;
+    }
+    if (character === "<" && source.startsWith("<<<", index)) return { reason: "herestring" };
+    if (character === "<" && source[index + 1] === "<") {
+      finishWord();
+      let cursor = index + 2;
+      const stripTabs = source[cursor] === "-";
+      if (stripTabs) cursor += 1;
+      const delimiter = readHeredocDelimiter(source, cursor);
+      if (!delimiter) return { reason: "heredoc" };
+      // Quoted bodies are data. Unquoted bodies still expand, so they are scanned below.
+      pending.push({ delimiter: delimiter.delimiter, quoted: delimiter.quoted, stripTabs });
+      index = delimiter.end;
+      atWordStart = true;
+      continue;
+    }
+    if ((character === "<" || character === ">") && source[index + 1] === "(") {
+      return { reason: "subshell" };
+    }
+    if (character === "`") return { reason: "backtick" };
+    if (character === "$") {
+      const reason = appendExpansion();
+      if (reason) return { reason };
+      continue;
+    }
+    if (character === "(" || character === ")") return { reason: "subshell" };
+    const multi = ["&&", "||", ";;", "|&", ">>", ">&", "<&", "&>"].find((op) =>
+      source.startsWith(op, index),
+    );
+    if (
+      multi ||
+      character === ";" ||
+      character === "|" ||
+      character === "&" ||
+      character === ">" ||
+      character === "<"
+    ) {
+      const op = multi ?? character ?? "";
+      const redirect =
+        op === ">" || op === "<" || op === ">>" || op === ">&" || op === "<&" || op === "&>";
+      if (redirect && !wordQuoted && /^\d+$/.test(rawWord)) {
+        rawWord = "";
+        atWordStart = true;
+      }
+      if (redirect) {
+        finishWord();
+        out += op;
+        atWordStart = true;
+        redirectNext = true;
+        index += op.length;
+        continue;
+      }
+      out += op;
+      atWordStart = true;
+      redirectNext = false;
+      index += op.length;
+      const kind: ShellSeparator =
+        op === "|" || op === "|&"
+          ? "pipe"
+          : op === "&&"
+            ? "and"
+            : op === "||"
+              ? "or"
+              : op === "&"
+                ? "background"
+                : "seq";
+      const separated = endSimple(kind);
+      if (separated) return { reason: separated };
+      continue;
+    }
+    out += character ?? "";
+    rawWord += character ?? "";
+    atWordStart = false;
+    index += 1;
+  }
+
+  const separated = endSimple("seq");
+  if (separated) return { reason: separated };
+  if (quote || pending.length > 0)
+    return { reason: quote ? "uninspectable shell syntax" : "heredoc" };
+  return { command: out, literals };
+}
+
+function shellCFlagProgram(words: readonly string[], interpreterIndex: number): string | undefined {
   for (let index = interpreterIndex + 1; index < words.length; index += 1) {
     const word = words[index] ?? "";
     if (word.startsWith("--command=")) return word.slice("--command=".length);
@@ -466,15 +1138,32 @@ function preserveShellCommandBoundaries(command: string): string {
   return result;
 }
 
-function tokenizeProtectedShellCommand(command: string): string[] | "dynamic" {
+function shellTokenReason(entry: object): string | undefined {
+  if ("comment" in entry) return "comment";
+  if ("expansion" in entry && typeof entry.expansion === "string") {
+    const hazard = braceExpansionHazard(entry.expansion);
+    // The value is chosen by the shell after this guard, so it cannot be checked.
+    return hazard ?? unresolvedVariableReason(entry.expansion);
+  }
+  if (!("op" in entry) || typeof entry.op !== "string") return "uninspectable shell syntax";
+  if (entry.op === "glob") return undefined;
+  if (entry.op === "(" || entry.op === ")" || entry.op === "<(") return "subshell";
+  if (entry.op === "<<<") return "herestring";
+  if (SAFE_SHELL_CONTROL_OPS.has(entry.op)) return undefined;
+  return "unsupported shell syntax";
+}
+
+function tokenizeProtectedShellCommand(
+  command: string,
+  literals: Readonly<Record<string, string>>,
+): { words: string[] } | { reason: string } {
   try {
     // shell-quote treats newlines as whitespace. Preserve command boundaries for
-    // the dot builtin, after folding shell line continuations. Retaining the
-    // newline also preserves comment handling (comments remain fail-closed).
+    // the dot builtin, after folding shell line continuations.
     const separated = preserveShellCommandBoundaries(command);
     const parsed = parseShellCommand<{ expansion: string }>(
       separated,
-      (name) => STATIC_SHELL_EXPANSIONS[name] ?? { expansion: name },
+      (name) => literals[name] ?? STATIC_SHELL_EXPANSIONS[name] ?? { expansion: name },
       { splitUnquoted: true },
     );
     const words: string[] = [];
@@ -483,11 +1172,11 @@ function tokenizeProtectedShellCommand(command: string): string[] | "dynamic" {
     for (const [index, entry] of parsed.entries()) {
       if (typeof entry === "string") {
         // Backtick fragments are not fully tokenized; treat them as dynamic.
-        if (entry.includes("`")) return "dynamic";
-        const word = entry.toLowerCase();
+        if (entry.includes("`")) return { reason: "backtick" };
+        const folded = entry.toLowerCase();
         // `find .`, `git add .`, and `git -C .` use a path, not the
         // executable `. script` builtin. Keep the path out of the builtin scan.
-        words.push(word === "." && (!commandPosition || redirectTarget) ? "./" : word);
+        words.push(entry === "." && (!commandPosition || redirectTarget) ? "./" : entry);
         if (redirectTarget) {
           redirectTarget = false;
           continue;
@@ -495,83 +1184,105 @@ function tokenizeProtectedShellCommand(command: string): string[] | "dynamic" {
         const next = parsed[index + 1];
         if (
           commandPosition &&
-          /^\d+$/.test(word) &&
+          /^\d+$/.test(folded) &&
           typeof next === "object" &&
+          next !== null &&
           "op" in next &&
           /^[<>]/.test(next.op)
         ) {
           // A leading file descriptor belongs to a redirect, not the command.
-        } else if (commandPosition && /^(?:then|do|else)$/.test(word)) {
+        } else if (commandPosition && /^(?:then|do|else)$/.test(folded)) {
           commandPosition = true;
-        } else if (commandPosition && (word === "coproc" || word === "function")) return "dynamic";
-        else if (
+        } else if (commandPosition && (folded === "coproc" || folded === "function")) {
+          return { reason: folded };
+        } else if (
           commandPosition &&
-          (/^(?:command|builtin|exec|time|if|elif|while|until|!|\{)$/.test(word) ||
-            word.startsWith("-") ||
-            /^[a-z_][a-z0-9_]*=/.test(word))
+          (/^(?:command|builtin|exec|time|if|elif|while|until|!|\{)$/.test(folded) ||
+            folded.startsWith("-") ||
+            /^[a-z_][a-z0-9_]*=/.test(folded))
         ) {
           // Shell prefixes and assignments leave the command word pending.
         } else commandPosition = false;
         continue;
       }
-      if ("expansion" in entry) {
-        // Unknown expansions and command substitutions are resolved by bash
-        // after this guard runs, so their eventual value cannot be inspected.
-        return "dynamic";
-      }
-      if ("op" in entry && entry.op === "glob") {
-        words.push(entry.pattern.toLowerCase());
+      if (typeof entry !== "object" || entry === null)
+        return { reason: "uninspectable shell syntax" };
+      if (
+        "op" in entry &&
+        entry.op === "glob" &&
+        "pattern" in entry &&
+        typeof entry.pattern === "string"
+      ) {
+        words.push(entry.pattern);
         continue;
       }
-      if ("op" in entry && SAFE_SHELL_CONTROL_OPS.has(entry.op)) {
+      const reason = shellTokenReason(entry);
+      if (reason) return { reason };
+      if ("op" in entry && typeof entry.op === "string" && SAFE_SHELL_CONTROL_OPS.has(entry.op)) {
         if (["&&", "||", ";", "|", "&"].includes(entry.op)) {
           commandPosition = true;
           redirectTarget = false;
         } else redirectTarget = true;
-        continue;
       }
-      return "dynamic";
     }
-    return words;
+    return { words };
   } catch {
-    return "dynamic";
+    return { reason: "uninspectable shell syntax" };
   }
 }
 
-export function isProtectedComputerLifecycleCommand(command: string): boolean {
-  const words = tokenizeProtectedShellCommand(command);
-  if (words === "dynamic") return true;
-
-  const commandNames = words.map((word) => word.split("/").at(-1));
-  if (commandNames.some((word) => /^(?:kill|pkill|killall|xkill)$/.test(word ?? ""))) {
-    return true;
+function protectedWordRefusal(words: readonly string[]): string | undefined {
+  for (const word of words) {
+    const base = (word.split("/").at(-1) ?? "").toLowerCase();
+    if (/^(?:kill|pkill|killall|xkill)$/.test(base)) return `protected command ${base}`;
   }
-  // eval/source/. can hide protected commands inside an expansion string that the
-  // outer tokenizer keeps as a single word (e.g. eval "pkill chromium").
-  if (words.includes(".") || commandNames.some((word) => /^(?:eval|source)$/.test(word ?? ""))) {
-    return true;
-  }
-  if (
-    commandNames.some((word) => word === "systemctl" || word === "service") &&
-    words.some((word) => /^(?:stop|restart|kill)$/.test(word))
-  ) {
-    return true;
-  }
-  if (
-    words.some((word) =>
-      /(?:\.browser-profiles|--user-data-dir|\/tmp\/\.x11-unix|\/tmp\/\.x\d+-lock)/.test(word),
-    )
-  ) {
-    return true;
-  }
-
   for (let index = 0; index < words.length; index += 1) {
-    const name = words[index]?.split("/").at(-1) ?? "";
+    const word = words[index] ?? "";
+    const base = (word.split("/").at(-1) ?? "").toLowerCase();
+    if (base !== "eval" && base !== "source" && word !== ".") continue;
+    const next = words[index + 1];
+    // Virtualenv activation is the one source form that does not run an arbitrary script.
+    if ((word === "source" || word === ".") && next && isLiteralActivatePath(next)) continue;
+    return base === "eval" ? "eval" : "source";
+  }
+  const service = words
+    .map((word) => (word.split("/").at(-1) ?? "").toLowerCase())
+    .find((word) => word === "systemctl" || word === "service");
+  if (service) {
+    const action = words.find((word) => /^(?:stop|restart|kill)$/.test(word.toLowerCase()));
+    if (action) return `${service} ${action.toLowerCase()}`;
+  }
+  for (const word of words) {
+    const folded = word.toLowerCase();
+    if (/(?:\.browser-profiles|--user-data-dir)/.test(folded)) return "browser profile path";
+    if (/(?:\/tmp\/\.x11-unix|\/tmp\/\.x\d+-lock)/.test(folded)) return "X11 path";
+  }
+  for (let index = 0; index < words.length; index += 1) {
+    const name = (words[index]?.split("/").at(-1) ?? "").toLowerCase();
     if (!SHELL_INTERPRETER_NAMES.test(name)) continue;
     const program = shellCFlagProgram(words, index);
-    if (program && isProtectedComputerLifecycleCommand(program)) return true;
+    if (!program) continue;
+    const nested = protectedComputerLifecycleRefusal(program);
+    if (nested) return nested;
   }
-  return false;
+  return undefined;
+}
+
+/** Short reason the desktop-protection guard refuses `command`, when it does. */
+export function protectedComputerLifecycleRefusal(command: string): string | undefined {
+  const prepared = prepareDesktopGuardCommand(command);
+  if ("reason" in prepared) return prepared.reason;
+  const tokenized = tokenizeProtectedShellCommand(prepared.command, prepared.literals);
+  if ("reason" in tokenized) return tokenized.reason;
+  return protectedWordRefusal(tokenized.words);
+}
+
+export function isProtectedComputerLifecycleCommand(command: string): boolean {
+  return protectedComputerLifecycleRefusal(command) !== undefined;
+}
+
+export function desktopProtectionGuardMessage(reason: string): string {
+  return `This command was not run: desktop-protection guard: ${reason}. Shell access is still available. Do not stop or restart browser or desktop processes.`;
 }
 
 /** Cap the roster so a large Space cannot flood the prompt. */
@@ -2716,11 +3427,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "shell") {
             const command = String(args.command ?? args.cmd ?? "");
-            if (graphical && isProtectedComputerLifecycleCommand(command)) {
-              return finish({
-                error:
-                  "This command was not run: the desktop-protection guard detected a protected command or shell syntax it cannot inspect. Shell access is still available. For ordinary repository work, use direct commands with explicit paths, without sourcing or command substitution. Do not stop or restart browser/desktop processes.",
-              });
+            const refusal = protectedComputerLifecycleRefusal(command);
+            if (graphical && refusal) {
+              return finish({ error: desktopProtectionGuardMessage(refusal) });
             }
             const cwd = resolveBotWorkspaceCwd(
               computerMode,
