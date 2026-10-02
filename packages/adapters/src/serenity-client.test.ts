@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { fetch as undiciFetch } from "undici";
 import { describe, expect, it, vi } from "vitest";
@@ -290,43 +291,46 @@ describe("serenity SSRF fetch path", () => {
 
   it("drives the private-hostname dispatcher with a fetch from the same undici", async () => {
     // A mismatched fetch throws invalid onRequestStart before the socket opens.
-    // Reaching ECONNREFUSED on the pinned address proves the package fetch
+    // A completed response on the pinned ephemeral port proves the package fetch
     // accepted the Agent. Omit, builtin, and a captured builtin all pair.
     expect(undiciFetch).not.toBe(globalThis.fetch);
+    let hits = 0;
+    const server = createServer((_request, response) => {
+      hits += 1;
+      response.writeHead(204);
+      response.end();
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (address == null || typeof address === "string") {
+      throw new Error("Missing test server address");
+    }
     const captured = globalThis.fetch;
-    for (const injected of [undefined, globalThis.fetch, captured] as const) {
-      const safeFetch = createSerenityPrivateLanFetch(injected, async () => [
-        { address: "127.0.0.1", family: 4 as const },
-      ]);
-      try {
-        const error = await safeFetch("https://serenity.example.test:59999/mcp", {
-          signal: AbortSignal.timeout(2_000),
-        }).then(
-          () => null,
-          (caught: unknown) => caught,
-        );
-        const text = causeText(error);
-        expect(text).not.toMatch(/onRequestStart/);
-        expect(text).toMatch(/ECONNREFUSED/);
-      } finally {
-        await safeFetch.close();
+    try {
+      for (const injected of [undefined, globalThis.fetch, captured] as const) {
+        const safeFetch = createSerenityPrivateLanFetch(injected, async () => [
+          { address: "127.0.0.1", family: 4 as const },
+        ]);
+        try {
+          const response = await safeFetch(`http://serenity.example.test:${address.port}/mcp`, {
+            signal: AbortSignal.timeout(2_000),
+          });
+          expect(response.status).toBe(204);
+        } finally {
+          await safeFetch.close();
+        }
       }
+      expect(hits).toBe(3);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
     }
   });
 });
-
-function causeText(error: unknown): string {
-  const parts: string[] = [];
-  const seen = new Set<unknown>();
-  let current = error;
-  while (current instanceof Error && !seen.has(current) && parts.length < 8) {
-    seen.add(current);
-    parts.push(current.message);
-    if ("code" in current && typeof current.code === "string") parts.push(current.code);
-    current = current instanceof AggregateError ? current.errors[0] : current.cause;
-  }
-  return parts.join("\n");
-}
 
 type JsonRpcRequest = { id?: number; method: string; params?: { arguments?: unknown } };
 
