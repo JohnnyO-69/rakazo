@@ -742,6 +742,24 @@ function heredocBodyHazard(body: string): string | undefined {
   return undefined;
 }
 
+/** A quoted body is not expanded, but it can still be a script that kills the desktop. */
+function quotedHeredocLifecycleHazard(body: string): boolean {
+  const folded = body.toLowerCase();
+  if (/(?:\.browser-profiles|--user-data-dir)/.test(folded)) return true;
+  if (/(?:\/tmp\/\.x11-unix|\/tmp\/\.x\d+-lock)/.test(folded)) return true;
+  let sawService = false;
+  let sawServiceAction = false;
+  for (const word of body.split(/[\s;&|]+/)) {
+    const bare = word.replace(/^['"]+|['"]+$/g, "");
+    if (bare.length === 0) continue;
+    const base = (bare.split("/").at(-1) ?? "").toLowerCase();
+    if (/^(?:kill|pkill|killall|xkill)$/.test(base)) return true;
+    if (base === "systemctl" || base === "service") sawService = true;
+    if (/^(?:stop|restart|kill)$/.test(base)) sawServiceAction = true;
+  }
+  return sawService && sawServiceAction;
+}
+
 function braceExpansionHazard(raw: string): string | undefined {
   if (raw.includes("`")) return "backtick";
   for (let index = 0; index < raw.length - 1; index += 1) {
@@ -819,8 +837,9 @@ function isShellOrSourceCommand(words: readonly string[]): boolean {
  * Drop comments and quoted heredoc bodies, and substitute literal assignments.
  * Returns a short refusal when the command is dynamic in a way the later
  * tokenizer cannot see (quotes hiding a substitution, a heredoc that is not
- * data for cat or tee, a shell, source, sudo, or busybox after that heredoc,
- * or source of anything but a literal activate path).
+ * data for cat or tee, a quoted body that names a lifecycle command, a shell,
+ * source, sudo, or busybox after that heredoc, or source of anything but a
+ * literal activate path).
  */
 function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
   const env = new Map<string, string>();
@@ -1023,7 +1042,9 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
       for (const heredoc of pending) {
         const body = readHeredocBody(source, cursor, heredoc.delimiter, heredoc.stripTabs);
         if (!body) return { reason: "heredoc" };
-        if (!heredoc.quoted) {
+        if (heredoc.quoted) {
+          if (quotedHeredocLifecycleHazard(body.content)) return { reason: "heredoc" };
+        } else {
           const hazard = heredocBodyHazard(body.content);
           if (hazard) return { reason: hazard };
           out += body.content;
@@ -1045,7 +1066,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
       if (stripTabs) cursor += 1;
       const delimiter = readHeredocDelimiter(source, cursor);
       if (!delimiter) return { reason: "heredoc" };
-      // Quoted bodies are data. Unquoted bodies still expand, so they are scanned below.
+      // Quoted delimiters suppress expansion. Unquoted bodies still expand, so they are scanned below.
       pending.push({ delimiter: delimiter.delimiter, quoted: delimiter.quoted, stripTabs });
       index = delimiter.end;
       atWordStart = true;

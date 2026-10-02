@@ -129,7 +129,8 @@ describe("computer lifecycle command guard", () => {
       ". ./bin/activate",
       "command source venv/bin/activate",
       "cat > notes.md <<'EOF'\nhello\nEOF",
-      "cat > notes.md <<'EOF'\npkill chromium\n$(date)\nEOF\necho after",
+      "cat > notes.md <<'EOF'\nhello\n$(date)\nEOF\necho after",
+      "cat > setup.sh <<'EOF'\nsource ./lib.sh\neval \"$REST\"\nEOF",
       'tee notes.md <<"EOF"\n# heading\nEOF',
       "cat <<'EOF' | tee notes.md\nhello\nEOF",
       "echo 'built at $(date)'",
@@ -192,6 +193,23 @@ describe("computer lifecycle command guard", () => {
       "protected command pkill",
     );
     expect(protectedComputerLifecycleRefusal("bash -c 'source /tmp/x'")).toBe("source");
+  });
+
+  it("refuses a quoted heredoc whose body names a desktop lifecycle command", () => {
+    expect(protectedComputerLifecycleRefusal("cat > x <<'EOF'\npkill chromium\nEOF")).toBe(
+      "heredoc",
+    );
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nsystemctl restart chromium\nEOF"),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > notes.md <<'EOF'\nrm -rf ~/.browser-profiles/chromium\nEOF",
+      ),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nrm -f /tmp/.X1-lock\nEOF"),
+    ).toBe("heredoc");
   });
 
   it("refuses heredoc writes that a later command can execute", () => {
