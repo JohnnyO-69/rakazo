@@ -495,7 +495,8 @@ function isLiteralActivatePath(text: string): boolean {
 
 /**
  * Collapse repeated slashes and `.` / `..` without reading the filesystem.
- * Undefined when a relative `..` escapes the path that is visible here.
+ * A relative `..` that escapes the visible prefix stays in the result.
+ * Undefined only when the path contains a null byte.
  */
 function lexicalPath(path: string): string | undefined {
   if (path.includes("\0")) return undefined;
@@ -504,11 +505,9 @@ function lexicalPath(path: string): string | undefined {
   for (const part of path.split("/")) {
     if (part === "" || part === ".") continue;
     if (part === "..") {
-      if (stack.length === 0) {
-        if (absolute) continue;
-        return undefined;
-      }
-      stack.pop();
+      if (absolute && stack.length === 0) continue;
+      if (stack.length === 0 || stack.at(-1) === "..") stack.push("..");
+      else stack.pop();
       continue;
     }
     stack.push(part);
@@ -517,7 +516,7 @@ function lexicalPath(path: string): string | undefined {
   return stack.join("/");
 }
 
-/** A write can plant `bin/activate`, or the destination cannot be normalized. */
+/** A write can plant `bin/activate`, or the path contains a null byte. */
 function isActivateWritePath(path: string): boolean {
   const normalized = lexicalPath(path);
   if (normalized === undefined) return true;

@@ -297,6 +297,11 @@ describe("computer lifecycle command guard", () => {
       protectedComputerLifecycleRefusal("install -t /backup venv/bin/activate"),
     ).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("ln -t /backup venv/bin/activate")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("echo notes > ../notes.txt")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("echo notes > ../docs/notes.txt")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("echo notes > ../bin/activate")).toBe(
+      "activate script",
+    );
     expect(protectedComputerLifecycleRefusal('dest=notes.md; printf x > "$dest"')).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("source venv/bin/activate")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("source venv/bin/./activate")).toBe("source");
@@ -307,7 +312,10 @@ describe("computer lifecycle command guard", () => {
     expect(protectedActivateScriptWriteRefusal("venv/bin/foo/../activate")).toBe("activate script");
     expect(protectedActivateScriptWriteRefusal("//tmp//v/bin/activate")).toBe("activate script");
     expect(protectedActivateScriptWriteRefusal("../venv/bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("../bin/activate")).toBe("activate script");
     expect(protectedActivateScriptWriteRefusal("foo/../../bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("../notes.txt")).toBeUndefined();
+    expect(protectedActivateScriptWriteRefusal("../docs/notes.txt")).toBeUndefined();
     expect(protectedActivateScriptWriteRefusal("notes.md")).toBeUndefined();
     expect(protectedActivateScriptWriteRefusal("venv/bin/activate.fish")).toBeUndefined();
   });
