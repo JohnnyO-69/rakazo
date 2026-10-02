@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  catalogProviderProbeBaseUrl,
   classifyModelConnectionFailure,
   runModelConnectionPreflight,
   sanitizeModelConnectionError,
+  unavailableSelectedModel,
 } from "./model-connection-preflight.js";
 
 describe("sanitizeModelConnectionError", () => {
@@ -21,31 +21,105 @@ describe("classifyModelConnectionFailure", () => {
   });
 });
 
+describe("unavailableSelectedModel", () => {
+  it("fails only when a non-empty list omits the selected id", () => {
+    expect(unavailableSelectedModel("gpt-missing", ["gpt-test"])?.outcome).toBe(
+      "unavailable_model",
+    );
+    expect(unavailableSelectedModel("gpt-test", ["gpt-test"])).toBeNull();
+    expect(unavailableSelectedModel("", ["gpt-test"])).toBeNull();
+    expect(unavailableSelectedModel("gpt-missing", [])).toBeNull();
+  });
+});
+
 describe("runModelConnectionPreflight", () => {
-  it("probes catalog providers with api keys", async () => {
-    const probe = vi.fn().mockResolvedValue({ models: ["gpt-test"] });
+  it("probes catalog providers through the pinned catalog endpoint", async () => {
+    const probeCatalog = vi.fn().mockResolvedValue({ models: ["gpt-test"] });
+    const probe = vi.fn();
     const result = await runModelConnectionPreflight({
       authKind: "api-key",
       provider: "openrouter",
       apiKey: "sk-test-key-12345678",
       modelId: "gpt-test",
+      catalogProbe: true,
       probe,
+      probeCatalog,
     });
     expect(result.ok).toBe(true);
-    expect(probe).toHaveBeenCalledWith({
-      baseUrl: catalogProviderProbeBaseUrl("openrouter"),
+    expect(probe).not.toHaveBeenCalled();
+    expect(probeCatalog).toHaveBeenCalledWith({
+      provider: "openrouter",
       apiKey: "sk-test-key-12345678",
     });
+  });
+
+  it("does not send catalog keys through the user-supplied URL probe", async () => {
+    const result = await runModelConnectionPreflight({
+      authKind: "api-key",
+      provider: "anthropic",
+      apiKey: "sk-test-key-12345678",
+      catalogProbe: false,
+      probe: vi.fn(),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.message).toMatch(/cannot be tested without saving/);
   });
 
   it("reports oauth when not connected", async () => {
     const result = await runModelConnectionPreflight({
       authKind: "oauth",
       provider: "openai-codex",
-      oauthConnected: false,
-      probe: vi.fn(),
+      storedAuthKind: null,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.failure.outcome).toBe("needs_sign_in");
+  });
+
+  it("does not treat a stored api key as subscription sign-in", async () => {
+    const result = await runModelConnectionPreflight({
+      authKind: "oauth",
+      provider: "anthropic",
+      storedAuthKind: "api_key",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.outcome).toBe("needs_sign_in");
+      expect(result.failure.message).toMatch(/API key is stored/);
+    }
+  });
+
+  it("accepts a stored subscription credential", async () => {
+    const result = await runModelConnectionPreflight({
+      authKind: "oauth",
+      provider: "openai-codex",
+      storedAuthKind: "oauth",
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not treat an unreadable credential as a missing sign-in", async () => {
+    const result = await runModelConnectionPreflight({
+      authKind: "oauth",
+      provider: "anthropic",
+      credentialUnreadable: true,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.outcome).toBe("unknown");
+      expect(result.failure.message).toMatch(/Could not check stored credentials/);
+    }
+  });
+
+  it("keeps credential lookup failures distinct from a missing sign-in", async () => {
+    const result = await runModelConnectionPreflight({
+      authKind: "oauth",
+      provider: "openai-codex",
+      credentialLookupFailed: true,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.outcome).toBe("unknown");
+      expect(result.failure.message).toMatch(/Could not check stored credentials/);
+    }
   });
 });

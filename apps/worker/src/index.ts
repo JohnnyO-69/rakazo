@@ -6,6 +6,7 @@ loadRootEnv();
 
 import {
   ChatSdkMessagingSurface,
+  CodexCatalogCache,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
   createConnectorStack,
@@ -43,6 +44,7 @@ import {
   resolveSandboxProvider,
   ScriptedAgentRuntime,
   SpaceMemoryProviderResolver,
+  sandboxProviderOptionsFromEnv,
 } from "@rakazo/adapters";
 import { resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
@@ -86,18 +88,14 @@ async function main() {
   const { key: deploymentModelKey } = resolveDeploymentModel();
   const sandboxProvider = resolveSandboxProvider(process.env);
   const sandbox = createRunSandbox(sandboxProvider, {
+    ...sandboxProviderOptionsFromEnv(process.env),
     supervisorUrl: process.env.SANDBOX_SUPERVISOR_URL ?? "http://127.0.0.1:7091",
     supervisorToken: sandboxProvider === "docker" ? resolveSupervisorToken(process.env) : undefined,
-    e2bApiKey: process.env.E2B_API_KEY,
-    daytonaApiKey: process.env.DAYTONA_API_KEY,
-    daytonaApiUrl: process.env.DAYTONA_API_URL,
-    daytonaTarget: process.env.DAYTONA_TARGET,
-    boxApiKey: process.env.BOX_API_KEY,
-    boxApiUrl: process.env.BOX_API_URL ?? process.env.BOX_BASE_URL,
     dataDir,
     prisma,
   });
-  const mcpOAuth = new McpOAuthBroker(prisma, secrets);
+  const allowPrivateEndpoint = process.env.MCP_ALLOW_PRIVATE_ENDPOINT === "true";
+  const mcpOAuth = new McpOAuthBroker(prisma, secrets, {}, allowPrivateEndpoint);
   const mcp = new McpConnector(
     prisma,
     secrets,
@@ -108,6 +106,7 @@ async function main() {
         .map((v) => v.trim())
         .filter(Boolean),
       events,
+      allowPrivateEndpoint,
     },
     mcpOAuth,
   );
@@ -144,7 +143,7 @@ async function main() {
     },
   );
   const stack = createConnectorStack(false, undefined, [
-    new InstalledConnectorProvider(prisma, secrets),
+    new InstalledConnectorProvider(prisma, secrets, {}, allowPrivateEndpoint),
     ...integrationSettings.providers(),
     mcp,
   ]);
@@ -166,6 +165,8 @@ async function main() {
   const executor = createRunExecutor({
     prisma,
     runtime,
+    // Live per-account Codex catalog; never refreshes or writes credentials.
+    codexCatalog: new CodexCatalogCache(),
     sandbox,
     memory: new MarkdownMemoryStore(prisma),
     memoryProviders,
@@ -191,6 +192,7 @@ async function main() {
       process.env.TYPESAFE_API_KEY ?? "",
     ].filter(Boolean),
     secretStore: secrets,
+    mcpAllowPrivateEndpoint: process.env.MCP_ALLOW_PRIVATE_ENDPOINT === "true",
     deploymentModelKey,
     dataDir,
     notifications: new ExpoPushProvider(dataDir),

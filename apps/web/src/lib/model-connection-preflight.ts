@@ -15,6 +15,8 @@ export type ModelPreflightFailure = {
   nextAction: string;
 };
 
+export type StoredModelAuthKind = "api_key" | "oauth" | "openai_compatible";
+
 const SECRET_PATTERNS: RegExp[] = [
   /\bsk-[a-zA-Z0-9_-]{8,}\b/g,
   /\bBearer\s+[a-zA-Z0-9._-]+\b/gi,
@@ -28,19 +30,6 @@ export function sanitizeModelConnectionError(raw: string): string {
     text = text.replace(pattern, "•••");
   }
   return text;
-}
-
-export function catalogProviderProbeBaseUrl(provider: string): string | null {
-  switch (provider) {
-    case "openrouter":
-      return "https://openrouter.ai/api/v1";
-    case "openai":
-      return "https://api.openai.com/v1";
-    case "groq":
-      return "https://api.groq.com/openai/v1";
-    default:
-      return null;
-  }
 }
 
 function messageFromError(error: unknown): string {
@@ -117,14 +106,34 @@ export function classifyModelConnectionFailure(
   };
 }
 
+/** Failure when a non-empty model list omits the selected id. Empty lists stay reachable. */
+export function unavailableSelectedModel(
+  modelId: string | undefined,
+  discoveredModels: string[],
+): ModelPreflightFailure | null {
+  const trimmed = modelId?.trim() ?? "";
+  if (!trimmed || discoveredModels.length === 0 || discoveredModels.includes(trimmed)) return null;
+  return classifyModelConnectionFailure(new Error("model not listed"), {
+    modelId: trimmed,
+    discoveredModels,
+  });
+}
+
 export type ModelConnectionPreflightInput = {
   authKind: "openai-compatible" | "api-key" | "oauth";
   provider: string;
   baseUrl?: string;
   apiKey?: string;
   modelId?: string;
-  oauthConnected?: boolean;
-  probe: (input: { baseUrl: string; apiKey?: string }) => Promise<{ models: string[] }>;
+  /** Kind of the stored credential, when a lookup succeeded and the secret was readable. */
+  storedAuthKind?: StoredModelAuthKind | null;
+  credentialLookupFailed?: boolean;
+  /** A credential row exists but its kind could not be read. */
+  credentialUnreadable?: boolean;
+  /** Catalog entry says this provider has a pinned models-list URL. */
+  catalogProbe?: boolean;
+  probe?: (input: { baseUrl: string; apiKey?: string }) => Promise<{ models: string[] }>;
+  probeCatalog?: (input: { provider: string; apiKey: string }) => Promise<{ models: string[] }>;
 };
 
 export async function runModelConnectionPreflight(
@@ -134,15 +143,35 @@ export async function runModelConnectionPreflight(
   | { ok: false; failure: ModelPreflightFailure }
 > {
   if (input.authKind === "oauth") {
-    if (input.oauthConnected) {
+    if (input.credentialLookupFailed || input.credentialUnreadable) {
+      return {
+        ok: false,
+        failure: {
+          outcome: "unknown",
+          message: "Could not check stored credentials.",
+          nextAction: "Try the test again.",
+        },
+      };
+    }
+    if (input.storedAuthKind === "oauth") {
       return { ok: true, discoveredModels: [], usesModelsListOnly: true };
+    }
+    if (input.storedAuthKind === "api_key" || input.storedAuthKind === "openai_compatible") {
+      return {
+        ok: false,
+        failure: {
+          outcome: "needs_sign_in",
+          message: "An API key is stored for this provider, not a subscription sign-in.",
+          nextAction: "Sign in with the subscription, or test the API key instead.",
+        },
+      };
     }
     return {
       ok: false,
       failure: {
         outcome: "needs_sign_in",
         message: "This provider is not connected yet.",
-        nextAction: "Finish subscription or OAuth sign-in, then test again.",
+        nextAction: "Finish subscription sign-in, then test again.",
       },
     };
   }
@@ -161,28 +190,23 @@ export async function runModelConnectionPreflight(
         },
       };
     }
-    const baseUrl = catalogProviderProbeBaseUrl(input.provider);
-    if (!baseUrl) {
+    if (!input.catalogProbe || !input.probeCatalog) {
       return {
         ok: false,
         failure: {
           outcome: "unknown",
           message: "This provider cannot be tested without saving.",
-          nextAction: "Use Connect to verify the key, or choose an OpenAI-compatible server URL.",
+          nextAction: "Use Connect to verify the key.",
         },
       };
     }
     try {
-      const { models } = await input.probe({ baseUrl, apiKey: trimmedKey });
-      if (trimmedModel && models.length > 0 && !models.includes(trimmedModel)) {
-        return {
-          ok: false,
-          failure: classifyModelConnectionFailure(new Error("model not listed"), {
-            modelId: trimmedModel,
-            discoveredModels: models,
-          }),
-        };
-      }
+      const { models } = await input.probeCatalog({
+        provider: input.provider,
+        apiKey: trimmedKey,
+      });
+      const unavailable = unavailableSelectedModel(trimmedModel, models);
+      if (unavailable) return { ok: false, failure: unavailable };
       return { ok: true, discoveredModels: models, usesModelsListOnly: true };
     } catch (error) {
       return {
@@ -193,7 +217,7 @@ export async function runModelConnectionPreflight(
   }
 
   const baseUrl = input.baseUrl?.trim() ?? "";
-  if (!baseUrl) {
+  if (!baseUrl || !input.probe) {
     return {
       ok: false,
       failure: {
@@ -209,15 +233,8 @@ export async function runModelConnectionPreflight(
       baseUrl,
       apiKey: trimmedKey || undefined,
     });
-    if (trimmedModel && models.length > 0 && !models.includes(trimmedModel)) {
-      return {
-        ok: false,
-        failure: classifyModelConnectionFailure(new Error("model not listed"), {
-          modelId: trimmedModel,
-          discoveredModels: models,
-        }),
-      };
-    }
+    const unavailable = unavailableSelectedModel(trimmedModel, models);
+    if (unavailable) return { ok: false, failure: unavailable };
     return { ok: true, discoveredModels: models, usesModelsListOnly: true };
   } catch (error) {
     return {

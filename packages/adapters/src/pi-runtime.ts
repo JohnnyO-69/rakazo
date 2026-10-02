@@ -7,14 +7,19 @@ import {
 } from "@earendil-works/pi-agent-core";
 import {
   type Api,
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  type Context,
   clampThinkingLevel,
   type Model,
   type Models,
+  type ModelsSimpleStreamOptions,
   type ModelThinkingLevel,
-  type SimpleStreamOptions,
+  type ProviderHeaders,
   Type,
 } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import type {
   AdapterContext,
   AgentRunRequest,
@@ -35,7 +40,9 @@ import {
   openAiToolParametersNeedNormalization,
 } from "./openai-tool-parameters.js";
 import { PiRuntimeCredentialStore, toOAuthCredential } from "./pi-credentials.js";
+import { supplementPiModels } from "./pi-current-models.js";
 import { registerLocalProvider } from "./pi-local-provider.js";
+import { codexComputeResidency } from "./pi-oauth.js";
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   registerOpenAiCompatibleCatalog,
@@ -45,8 +52,10 @@ import {
   billedPromptTokens,
   clipToolResultContent,
   clipToolResultText,
-  MODEL_STREAM_MAX_RETRIES,
+  MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
+  modelStreamMaxRetries,
+  REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
 } from "./pi-runtime-limits.js";
 import {
@@ -54,6 +63,8 @@ import {
   type PiSessionHandle,
   type PiSessionRecorder,
 } from "./pi-session.js";
+import type { FinishedShellCommand } from "./shell-command-stream.js";
+import { deliverFinishedShells } from "./shell-command-stream.js";
 import { textContentArg } from "./tool-text.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
@@ -70,7 +81,9 @@ const toolCallBudgetsByRun = new Map<string, ToolCallBudget>();
 // would run before .env is loaded and miss the local provider entirely.
 let catalogModelsCache: Models | undefined;
 function catalogModels(): Models {
-  catalogModelsCache ??= registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels()));
+  catalogModelsCache ??= registerOpenAiCompatibleCatalog(
+    registerLocalProvider(supplementPiModels(builtinModels())),
+  );
   return catalogModelsCache;
 }
 const MAX_PARALLEL_SUBAGENTS = 4;
@@ -208,6 +221,7 @@ export class PiAgentRuntime implements AgentRuntime {
           signal,
           depth: 0,
           pausePending: false,
+          pendingShells: [],
         };
         resumeHost = host;
         const tools = toAgentTools(toolDefs, host);
@@ -260,13 +274,30 @@ export class PiAgentRuntime implements AgentRuntime {
           sessionId: conversationSessionId(request.threadId, request.botId),
           steeringMode: "all",
           streamFn: (m, ctx, options) =>
-            models.streamSimple(m, ctx, reliableStreamOptions(m, options, request.model.maxTokens)),
+            reliableModelStream(
+              models,
+              m,
+              ctx,
+              options,
+              request.model.maxTokens,
+              () => selectedModel.credentials?.accessToken ?? apiKey,
+            ),
           getApiKey: async () => apiKey,
           transformContext: async (messages) =>
             pruneComputerScreenshotContext(
               pruneStalePageStateContext(messages),
               request.model.maxImagesPerPrompt,
             ),
+          finishTurn: async (turn, turnSignal) => {
+            await deliverFinishedShells(
+              (text) => {
+                agent.followUp({ role: "user", content: text, timestamp: Date.now() });
+              },
+              host.pendingShells,
+              turn,
+              turnSignal,
+            );
+          },
           prepareNextTurnWithContext: async () => {
             if (!request.claimSteering) return undefined;
             const steering = await request.claimSteering([...seenSteeringIds]);
@@ -377,11 +408,18 @@ export class PiAgentRuntime implements AgentRuntime {
               queue.push({ type: "text", text });
             }
             if ("usage" in event.message && event.message.usage) {
+              const usage = billedPromptTokens(event.message.usage);
               queue.push({
                 type: "usage",
-                ...billedPromptTokens(event.message.usage),
+                ...usage,
                 provider: model.provider,
                 model: model.id,
+              });
+              getLogger().debug("model usage", {
+                runId: request.runId,
+                provider: model.provider,
+                model: model.id,
+                ...usage,
               });
             }
           }
@@ -486,6 +524,10 @@ function configuredOpenRouterModel(id: string): Model<"openai-completions"> {
   // pricing conservative, but enable reasoning: unknown OpenRouter endpoints
   // (e.g. gemini-3.7-flash before the snapshot catches up) often mandate it, and
   // thinkingLevel "off" becomes effort "none" which those endpoints reject.
+  // The output ceiling follows from that reasoning flag: a 4k placeholder would
+  // clamp the reasoning budget back to a size the thinking alone can consume.
+  // It cannot outgrow the conservative window this placeholder also assumes.
+  const contextWindow = 16_384;
   return {
     id,
     name: id,
@@ -495,8 +537,8 @@ function configuredOpenRouterModel(id: string): Model<"openai-completions"> {
     reasoning: true,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 16_384,
-    maxTokens: 4_096,
+    contextWindow,
+    maxTokens: Math.min(REASONING_MODEL_MAX_TOKENS, contextWindow),
   };
 }
 
@@ -506,6 +548,8 @@ export function resolveRuntimeModel(modelConfig: AgentRunRequest["model"]): {
   models: Models;
   model: Model<Api> | undefined;
   apiKey: string | undefined;
+  /** Live credential store; OAuth refreshes swap the credential mid-run. */
+  credentials: PiRuntimeCredentialStore | undefined;
 } {
   const provider = modelConfig.provider === "scripted" ? "openrouter" : modelConfig.provider;
   const envDefaultModel = process.env.PI_DEFAULT_MODEL?.trim();
@@ -513,7 +557,8 @@ export function resolveRuntimeModel(modelConfig: AgentRunRequest["model"]): {
   const requestedId =
     modelConfig.id === "scripted" ? envDefaultModel || DEFAULT_OPENROUTER_MODEL_ID : modelConfig.id;
   const modelId = usableModelId(requestedId) ?? "";
-  const models = modelsForRequest({ model: modelConfig }, provider);
+  const credentials = credentialStoreForRequest({ model: modelConfig }, provider);
+  const models = modelsForRequest({ model: modelConfig }, provider, credentials);
   let model = models.getModel(provider, modelId);
   if (!model && provider !== "openrouter" && provider !== OPENAI_COMPATIBLE_PROVIDER_ID) {
     model = models.getModel("openrouter", modelId);
@@ -534,26 +579,33 @@ export function resolveRuntimeModel(modelConfig: AgentRunRequest["model"]): {
         // another provider would ship our key to a vendor it was not issued for.
         (modelConfig.apiKey ??
         (provider === "openrouter" ? process.env.OPENROUTER_API_KEY : undefined));
-  return { provider, modelId, models, model, apiKey };
+  return { provider, modelId, models, model, apiKey, credentials };
+}
+
+function credentialStoreForRequest(
+  request: Pick<AgentRunRequest, "model">,
+  provider: string,
+): PiRuntimeCredentialStore | undefined {
+  const oauth = request.model.oauth;
+  if (!oauth) return undefined;
+  const persist = oauth.persist;
+  return new PiRuntimeCredentialStore(
+    provider,
+    toOAuthCredential(oauth.credential),
+    persist ? (next) => persist(next) : undefined,
+    oauth.retire,
+  );
 }
 
 export function modelsForRequest(
   request: Pick<AgentRunRequest, "model">,
   provider: string,
+  credentials?: PiRuntimeCredentialStore,
 ): Models {
-  const oauth = request.model.oauth;
-  if (oauth) {
-    const persist = oauth.persist;
+  const store = credentials ?? credentialStoreForRequest(request, provider);
+  if (store) {
     return registerOpenAiCompatibleCatalog(
-      registerLocalProvider(
-        builtinModels({
-          credentials: new PiRuntimeCredentialStore(
-            provider,
-            toOAuthCredential(oauth.credential),
-            persist ? (next) => persist(next) : undefined,
-          ),
-        }),
-      ),
+      registerLocalProvider(supplementPiModels(builtinModels({ credentials: store }))),
     );
   }
   if (
@@ -561,7 +613,9 @@ export function modelsForRequest(
     request.model.baseUrl &&
     request.model.id.trim()
   ) {
-    const models = registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels()));
+    const models = registerOpenAiCompatibleCatalog(
+      registerLocalProvider(supplementPiModels(builtinModels())),
+    );
     return registerOpenAiCompatibleRuntime(models, {
       modelId: request.model.id,
       baseUrl: request.model.baseUrl,
@@ -626,6 +680,7 @@ export function describeToolActivity(toolName: string, args: unknown): string {
   if (toolName === "run_subagent") return `Delegating to helper: ${detail(record.name)}`;
   if (toolName === "create_space") return `Creating space: ${detail(record.name)}`;
   if (toolName === "remember") return "Saving a note to memory";
+  if (toolName === "save_shared_memory") return `Saving shared memory: ${detail(record.path)}`;
   if (toolName === "web_search") return `Searching the web: ${detail(record.query)}`;
   if (toolName === "web_fetch") return `Reading page: ${detail(redactActivityUrl(record.url))}`;
   if (toolName === "skill_read") return `Reading skill: ${detail(record.name)}`;
@@ -706,11 +761,15 @@ function toHistory(
       : history.filter((_, index) => index !== duplicatePromptIndex);
   return prior
     .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) =>
-      m.role === "assistant"
-        ? { role: "user" as const, content: `Assistant: ${m.content}`, timestamp: Date.now() }
-        : { role: "user" as const, content: m.content, timestamp: Date.now() },
-    );
+    .map((m) => {
+      const text = m.role === "assistant" ? `Assistant: ${m.content}` : m.content;
+      const images = m.role === "assistant" ? [] : toPiImages(m.images);
+      return {
+        role: "user" as const,
+        content: images.length ? [{ type: "text" as const, text }, ...images] : text,
+        timestamp: Date.now(),
+      };
+    });
 }
 
 function withoutSteeringMessages(
@@ -754,7 +813,11 @@ export function prepareRequestSecretArguments(raw: Record<string, unknown>) {
   const label = raw.label == null ? "" : String(raw.label);
   const purpose = raw.purpose == null ? "" : String(raw.purpose);
   if (!label.trim() || !purpose.trim()) {
-    throw new Error("request_secret requires a non-empty label and purpose");
+    throw new Error(
+      `request_secret requires a non-empty label and purpose (received: ${
+        Object.keys(raw).sort().join(", ") || "no arguments"
+      })`,
+    );
   }
   return {
     label,
@@ -954,9 +1017,17 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             };
           }
           if (host.request.executeTool) {
-            const result = tool.route
-              ? await host.request.executeTool(tool.name, args, executionId, tool.route)
-              : await host.request.executeTool(tool.name, args, executionId);
+            const result = await host.request.executeTool(
+              tool.name,
+              args,
+              executionId,
+              tool.route,
+              {
+                onShellStillRunning: (completion) => {
+                  host.pendingShells.push(completion);
+                },
+              },
+            );
             if (isAgentToolExecutionResult(result)) {
               if (isToolPauseResult(result)) host.pausePending = true;
               return boundAgentToolResult(result);
@@ -1052,14 +1123,29 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     model: subagentModel,
     apiKey: selectedModel.apiKey,
     depth: 1,
+    pendingShells: [],
   };
-  const nested = new Agent({
+  let nested!: Agent;
+  nested = new Agent({
+    finishTurn: async (turn, turnSignal) => {
+      await deliverFinishedShells(
+        (text) => {
+          nested.followUp({ role: "user", content: text, timestamp: Date.now() });
+        },
+        nestedHost.pendingShells,
+        turn,
+        turnSignal,
+      );
+    },
     sessionId: conversationSessionId(host.request.threadId, host.request.botId, agentId),
     streamFn: (m, ctx, options) =>
-      selectedModel.models.streamSimple(
+      reliableModelStream(
+        selectedModel.models,
         m,
         ctx,
-        reliableStreamOptions(m, options, requestModel.maxTokens),
+        options,
+        requestModel.maxTokens,
+        () => selectedModel.credentials?.accessToken ?? selectedModel.apiKey,
       ),
     getApiKey: async () => selectedModel.apiKey,
     transformContext: async (messages) =>
@@ -1121,11 +1207,18 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       const text = assistantText(event.message);
       if (text && !streamed) streamed = text;
       if ("usage" in event.message && event.message.usage) {
+        const usage = billedPromptTokens(event.message.usage);
         host.queue.push({
           type: "usage",
-          ...billedPromptTokens(event.message.usage),
+          ...usage,
           provider: subagentModel.provider,
           model: subagentModel.id,
+        });
+        getLogger().debug("model usage", {
+          runId: host.request.runId,
+          provider: subagentModel.provider,
+          model: subagentModel.id,
+          ...usage,
         });
       }
     }
@@ -1195,7 +1288,10 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
 
 /** Build AgentTool.parameters for a connector tool, including OpenAI wire fidelity. */
 export function parametersFor(tool: ConnectorTool) {
-  const schema = builtinParameters(tool) ?? safeJsonSchemaParameters(tool);
+  const builtin = builtinParameters(tool);
+  const schema = builtin
+    ? withDeclaredDescriptions(builtin, tool.inputSchema)
+    : safeJsonSchemaParameters(tool);
   // Type.Union (top-level oneOf/anyOf) serializes without type/properties, and
   // Anthropic rejects a root union, so it is flattened into one object schema.
   // Re-wrap only when needed so Type.Object schemas keep TypeBox Kind metadata.
@@ -1203,6 +1299,30 @@ export function parametersFor(tool: ConnectorTool) {
   return Type.Unsafe(
     normalizeOpenAiToolParameters(JSON.parse(JSON.stringify(schema))),
   ) as unknown as ReturnType<typeof Type.Object>;
+}
+
+/** builtinParameters hand-builds stricter schemas for some tools, and those carried none of
+ * the parameter descriptions the tool declares. Copy each declared description onto the
+ * matching top-level field. The schema is built fresh per call, so this mutates no shared
+ * node. */
+function withDeclaredDescriptions<T>(schema: T, declared: unknown): T {
+  const fields = (schema as { properties?: Record<string, Record<string, unknown>> }).properties;
+  const source = (
+    declared as { properties?: Record<string, { description?: unknown }> } | undefined
+  )?.properties;
+  if (!fields || !source) return schema;
+  for (const [key, spec] of Object.entries(source)) {
+    const field = fields[key];
+    if (
+      field &&
+      field.description === undefined &&
+      typeof spec?.description === "string" &&
+      spec.description
+    ) {
+      field.description = spec.description;
+    }
+  }
+  return schema;
 }
 
 /** A remote MCP server controls its own schemas, so a shape TypeBox cannot express must
@@ -1264,7 +1384,7 @@ function builtinParameters(tool: ConnectorTool) {
       title: Type.Optional(Type.String()),
       instructions: Type.Optional(Type.String()),
       prompt: Type.Optional(Type.String()),
-      computer_mode: Type.Optional(Type.Union([Type.Literal("team"), Type.Literal("dedicated")])),
+      computer_mode: Type.Optional(stringEnum(["team", "dedicated"], {})),
     });
   }
   if (tool.name === "update_bot") {
@@ -1441,11 +1561,12 @@ function isAgentToolExecutionResult(result: unknown): result is AgentToolExecuti
 
 export function jsonSchemaParameters(
   schema: Record<string, unknown>,
+  options: FieldOptions = {},
 ): ReturnType<typeof Type.Object> {
   // Keep intersections intact until parametersFor flattens root combinators.
   // Rebuilding only properties here drops allOf-only fields and their constraints.
   if (Array.isArray(schema.allOf)) {
-    return Type.Unsafe(schema) as unknown as ReturnType<typeof Type.Object>;
+    return Type.Unsafe({ ...schema, ...options }) as unknown as ReturnType<typeof Type.Object>;
   }
   // Top-level oneOf/anyOf (e.g. request_secret's credential XOR connectionId)
   // must stay a union. Falling through to properties would drop the exclusivity
@@ -1458,6 +1579,7 @@ export function jsonSchemaParameters(
   if (alternatives && alternatives.length > 0 && schema.properties == null) {
     return Type.Union(
       alternatives.map((variant) => jsonSchemaParameters(variant as Record<string, unknown>)),
+      options,
     ) as unknown as ReturnType<typeof Type.Object>;
   }
   const properties = (schema.properties ?? {}) as Record<string, unknown>;
@@ -1473,13 +1595,27 @@ export function jsonSchemaParameters(
   // Type.Object defaults to open, which would let connectionId+replace match both
   // anyOf variants after conversion.
   return schema.additionalProperties === false
-    ? Type.Object(fields, { additionalProperties: false })
-    : Type.Object(fields);
+    ? Type.Object(fields, { ...options, additionalProperties: false })
+    : Type.Object(fields, options);
+}
+
+type FieldOptions = { description?: string };
+
+/** Carry the parameter description when rebuilding its TypeBox node. */
+function fieldOptions(definition: Record<string, unknown>): FieldOptions {
+  return typeof definition.description === "string" && definition.description
+    ? { description: definition.description }
+    : {};
+}
+
+/** Use a plain string enum: some gateways discard the allowed values from anyOf/const unions. */
+function stringEnum(values: readonly string[], options: FieldOptions) {
+  return Type.Unsafe<string>({ type: "string", enum: [...values], ...options });
 }
 
 /** TypeBox only builds literals from primitives; anything else throws while the tool list is
  * being assembled, which would take down the whole turn. */
-function enumUnion(values: readonly unknown[]) {
+function enumUnion(values: readonly unknown[], options: FieldOptions = {}) {
   const members = values.map((value) =>
     value === null
       ? Type.Null()
@@ -1487,20 +1623,34 @@ function enumUnion(values: readonly unknown[]) {
         ? Type.Literal(value)
         : undefined,
   );
-  return members.every((member) => member !== undefined) ? Type.Union(members) : undefined;
+  return members.every((member) => member !== undefined) ? Type.Union(members, options) : undefined;
 }
 
 export function jsonField(spec: unknown): ReturnType<typeof Type.String> {
   const definition = spec && typeof spec === "object" ? (spec as Record<string, unknown>) : {};
+  const options = fieldOptions(definition);
   if (Array.isArray(definition.enum) && definition.enum.length > 0) {
-    const union = enumUnion(definition.enum);
+    if (definition.enum.every((value) => typeof value === "string")) {
+      return stringEnum(definition.enum as string[], options) as never;
+    }
+    const union = enumUnion(definition.enum, options);
     if (union) return union as never;
   }
   // A `const` names the only accepted value. Without this it degraded to a bare
   // string, so a discriminator like {type: {const: "bearer"}} told the model
   // nothing about which value to send -- and it guessed, twice.
   if ("const" in definition) {
-    const literal = enumUnion([definition.const]);
+    // Keep `const` (discriminators such as request_secret's auth.type depend on it) and
+    // add the equivalent one-value `enum`, which survives converters that drop `const`.
+    if (typeof definition.const === "string") {
+      return Type.Unsafe<string>({
+        type: "string",
+        const: definition.const,
+        enum: [definition.const],
+        ...options,
+      }) as never;
+    }
+    const literal = enumUnion([definition.const], options);
     if (literal) return literal as never;
   }
   // A discriminated union arrives as oneOf/anyOf with no sibling `type`. Without
@@ -1512,28 +1662,36 @@ export function jsonField(spec: unknown): ReturnType<typeof Type.String> {
       ? definition.anyOf
       : undefined;
   if (variants && variants.length > 0) {
-    return Type.Union(variants.map((variant) => jsonField(variant))) as never;
+    return Type.Union(
+      variants.map((variant) => jsonField(variant)),
+      options,
+    ) as never;
   }
   if (Array.isArray(definition.type) && definition.type.length > 0) {
-    return Type.Union(definition.type.map((type) => jsonField({ ...definition, type }))) as never;
+    // The description belongs on the union, not repeated on every member.
+    const { description: _description, ...member } = definition;
+    return Type.Union(
+      definition.type.map((type) => jsonField({ ...member, type })),
+      options,
+    ) as never;
   }
   const type = "type" in definition ? String(definition.type) : "string";
-  if (type === "null") return Type.Null() as never;
-  if (type === "number" || type === "integer") return Type.Number() as never;
-  if (type === "boolean") return Type.Boolean() as never;
+  if (type === "null") return Type.Null(options) as never;
+  if (type === "number" || type === "integer") return Type.Number(options) as never;
+  if (type === "boolean") return Type.Boolean(options) as never;
   if (type === "array") {
-    const options: {
+    const arrayOptions: FieldOptions & {
       minItems?: number;
       maxItems?: number;
       uniqueItems?: boolean;
-    } = {};
-    if (typeof definition.minItems === "number") options.minItems = definition.minItems;
-    if (typeof definition.maxItems === "number") options.maxItems = definition.maxItems;
-    if (definition.uniqueItems === true) options.uniqueItems = true;
-    return Type.Array(jsonField(definition.items), options) as never;
+    } = { ...options };
+    if (typeof definition.minItems === "number") arrayOptions.minItems = definition.minItems;
+    if (typeof definition.maxItems === "number") arrayOptions.maxItems = definition.maxItems;
+    if (definition.uniqueItems === true) arrayOptions.uniqueItems = true;
+    return Type.Array(jsonField(definition.items), arrayOptions) as never;
   }
-  if (type === "object") return jsonSchemaParameters(definition) as never;
-  return Type.String();
+  if (type === "object") return jsonSchemaParameters(definition, options) as never;
+  return Type.String(options);
 }
 
 function summarizeToolResult(result: unknown) {
@@ -1652,6 +1810,8 @@ interface ToolHost {
   signal: AbortSignal;
   depth: number;
   pausePending: boolean;
+  /** Shell commands that returned output and are still running. */
+  pendingShells: Array<Promise<FinishedShellCommand>>;
 }
 
 function toolCallBudgetExceededMessage(limit: number) {
@@ -1717,7 +1877,12 @@ function endToolCall(host: ToolHost) {
 }
 
 function modelForCompletion(model: Model<Api>, configuredMaxTokens?: number): Model<Api> {
-  const maxTokens = resolveCompletionMaxTokens(model.maxTokens, configuredMaxTokens);
+  const maxTokens = resolveCompletionMaxTokens(
+    model.maxTokens,
+    configuredMaxTokens,
+    undefined,
+    model.reasoning,
+  );
   if (maxTokens === model.maxTokens) return model;
   return { ...model, maxTokens };
 }
@@ -1776,23 +1941,272 @@ function createQueue(): EventQueue {
   };
 }
 
-export function reliableStreamOptions(
-  model: Pick<Model<Api>, "api" | "provider" | "maxTokens">,
-  options?: SimpleStreamOptions,
-  configuredMaxTokens?: number,
-): SimpleStreamOptions {
-  let next: SimpleStreamOptions = {
-    ...options,
-    timeoutMs: options?.timeoutMs ?? MODEL_STREAM_TIMEOUT_MS,
-    maxRetries: options?.maxRetries ?? MODEL_STREAM_MAX_RETRIES,
-    maxTokens: resolveCompletionMaxTokens(model.maxTokens, configuredMaxTokens, options?.maxTokens),
+export function isCodexModel(model: Pick<Model<Api>, "api" | "provider">): boolean {
+  return model.provider === "openai-codex" || model.api === "openai-codex-responses";
+}
+
+/** Abort reason recorded when a Codex stream goes silent past the idle bound. */
+export const CODEX_STREAM_IDLE_TIMEOUT_MESSAGE = "Codex stream idle timeout";
+
+export interface StreamIdleWatchdog {
+  /** Composed abort signal to hand to the provider request. */
+  signal: AbortSignal;
+  /** Re-arms the idle bound; invoke on response headers and each delivered event. */
+  ping(): void;
+  /** Wraps the provider stream so every delivered event re-arms the idle bound. */
+  wrap(stream: AssistantMessageEventStream): AssistantMessageEventStream;
+  /** Stops the timer and drops the caller-signal listener. */
+  dispose(): void;
+}
+
+/**
+ * `timeoutMs` bounds each attempt's time-to-headers. After headers arrive, pi
+ * reads the body until it ends or the request signal aborts, so silence can
+ * stall a run. The watchdog composes an AbortController into `options.signal`
+ * and re-arms on a 2xx `onResponse` — pi invokes it inside the retry loop when
+ * an attempt's headers land — and on every stream event the agent consumes.
+ * `idleTimeoutMs` of silence aborts the request.
+ *
+ * Arming only on a successful response — not at stream creation, and not on
+ * retryable error headers — keeps each attempt's time-to-headers inside its
+ * own `timeoutMs` budget and each retry backoff outside the idle bound. A
+ * non-2xx body is bounded separately by `boundRetryableErrorBody`: pi reads it
+ * with `response.text()` after the header timeout is gone, and failing that
+ * read lets the attempt retry, whereas aborting this signal would also cancel
+ * the backoff. pi reports any signal abort as a generic "Request was aborted",
+ * so when the watchdog fired the wrapper relabels the terminal error as an
+ * idle timeout rather than a caller abort.
+ */
+export function codexStreamIdleWatchdog(
+  upstream: AbortSignal | undefined,
+  idleTimeoutMs: number = MODEL_STREAM_IDLE_TIMEOUT_MS,
+): StreamIdleWatchdog {
+  const controller = new AbortController();
+  let timedOut = false;
+  let disposed = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const onUpstreamAbort = () => controller.abort(upstream?.reason);
+  if (upstream?.aborted) controller.abort(upstream.reason);
+  else upstream?.addEventListener("abort", onUpstreamAbort, { once: true });
+
+  const arm = () => {
+    if (disposed || controller.signal.aborted) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (controller.signal.aborted) return;
+      timedOut = true;
+      controller.abort(new Error(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE));
+    }, idleTimeoutMs);
+    timer.unref?.();
   };
 
-  if (model.provider === "openai-codex" || model.api === "openai-codex-responses") {
+  const dispose = () => {
+    disposed = true;
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    upstream?.removeEventListener("abort", onUpstreamAbort);
+  };
+
+  // Nothing arms the timer before a successful response's headers land: the
+  // pre-headers window is bounded per attempt by timeoutMs and retry backoff
+  // by maxRetryDelayMs, so idle budget must not burn there and a retry always
+  // starts from a fresh full budget.
+  const ping = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    arm();
+  };
+
+  const describeTimeout = (message: AssistantMessage): AssistantMessage =>
+    timedOut && message.stopReason === "aborted"
+      ? { ...message, stopReason: "error", errorMessage: CODEX_STREAM_IDLE_TIMEOUT_MESSAGE }
+      : message;
+
+  const rewrite = (event: AssistantMessageEvent): AssistantMessageEvent => {
+    if (event.type !== "error") return event;
+    const error = describeTimeout(event.error);
+    return error === event.error ? event : { type: "error", reason: "error", error };
+  };
+
+  return {
+    signal: controller.signal,
+    ping,
+    dispose,
+    wrap(inner) {
+      class Watched extends AssistantMessageEventStream {
+        override async *[Symbol.asyncIterator](): AsyncGenerator<AssistantMessageEvent> {
+          try {
+            for await (const event of inner) {
+              ping();
+              yield rewrite(event);
+            }
+          } finally {
+            dispose();
+          }
+        }
+        override result(): Promise<AssistantMessage> {
+          return inner.result().then(describeTimeout).finally(dispose);
+        }
+      }
+      return new Watched();
+    },
+  };
+}
+
+/**
+ * Fails a non-2xx body that stays open. The shared idle watchdog stays
+ * unarmed: aborting it would skip pi's retry backoff, and a thrown read error
+ * is retried like any other transport failure.
+ */
+function boundRetryableErrorBody(response: Response, idleTimeoutMs: number): Response {
+  if (response.ok || response.body == null) return response;
+  const reader = response.body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clear = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const read = reader.read().then(
+        (chunk) => ({ kind: "chunk" as const, chunk }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
+      const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
+        timer = setTimeout(() => resolve({ kind: "timeout" }), idleTimeoutMs);
+        timer.unref?.();
+      });
+      const outcome = await Promise.race([read, timeout]);
+      clear();
+      if (outcome.kind === "timeout") {
+        const error = new Error(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE);
+        void reader.cancel(error).catch(() => undefined);
+        controller.error(error);
+        return;
+      }
+      if (outcome.kind === "error") {
+        controller.error(outcome.error);
+        return;
+      }
+      if (outcome.chunk.done) controller.close();
+      else controller.enqueue(outcome.chunk.value);
+    },
+    cancel(reason) {
+      clear();
+      return reader.cancel(reason);
+    },
+  });
+  const headers = new Headers(response.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function codexRequestFetch(
+  fetchImpl: ModelsSimpleStreamOptions["fetch"],
+  idleTimeoutMs: number,
+): NonNullable<ModelsSimpleStreamOptions["fetch"]> {
+  return async (input, init) => {
+    const response = fetchImpl ? await fetchImpl(input, init) : await globalThis.fetch(input, init);
+    return boundRetryableErrorBody(response, idleTimeoutMs);
+  };
+}
+
+export function reliableModelStream(
+  models: Models,
+  model: Model<Api>,
+  context: Context,
+  options: ModelsSimpleStreamOptions | undefined,
+  configuredMaxTokens: number | undefined,
+  accessToken?: string | (() => string | undefined),
+): AssistantMessageEventStream {
+  const watchdog = isCodexModel(model) ? codexStreamIdleWatchdog(options?.signal) : undefined;
+  try {
+    const stream = models.streamSimple(
+      model,
+      context,
+      reliableStreamOptions(
+        model,
+        watchdog
+          ? {
+              ...options,
+              signal: watchdog.signal,
+              fetch: codexRequestFetch(options?.fetch, MODEL_STREAM_IDLE_TIMEOUT_MS),
+              // Only a 2xx arms the shared watchdog. Error bodies are bounded by
+              // the fetch wrapper, and a caller-supplied hook still sees every status.
+              onResponse: (response, requestModel) => {
+                if (response.status >= 200 && response.status < 300) watchdog.ping();
+                return options?.onResponse?.(response, requestModel);
+              },
+            }
+          : options,
+        configuredMaxTokens,
+        accessToken,
+      ),
+    );
+    return watchdog ? watchdog.wrap(stream) : stream;
+  } catch (error) {
+    watchdog?.dispose();
+    throw error;
+  }
+}
+
+const CODEX_RESIDENCY_HEADER = "x-openai-internal-codex-residency";
+
+/** Header names are case-insensitive: any caller-set casing counts as explicit. */
+function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
+  return Object.keys(headers ?? {}).some((key) => key.toLowerCase() === name);
+}
+
+export function reliableStreamOptions(
+  model: Pick<Model<Api>, "api" | "provider" | "maxTokens" | "reasoning">,
+  options?: ModelsSimpleStreamOptions,
+  configuredMaxTokens?: number,
+  accessToken?: string | (() => string | undefined),
+): ModelsSimpleStreamOptions {
+  let next: ModelsSimpleStreamOptions = {
+    ...options,
+    timeoutMs: options?.timeoutMs ?? MODEL_STREAM_TIMEOUT_MS,
+    maxRetries: options?.maxRetries ?? modelStreamMaxRetries(),
+    maxTokens: resolveCompletionMaxTokens(
+      model.maxTokens,
+      configuredMaxTokens,
+      options?.maxTokens,
+      model.reasoning,
+    ),
+  };
+
+  if (isCodexModel(model)) {
     // Pi cannot fall back after a WebSocket has emitted its start event. Long tool
     // runs then surface abnormal close 1006 as a terminal model error. SSE has
     // bounded network retries and no long-lived connection between tool turns.
     next = { ...next, transport: "sse" };
+    // Forward the account's compute residency so the Codex backend routes to the
+    // right region. Models.applyAuth resolves auth — including an OAuth refresh
+    // that swaps the stored credential — after these options are built, so the
+    // claim is derived in transformHeaders at request time from the credential
+    // the store holds then. Injection acts like a default header: an explicit
+    // value under any casing wins, and a caller-supplied transformHeaders keeps
+    // the final say.
+    const callerTransform = next.transformHeaders;
+    next = {
+      ...next,
+      transformHeaders: (headers) => {
+        const residency = codexComputeResidency(
+          typeof accessToken === "function" ? accessToken() : accessToken,
+        );
+        const merged =
+          residency && !hasHeader(headers, CODEX_RESIDENCY_HEADER)
+            ? { ...headers, [CODEX_RESIDENCY_HEADER]: residency }
+            : headers;
+        return callerTransform ? callerTransform(merged) : merged;
+      },
+    };
   }
 
   // OpenCode Go/Zen require a sticky x-opencode-session header (affinity + some

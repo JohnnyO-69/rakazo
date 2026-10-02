@@ -1,4 +1,3 @@
-import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type {
   AgentSkillCatalogEntry,
@@ -26,8 +25,10 @@ import {
 } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
+import { thinkingLevelLabel } from "../../lib/model-catalog";
 import { rpc } from "../../lib/rpc";
 import { AvatarStudioPopover } from "./avatar-studio-popover";
+import { BotCredentialsSection } from "./bot-credentials";
 
 const ScratchpadSection = lazy(() =>
   import("../ScratchpadSection").then((module) => ({ default: module.ScratchpadSection })),
@@ -595,6 +596,7 @@ export function BotSettings({
             </NativeSelect>
           </label>
         ) : null}
+        {advancedOpened ? <BotCredentialsSection botId={bot.id} /> : null}
       </details>
       {error ? <p className="mt-2 text-[13px] text-destructive">{error}</p> : null}
       <div className="mt-5 flex flex-col items-start gap-3">
@@ -630,16 +632,6 @@ export function BotSettings({
 
 function modelOptionKey(provider: string, modelId: string) {
   return `${provider}::${modelId}`;
-}
-
-function thinkingLevelLabel(level: ThinkingLevel) {
-  if (level === "xhigh") return t`Extra high`;
-  if (level === "low") return t`Low`;
-  if (level === "medium") return t`Medium`;
-  if (level === "high") return t`High`;
-  if (level === "minimal") return t`Minimal`;
-  if (level === "max") return t`Max`;
-  return `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`;
 }
 
 function parseModelOptionKey(key: string) {

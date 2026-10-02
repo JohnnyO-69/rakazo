@@ -36,7 +36,9 @@ import { t } from "./i18n";
 import { resumeLiveNotifications } from "./live-notifications";
 import {
   clearSessionToken,
+  currentSessionGeneration,
   loadSessionToken,
+  replaceSessionTokenIfCurrent,
   restoreSessionToken,
   saveSessionToken,
   snapshotSessionToken,
@@ -369,6 +371,11 @@ export type ApiRequestContext = {
   headers: Record<string, string>;
 };
 
+/** Keeps consent prompts separate across servers and the selected Space. */
+export function aiConsentCoalesceKey(requestContext: ApiRequestContext): string {
+  return [requestContext.apiBase, requestContext.headers["x-rakazo-space-id"] ?? ""].join("\u0000");
+}
+
 export async function captureApiRequestContext(): Promise<ApiRequestContext> {
   const apiBase = currentApiBase();
   const headers = await authHeaders(selectedSpaceId());
@@ -444,20 +451,43 @@ export async function requestPasswordReset(email: string, redirectTo: string): P
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const apiBase = currentApiBase();
+  const generation = currentSessionGeneration();
+  const headers = await authHeaders();
   const { response, body } = await fetchMobileJson<unknown>(
-    `${currentApiBase()}/api/auth/change-password`,
+    `${apiBase}/api/auth/change-password`,
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
         origin: "rakazo://",
-        ...(await authHeaders()),
+        ...headers,
       },
       body: JSON.stringify({ currentPassword, newPassword, revokeOtherSessions: true }),
     },
     {},
   );
   if (!response.ok) throw new Error(responseErrorMessage(body, t("Could not change password")));
+  // Revoking other sessions also revokes this one; keep the replacement the server issued.
+  const token = tokenFromAuthResponse(response, body);
+  if (!token) return;
+  // A sign-out or server switch changes the session while the request is in flight.
+  if (currentApiBase() !== apiBase) return;
+  const maybeResume = async () => {
+    // Our save is the only change allowed; a sign-out during it must not restart notifications.
+    const spaceId = selectedSpaceId();
+    if (spaceId && currentSessionGeneration() === generation + 1) {
+      await resumeLiveNotifications(apiBase, token, spaceId).catch(() => undefined);
+    }
+  };
+  try {
+    if (!(await replaceSessionTokenIfCurrent(generation, token))) return;
+  } catch (error) {
+    // The replacement is already in memory; resume before the keychain error reaches the UI.
+    await maybeResume();
+    throw error;
+  }
+  await maybeResume();
 }
 
 async function fetchMobileJson<T>(
@@ -576,6 +606,7 @@ export async function rpc<T>(
       ),
     prompt: promptAiConsent,
     allow: (input) => rpc("aiConsent/allow", input, { requestContext: consentContext }),
+    coalesceKey: consentContext ? aiConsentCoalesceKey(consentContext) : undefined,
   });
   // Abort with an explicit reason so every consumer of the signal (the fetch, the bounded body
   // read, and nested recovery calls that share this signal) reports the same cause.
@@ -727,6 +758,7 @@ export type MobileBot = Pick<
   | "modelProvider"
   | "modelId"
   | "thinkingLevel"
+  | "autoSpeak"
 > &
   Partial<Pick<Bot, "parentBotId" | "spaceId">>;
 
@@ -754,6 +786,8 @@ export type MobileMessage = {
   seq?: number;
   runId?: string;
   role: "user" | "bot" | "system";
+  /** Set when the message was sent from a live voice call; groups one call's transcript. */
+  callId?: string;
   botId?: string;
   replyToMessageId?: string;
   replyQuote?: string;
@@ -899,6 +933,9 @@ type ThreadEvent = {
   payload?: Record<string, unknown>;
 };
 
+/** No frame at all for this long means the stream is half-open; the server beats far faster. */
+export const IDLE_TIMEOUT_MS = 45_000;
+
 export async function subscribeThread(
   target: { botId: string } | { groupId: string },
   cursor: number,
@@ -921,7 +958,19 @@ export async function subscribeThread(
   const decoder = new TextDecoder();
   let buffer = "";
   while (!signal.aborted) {
-    const { done, value } = await reader.read();
+    // A half-open socket never reports done, so give up on silence and let the caller reconnect.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = await Promise.race([
+      reader.read(),
+      new Promise<"idle">((resolve) => {
+        timer = setTimeout(() => resolve("idle"), IDLE_TIMEOUT_MS);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (read === "idle") {
+      void reader.cancel().catch(() => undefined);
+      return;
+    }
+    const { done, value } = read;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const chunks = buffer.split("\n\n");
@@ -935,7 +984,8 @@ export async function subscribeThread(
       if (!data || data === "[DONE]") continue;
       try {
         const parsed = JSON.parse(data) as { json?: ThreadEvent; error?: { message?: string } };
-        if (parsed.json?.type) onEvent(parsed.json);
+        // Heartbeats prove liveness only; forwarding one would advance the caller's cursor.
+        if (parsed.json?.type && parsed.json.type !== "heartbeat") onEvent(parsed.json);
       } catch {
         // ignore keepalives and partial frames
       }
@@ -947,7 +997,7 @@ export function applyMobileThreadEvent(
   prev: MobileSnapshot | null,
   event: ThreadEvent,
 ): MobileSnapshot | null {
-  if (!prev) return prev;
+  if (!prev || event.type === "heartbeat") return prev;
   if (event.type === "thread.cleared") {
     return {
       ...prev,
@@ -1112,10 +1162,17 @@ export function applyMobileThreadEvent(
   }
   if (event.type === "thread.message.created" || event.type === "thread.message.updated") {
     const { remaining } = takeLiveMessage(prev.messages, progressMessageId(event));
+    const id = String(event.payload?.messageId ?? event.id ?? `msg:${event.seq ?? 0}`);
     const next: MobileMessage = {
-      id: String(event.payload?.messageId ?? event.id ?? `msg:${event.seq ?? 0}`),
+      id,
       runId: event.runId ? String(event.runId) : undefined,
       role: (event.payload?.role as MobileMessage["role"]) ?? "bot",
+      // An update can leave the call id out — the `end_call` marker does — so keep the one
+      // the message already carries instead of dropping it out of its call.
+      callId:
+        typeof event.payload?.callId === "string"
+          ? event.payload.callId
+          : prev.messages.find((message) => message.id === id)?.callId,
       blocks: (event.payload?.blocks as MobileMessage["blocks"]) ?? [],
       botId: event.botId ?? (event.payload?.botId ? String(event.payload.botId) : undefined),
       replyToMessageId: event.payload?.replyToMessageId

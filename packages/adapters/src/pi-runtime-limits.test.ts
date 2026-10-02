@@ -1,12 +1,36 @@
 import { DEFAULT_MODEL_MAX_TOKENS } from "@rakazo/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   billedPromptTokens,
   clipToolResultContent,
   clipToolResultText,
+  modelStreamMaxRetries,
+  REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
   TOOL_RESULT_TEXT_LIMIT,
 } from "./pi-runtime-limits.js";
+
+describe("modelStreamMaxRetries", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("defaults to one retry when unset", () => {
+    vi.stubEnv("MODEL_STREAM_MAX_RETRIES", undefined);
+    expect(modelStreamMaxRetries()).toBe(1);
+  });
+
+  it.each(["0", "1", "2", "3", "4", "5", " 3 "])("accepts %j", (value) => {
+    vi.stubEnv("MODEL_STREAM_MAX_RETRIES", value);
+    expect(modelStreamMaxRetries()).toBe(Number(value));
+  });
+
+  it.each(["", " ", "-1", "6", "1.5", "NaN", "Infinity", "three", "3retries"])(
+    "falls back to one retry for %j",
+    (value) => {
+      vi.stubEnv("MODEL_STREAM_MAX_RETRIES", value);
+      expect(modelStreamMaxRetries()).toBe(1);
+    },
+  );
+});
 
 describe("billedPromptTokens", () => {
   it("adds cache read and write onto uncached input so the meter matches provider cost", () => {
@@ -17,13 +41,20 @@ describe("billedPromptTokens", () => {
         cacheRead: 8_000,
         cacheWrite: 200,
       }),
-    ).toEqual({ inputTokens: 8_212, outputTokens: 40 });
+    ).toEqual({
+      inputTokens: 8_212,
+      outputTokens: 40,
+      cacheReadTokens: 8_000,
+      cacheWriteTokens: 200,
+    });
   });
 
   it("keeps uncached-only usage unchanged when cache fields are absent", () => {
     expect(billedPromptTokens({ input: 100, output: 20 })).toEqual({
       inputTokens: 100,
       outputTokens: 20,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
     });
   });
 
@@ -35,7 +66,30 @@ describe("billedPromptTokens", () => {
         cacheRead: 12_500,
         cacheWrite: 0,
       }),
-    ).toEqual({ inputTokens: 12_500, outputTokens: 15 });
+    ).toEqual({
+      inputTokens: 12_500,
+      outputTokens: 15,
+      cacheReadTokens: 12_500,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("reports the cache halves alongside the billed total", () => {
+    expect(billedPromptTokens({ input: 100, cacheRead: 40, cacheWrite: 10, output: 5 })).toEqual({
+      inputTokens: 150,
+      cacheReadTokens: 40,
+      cacheWriteTokens: 10,
+      outputTokens: 5,
+    });
+  });
+
+  it("floors missing or negative cache counts at zero", () => {
+    expect(billedPromptTokens({ input: 100, cacheRead: -40, output: 5 })).toEqual({
+      inputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 5,
+    });
   });
 });
 
@@ -52,6 +106,21 @@ describe("resolveCompletionMaxTokens", () => {
   it("clamps an agent-supplied options maxTokens to the user cap", () => {
     expect(resolveCompletionMaxTokens(128_000, undefined, 128_000)).toBe(DEFAULT_MODEL_MAX_TOKENS);
     expect(resolveCompletionMaxTokens(128_000, 16_384, 128_000)).toBe(16_384);
+  });
+
+  it("gives a reasoning model room for thinking and a reply", () => {
+    expect(resolveCompletionMaxTokens(128_000, undefined, undefined, true)).toBe(
+      REASONING_MODEL_MAX_TOKENS,
+    );
+    // A smaller model ceiling still wins.
+    expect(resolveCompletionMaxTokens(8_192, undefined, undefined, true)).toBe(8_192);
+  });
+
+  it("keeps the configured cap and the non-reasoning default intact", () => {
+    expect(resolveCompletionMaxTokens(128_000, 8_192, undefined, true)).toBe(8_192);
+    expect(resolveCompletionMaxTokens(128_000, undefined, undefined, false)).toBe(
+      DEFAULT_MODEL_MAX_TOKENS,
+    );
   });
 });
 

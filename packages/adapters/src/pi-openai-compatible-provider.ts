@@ -161,10 +161,13 @@ function requestCarriesAuthorization(input: RequestInfo | URL, init?: RequestIni
 export function createOpenAiCompatibleFetch(
   baseFetch: typeof globalThis.fetch = dispatcherFetch,
   resolve: ResolveHostname = resolveHostname,
+  opts?: { allowPublic?: boolean },
 ): typeof globalThis.fetch {
   return async (input, init) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
-    const url = assertAllowedOpenAiCompatibleRequestUrl(rawUrl);
+    const url = assertAllowedOpenAiCompatibleRequestUrl(rawUrl, {
+      allowPublic: opts?.allowPublic,
+    });
     if (requestCarriesAuthorization(input, init)) {
       assertHttpsForKeyedOpenAiCompatibleUrl(url, "present");
     }
@@ -400,8 +403,11 @@ export async function probeOpenAiCompatibleModels(
   input: { baseUrl: string; apiKey?: string },
   fetchImpl?: typeof fetch,
   signal?: AbortSignal,
+  opts?: { allowPublic?: boolean },
 ): Promise<string[]> {
-  const baseUrl = assertAllowedOpenAiCompatibleUrl(input.baseUrl);
+  const baseUrl = assertAllowedOpenAiCompatibleUrl(input.baseUrl, {
+    allowPublic: opts?.allowPublic,
+  });
   assertHttpsForKeyedOpenAiCompatibleUrl(baseUrl, input.apiKey);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
@@ -409,7 +415,7 @@ export async function probeOpenAiCompatibleModels(
   try {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (input.apiKey?.trim()) headers.Authorization = `Bearer ${input.apiKey.trim()}`;
-    const safeFetch = createOpenAiCompatibleFetch(fetchImpl);
+    const safeFetch = createOpenAiCompatibleFetch(fetchImpl, undefined, opts);
     const response = await safeFetch(new URL("models", `${baseUrl.href}/`).href, {
       headers,
       redirect: "error",
