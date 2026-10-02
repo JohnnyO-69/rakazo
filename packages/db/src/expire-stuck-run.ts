@@ -108,8 +108,13 @@ export async function expireStuckRun(
   });
   await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
   await expireComputerExecutionLeases(tx, { runId: input.runId });
+  // A user lease still on this row is on the screen until release or revocation.
+  // Dropping controlRunId first makes maintenance treat the takeover as idle.
   await tx.computer.updateMany({
-    where: { controlRunId: input.runId },
+    where: {
+      controlRunId: input.runId,
+      OR: [{ controlHolder: { not: "user" } }, { controlLeaseId: null }],
+    },
     data: { controlRunId: null },
   });
   await tx.computer.updateMany({

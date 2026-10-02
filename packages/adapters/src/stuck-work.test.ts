@@ -120,7 +120,7 @@ describe("reconcileStuckWork", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("records the reminder without sending when finish notices are off", async () => {
+  it("does not stamp a skipped reminder, so enabling notices later still sends", async () => {
     const run = candidate("queued", 5);
     run.bot.notifyOnFinish = false;
     const stamps: Array<{ runId: string | null; payload: unknown }> = [];
@@ -130,8 +130,39 @@ describe("reconcileStuckWork", () => {
 
     await reconcileStuckWork({ prisma, jobs, notifications: provider, now, batchSize: 100 });
 
-    expect(stamps).toHaveLength(1);
+    expect(stamps).toHaveLength(0);
     expect(send).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    run.bot.notifyOnFinish = true;
+    await reconcileStuckWork({ prisma, jobs, notifications: provider, now, batchSize: 100 });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(stamps).toHaveLength(1);
+  });
+
+  it("retries the four-hour reminder when the push fails", async () => {
+    const run = candidate("waiting_takeover", 5);
+    const stamps: Array<{ runId: string | null; payload: unknown }> = [];
+    const prisma = noticePrisma(run, stamps);
+    const { jobs } = publisher();
+    const { provider, send } = notifications();
+    send.mockRejectedValueOnce(new Error("push down"));
+
+    await reconcileStuckWork({ prisma, jobs, notifications: provider, now, batchSize: 100 });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(stamps).toHaveLength(0);
+
+    await reconcileStuckWork({ prisma, jobs, notifications: provider, now, batchSize: 100 });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(stamps).toEqual([
+      {
+        runId: run.id,
+        payload: { notice: STUCK_WORK_NOTICE, updatedAt: run.updatedAt.toISOString() },
+      },
+    ]);
   });
 
   it("still reminds a group thread when finish notices are off", async () => {

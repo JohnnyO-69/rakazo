@@ -13,6 +13,8 @@ function tx(options?: {
   status?: "queued" | "waiting_input" | "waiting_takeover";
 }) {
   let reads = 0;
+  const messages: Array<Record<string, unknown>> = [];
+  const events: Array<Record<string, unknown>> = [];
   const client = {
     $queryRaw: vi.fn(async () => []),
     run: {
@@ -41,9 +43,18 @@ function tx(options?: {
       create: vi.fn(async () => ({ id: "task-next" })),
     },
     thread: { update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 9 })) },
-    message: { create: vi.fn(async () => ({ id: "message-expired", seq: 1 })) },
+    message: {
+      create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        const row = { id: "message-expired", ...args.data };
+        messages.push(row);
+        return row;
+      }),
+    },
     event: {
-      create: vi.fn(async () => ({ seq: 8 })),
+      create: vi.fn(async (args: { data: { seq: number } & Record<string, unknown> }) => {
+        events.push(args.data);
+        return { seq: args.data.seq };
+      }),
       deleteMany: vi.fn(async () => ({ count: 1 })),
     },
     computerExecutionLease: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -64,7 +75,12 @@ function tx(options?: {
       ),
     },
   };
-  return client;
+  return Object.assign(client, {
+    snapshot: () => ({
+      messages: messages.map((row) => ({ ...row })),
+      events: events.map((row) => ({ ...row })),
+    }),
+  });
 }
 
 describe("expireStuckRun", () => {
@@ -96,13 +112,27 @@ describe("expireStuckRun", () => {
         blocks: [{ kind: "meta", text: stuckWorkStatusMessage("queued") }],
       }),
     });
-    expect(client.event.create).toHaveBeenCalledWith(
+    expect(client.snapshot().messages).toEqual([
       expect.objectContaining({
-        data: expect.objectContaining({ type: "run.cancelled", runId: "run-1" }),
+        role: "system",
+        clientNonce: "stuck-expired:run-1",
+        blocks: [{ kind: "meta", text: stuckWorkStatusMessage("queued") }],
       }),
+    ]);
+    expect(client.snapshot().events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "thread.message.created",
+          payload: expect.objectContaining({ messageId: "message-expired", role: "system" }),
+        }),
+        expect.objectContaining({ type: "run.cancelled", runId: "run-1" }),
+      ]),
     );
     expect(client.computer.updateMany).toHaveBeenCalledWith({
-      where: { controlRunId: "run-1" },
+      where: {
+        controlRunId: "run-1",
+        OR: [{ controlHolder: { not: "user" } }, { controlLeaseId: null }],
+      },
       data: { controlRunId: null },
     });
     expect(client.computerExecutionLease.updateMany).toHaveBeenCalledWith({

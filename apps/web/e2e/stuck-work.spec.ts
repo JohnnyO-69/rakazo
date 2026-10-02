@@ -11,7 +11,7 @@ type ThreadCarrier = {
   thread?: ThreadCarrier;
 };
 
-/** Append the expired-wait status line to a thread snapshot, once. */
+/** Render fixture only. expireStuckRun reads the saved thread line back in its unit test. */
 function injectExpiredStatus(body: { json?: ThreadCarrier }) {
   const targets = [body.json, body.json?.thread].filter((target): target is ThreadCarrier =>
     Boolean(target?.threadId && Array.isArray(target.messages)),

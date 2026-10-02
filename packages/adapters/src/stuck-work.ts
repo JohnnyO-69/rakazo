@@ -11,7 +11,7 @@ import {
   stuckWorkReminder,
   stuckWorkStoppedNotification,
 } from "@rakazo/core";
-import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import type { Prisma, PrismaClient, ThreadEvents } from "@rakazo/db";
 import { appendEventInTransaction, expireStuckRun, withTransactionRetry } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
@@ -34,7 +34,8 @@ type StuckCandidate = {
  * Remind, then cancel, queued runs and human waits that have been sitting still.
  * Lives on the job reconciler so a second scheduler is not required. The notice
  * stamp is a thread.meta event keyed to this episode's updatedAt, so answering
- * or reclaiming the run (which bumps updatedAt) can remind again later.
+ * or reclaiming the run (which bumps updatedAt) can remind again later. It is
+ * written only after a push is accepted, so a failed or skipped push can retry.
  */
 export async function reconcileStuckWork(deps: {
   prisma: PrismaClient;
@@ -151,51 +152,63 @@ async function remindStuckRun(
   },
   run: StuckCandidate,
 ) {
-  if (!deps.notifications) return;
-  const recorded = await withTransactionRetry(() =>
-    deps.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM threads WHERE id = ${run.threadId} FOR UPDATE`;
-      const current = await tx.run.findUnique({
-        where: { id: run.id },
-        select: { status: true, updatedAt: true },
-      });
-      if (
-        !current ||
-        current.status !== run.status ||
-        current.updatedAt.getTime() !== run.updatedAt.getTime()
-      ) {
-        return false;
-      }
-      const existing = await tx.event.findFirst({
-        where: {
-          runId: run.id,
-          type: "thread.meta",
-          payload: { path: ["notice"], equals: STUCK_WORK_NOTICE },
-        },
-        orderBy: { seq: "desc" },
-        select: { payload: true },
-      });
-      if (noticeMatchesEpisode(existing?.payload, current.updatedAt)) return false;
-      await appendEventInTransaction(tx, {
-        spaceId: run.spaceId,
-        threadId: run.threadId,
-        botId: run.botId,
-        type: "thread.meta",
-        runId: run.id,
-        payload: { notice: STUCK_WORK_NOTICE, updatedAt: current.updatedAt.toISOString() },
-      });
-      return true;
-    }),
+  // A skipped push (notices off, or no provider) must stay unmarked so turning
+  // notices on later can still remind during this same wait.
+  if (!deps.notifications || !noticesEnabled(run)) return;
+  const open = await withTransactionRetry(() =>
+    deps.prisma.$transaction((tx) => stuckEpisodeOpen(tx, run)),
   );
-  if (!recorded || !noticesEnabled(run)) return;
+  if (!open) return;
   const reminder = stuckWorkReminder(run.status, run.bot.name);
-  await sendStuckNotice(deps.notifications, run, {
+  const sent = await sendStuckNotice(deps.notifications, run, {
     kind: reminder.kind,
     title: reminder.title,
     body: reminder.body,
     botId: run.botId,
     threadId: run.threadId,
   });
+  if (!sent) return;
+  await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      if (!(await stuckEpisodeOpen(tx, run))) return;
+      await appendEventInTransaction(tx, {
+        spaceId: run.spaceId,
+        threadId: run.threadId,
+        botId: run.botId,
+        type: "thread.meta",
+        runId: run.id,
+        payload: { notice: STUCK_WORK_NOTICE, updatedAt: run.updatedAt.toISOString() },
+      });
+    }),
+  );
+}
+
+async function stuckEpisodeOpen(
+  tx: Prisma.TransactionClient,
+  run: StuckCandidate,
+): Promise<boolean> {
+  await tx.$queryRaw`SELECT id FROM threads WHERE id = ${run.threadId} FOR UPDATE`;
+  const current = await tx.run.findUnique({
+    where: { id: run.id },
+    select: { status: true, updatedAt: true },
+  });
+  if (
+    !current ||
+    current.status !== run.status ||
+    current.updatedAt.getTime() !== run.updatedAt.getTime()
+  ) {
+    return false;
+  }
+  const existing = await tx.event.findFirst({
+    where: {
+      runId: run.id,
+      type: "thread.meta",
+      payload: { path: ["notice"], equals: STUCK_WORK_NOTICE },
+    },
+    orderBy: { seq: "desc" },
+    select: { payload: true },
+  });
+  return !noticeMatchesEpisode(existing?.payload, current.updatedAt);
 }
 
 async function expireOne(
@@ -243,17 +256,19 @@ async function sendStuckNotice(
   notifications: NotificationProvider,
   run: StuckCandidate,
   message: NotificationMessage,
-) {
-  await notifications
-    .send(message, {
+): Promise<boolean> {
+  try {
+    await notifications.send(message, {
       operationId: "notify",
       traceId: run.botId,
       spaceId: run.spaceId,
       userId: run.userId,
       botId: run.botId,
       signal: new AbortController().signal,
-    })
-    .catch((error) => {
-      getLogger().error("stuck work notification", error);
     });
+    return true;
+  } catch (error) {
+    getLogger().error("stuck work notification", error);
+    return false;
+  }
 }
