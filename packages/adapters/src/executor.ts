@@ -1068,6 +1068,41 @@ function heredocBodyHazard(body: string): string | undefined {
   return undefined;
 }
 
+function matchingBrace(body: string, openIndex: number): number | undefined {
+  let depth = 1;
+  let index = openIndex + 1;
+  while (index < body.length) {
+    const character = body[index];
+    if (character === "'") {
+      const end = body.indexOf("'", index + 1);
+      if (end === -1) return undefined;
+      index = end + 1;
+      continue;
+    }
+    if (character === '"') {
+      index += 1;
+      while (index < body.length && body[index] !== '"') {
+        if (body[index] === "\\" && index + 1 < body.length) index += 2;
+        else index += 1;
+      }
+      if (index >= body.length) return undefined;
+      index += 1;
+      continue;
+    }
+    if (character === "\\") {
+      index += 2;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+    index += 1;
+  }
+  return undefined;
+}
+
 function matchingParen(body: string, openIndex: number): number | undefined {
   let depth = 1;
   let index = openIndex + 1;
@@ -1308,11 +1343,273 @@ function normalizedHeredocWords(body: string): string[] {
   return text.split(/[\s;&|<>(){}]+/).filter((word) => word.length > 0);
 }
 
-/** A quoted body is data. Refuse only when a lifecycle word is still visible. */
+/**
+ * A quoted body is data. Refuse when a lifecycle word is visible, including one
+ * assembled across a command substitution (`p$(printf k)ill`). A later shell
+ * call would run that file without seeing this body.
+ */
 function quotedHeredocLifecycleHazard(body: string): boolean {
   const words = quotedHeredocWords(body);
   if (words && wordsHaveLifecycleHazard(words)) return true;
-  return wordsHaveLifecycleHazard(normalizedHeredocWords(body));
+  if (wordsHaveLifecycleHazard(normalizedHeredocWords(body))) return true;
+  return splicedLifecycleHazard(body);
+}
+
+type SplicePiece = { segments: string[]; holes: string[][] };
+
+const SPLICE_SOLO_COMMANDS = ["kill", "pkill", "killall", "xkill"];
+const SPLICE_SERVICE_COMMANDS = ["systemctl", "service"];
+const SPLICE_PATHS = [".browser-profiles", "--user-data-dir", "/tmp/.x11-unix"];
+
+function affixMatches(first: string, last: string, value: string): boolean {
+  return (
+    value.length > first.length + last.length && value.startsWith(first) && value.endsWith(last)
+  );
+}
+
+/** `p$(…)ill` still names `pkill` when the hole's output is not a visible literal. */
+function spliceAffixKind(piece: SplicePiece): "solo" | "service" | undefined {
+  if (piece.holes.length === 0) return undefined;
+  const first = (piece.segments[0] ?? "").toLowerCase();
+  const last = (piece.segments[piece.segments.length - 1] ?? "").toLowerCase();
+  if (first.length === 0 || last.length === 0) return undefined;
+  if (SPLICE_SOLO_COMMANDS.some((name) => affixMatches(first, last, name))) return "solo";
+  if (SPLICE_PATHS.some((path) => affixMatches(first, last, path))) return "solo";
+  if (first === "/tmp/.x" && last === "-lock") return "solo";
+  if (SPLICE_SERVICE_COMMANDS.some((name) => affixMatches(first, last, name))) return "service";
+  return undefined;
+}
+
+function pieceCandidates(piece: SplicePiece): { words: string[]; overflow: boolean } {
+  if (piece.holes.length === 0) {
+    const word = piece.segments[0] ?? "";
+    return { words: word.length > 0 ? [word] : [], overflow: false };
+  }
+  const limit = 48;
+  let current = [piece.segments[0] ?? ""];
+  let overflow = false;
+  for (let hole = 0; hole < piece.holes.length; hole += 1) {
+    const inserts = piece.holes[hole] ?? [""];
+    const tail = piece.segments[hole + 1] ?? "";
+    const next: string[] = [];
+    for (const prefix of current) {
+      for (const insert of inserts) {
+        if (next.length >= limit) {
+          overflow = true;
+          break;
+        }
+        next.push(`${prefix}${insert}${tail}`);
+      }
+      if (overflow) break;
+    }
+    current = next;
+    if (overflow) break;
+  }
+  return { words: current.filter((word) => word.length > 0), overflow };
+}
+
+function substitutionInserts(interior: string, depth: number): string[] {
+  if (depth > 6) return [""];
+  const inserts = new Set<string>([""]);
+  const parsed = quotedHeredocWords(interior);
+  for (const word of parsed ?? normalizedHeredocWords(interior)) inserts.add(word);
+  const nested = splicePieces(interior, depth + 1);
+  if (!nested) return [...inserts];
+  for (const piece of nested) {
+    for (const word of pieceCandidates(piece).words) inserts.add(word);
+  }
+  return [...inserts];
+}
+
+/** Shell words of a quoted body, with command-substitution holes kept in place. */
+function splicePieces(body: string, depth = 0): SplicePiece[] | undefined {
+  if (depth > 6) return undefined;
+  const pieces: SplicePiece[] = [];
+  let segments = [""];
+  let holes: string[][] = [];
+  let active = false;
+  const commit = () => {
+    if (active || holes.length > 0) pieces.push({ segments, holes });
+    segments = [""];
+    holes = [];
+    active = false;
+  };
+  const append = (text: string) => {
+    if (text.length === 0) return;
+    segments[segments.length - 1] = `${segments[segments.length - 1] ?? ""}${text}`;
+    active = true;
+  };
+  const addHole = (inserts: readonly string[]) => {
+    holes.push([...inserts]);
+    segments.push("");
+    active = true;
+  };
+  const expansionAt = (
+    start: number,
+  ): { end: number; inserts: string[] } | "literal" | undefined => {
+    const next = body[start + 1];
+    if (next !== "(") return "literal";
+    const close = matchingParen(body, start + 1);
+    if (close === undefined) return undefined;
+    const interior = body.slice(start + 2, close);
+    if (next === "(" && body[start + 2] === "(") {
+      return { end: close + 1, inserts: ["", ...normalizedHeredocWords(interior)] };
+    }
+    return { end: close + 1, inserts: substitutionInserts(interior, depth + 1) };
+  };
+  const backtickAt = (start: number): { end: number; inserts: string[] } | undefined => {
+    let cursor = start + 1;
+    let interior = "";
+    while (cursor < body.length) {
+      const character = body[cursor] ?? "";
+      if (character === "\\" && cursor + 1 < body.length) {
+        interior += body[cursor + 1] ?? "";
+        cursor += 2;
+        continue;
+      }
+      if (character === "`") {
+        return { end: cursor + 1, inserts: substitutionInserts(interior, depth + 1) };
+      }
+      interior += character;
+      cursor += 1;
+    }
+    return undefined;
+  };
+  const parameterAt = (start: number): { end: number } | undefined => {
+    const next = body[start + 1];
+    if (next === "{") {
+      const match = /^\{[A-Za-z_][A-Za-z0-9_]*\}/.exec(body.slice(start + 1));
+      if (match) return { end: start + 1 + match[0].length };
+      const close = matchingBrace(body, start + 1);
+      if (close === undefined) return undefined;
+      return { end: close + 1 };
+    }
+    if (next && /[A-Za-z_]/.test(next)) {
+      let cursor = start + 2;
+      while (cursor < body.length && /[A-Za-z0-9_]/.test(body[cursor] ?? "")) cursor += 1;
+      return { end: cursor };
+    }
+    if (next && /[0-9*@#?$!-]/.test(next)) return { end: start + 2 };
+    return undefined;
+  };
+
+  const finish = (): SplicePiece[] => {
+    commit();
+    return pieces;
+  };
+  let index = 0;
+  let quote: "'" | '"' | undefined;
+  while (index < body.length) {
+    const character = body[index] ?? "";
+    if (quote === "'") {
+      if (character === "'") quote = undefined;
+      else append(character);
+      index += 1;
+      continue;
+    }
+    if (character === "\\") {
+      const next = body[index + 1];
+      if (next === undefined) return finish();
+      if (next !== "\n") append(next);
+      index += 2;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === '"') {
+        quote = undefined;
+        index += 1;
+        continue;
+      }
+      if (character === "`") {
+        const tick = backtickAt(index);
+        if (!tick) return finish();
+        addHole(tick.inserts);
+        index = tick.end;
+        continue;
+      }
+      if (character === "$" && body[index + 1] === "(") {
+        const expansion = expansionAt(index);
+        if (expansion === undefined || expansion === "literal") return finish();
+        addHole(expansion.inserts);
+        index = expansion.end;
+        continue;
+      }
+      if (character === "$") {
+        const parameter = parameterAt(index);
+        if (!parameter) return finish();
+        addHole([""]);
+        index = parameter.end;
+        continue;
+      }
+      append(character);
+      index += 1;
+      continue;
+    }
+    if (!active && holes.length === 0 && (segments[0] ?? "") === "" && character === "#") {
+      const newline = body.indexOf("\n", index);
+      index = newline === -1 ? body.length : newline + 1;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      active = true;
+      index += 1;
+      continue;
+    }
+    if (character === "`") {
+      const tick = backtickAt(index);
+      if (!tick) return finish();
+      addHole(tick.inserts);
+      index = tick.end;
+      continue;
+    }
+    if (character === "$" && body[index + 1] === "(") {
+      const expansion = expansionAt(index);
+      if (expansion === undefined || expansion === "literal") return finish();
+      addHole(expansion.inserts);
+      index = expansion.end;
+      continue;
+    }
+    if (character === "$") {
+      const parameter = parameterAt(index);
+      if (!parameter) {
+        append("$");
+        index += 1;
+        continue;
+      }
+      addHole([""]);
+      index = parameter.end;
+      continue;
+    }
+    if (" \t\n;&|<>(){}".includes(character)) {
+      commit();
+      index += 1;
+      continue;
+    }
+    append(character);
+    index += 1;
+  }
+  return finish();
+}
+
+function splicedLifecycleHazard(body: string): boolean {
+  const pieces = splicePieces(body);
+  if (!pieces) return false;
+  const words: string[] = [];
+  let serviceAffix = false;
+  for (const piece of pieces) {
+    const produced = pieceCandidates(piece);
+    if (produced.overflow && piece.segments.some((segment) => segment.length > 0)) return true;
+    words.push(...produced.words);
+    const kind = spliceAffixKind(piece);
+    if (kind === "solo") return true;
+    if (kind === "service") serviceAffix = true;
+  }
+  if (wordsHaveLifecycleHazard(words)) return true;
+  if (!serviceAffix) return false;
+  return words.some((word) =>
+    /^(?:stop|restart|kill)$/.test((word.split("/").at(-1) ?? "").toLowerCase()),
+  );
 }
 
 function quotedHeredocBodyIsDynamic(body: string): boolean {
@@ -1420,7 +1717,15 @@ function executesWrittenHeredoc(
     const token = literalCommandToken(raw);
     if (token === undefined) return false;
     const resolved = resolveExecutionPath(dir.cwd, token);
-    return resolved !== undefined && outputs.has(resolved);
+    if (resolved !== undefined && outputs.has(resolved)) return true;
+    // `cd -` leaves the directory unknown, so a later relative name can still be the file.
+    if (dir.cwd !== undefined) return false;
+    const base = normalizeWrittenPath(token).split("/").filter((part) => part.length > 0).at(-1);
+    if (base === undefined || base === "." || base === "..") return false;
+    for (const output of outputs) {
+      if (output.split("/").filter((part) => part.length > 0).at(-1) === base) return true;
+    }
+    return false;
   };
   if (base === "chmod") return words.slice(index + 1).some((raw) => matchesWritten(raw));
   return matchesWritten(words[index] ?? "");

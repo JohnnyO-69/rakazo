@@ -302,6 +302,16 @@ describe("computer lifecycle command guard", () => {
       protectedComputerLifecycleRefusal("install -t /backup venv/bin/activate"),
     ).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("ln -t /backup venv/bin/activate")).toBeUndefined();
+    for (const command of [
+      "ln -sfn /tmp/x/bin venv/bin",
+      "ln -s -t venv /tmp/x/bin",
+      "cp -a /tmp/x/bin venv/bin",
+      "mv /tmp/notes.txt venv/bin",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(command), command).toBe("activate script");
+    }
+    expect(protectedComputerLifecycleRefusal("mv /tmp/x/bin /tmp/backup")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("ln -s /tmp/x/bin /tmp/backup")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("echo notes > ../notes.txt")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("echo notes > ../docs/notes.txt")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("echo notes > ../bin/activate")).toBe(
@@ -359,6 +369,35 @@ describe("computer lifecycle command guard", () => {
     }
   });
 
+  it("refuses a quoted heredoc that splices a lifecycle command", () => {
+    for (const body of [
+      "p$(printf k)ill chromium",
+      "p$(printf 'k')ill chromium",
+      'p"$(printf k)"ill chromium',
+      "pk$(printf ill) chromium",
+      "$(printf pk)ill chromium",
+      "sys$(printf tem)ctl restart chromium",
+      "p$(date)ill chromium",
+      "p$(printf k)ill chromium\n${x:-y}",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(`cat > /tmp/x.sh <<'EOF'\n${body}\nEOF`), body).toBe(
+        "heredoc",
+      );
+    }
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\necho $(date)\nEOF"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nfile-$(date).txt\nEOF"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\n{\"ok\":true}\nEOF"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nsys$(date)ctl status\nEOF"),
+    ).toBeUndefined();
+  });
+
   it("allows quoted heredoc prose that does not name a lifecycle command", () => {
     for (const body of [
       "Don't restart the server",
@@ -408,6 +447,20 @@ describe("computer lifecycle command guard", () => {
     expect(
       protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\n\"$cmd\"\nEOF\necho after"),
     ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cd sub\ncat > x.sh <<'EOF'\nhello\nEOF\n./x.sh"),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nhello\nEOF\ncd -\necho after"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > notes.md <<'EOF'\nhello\nEOF\ncd -\n/usr/bin/git status",
+      ),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd -\n./x.sh"),
+    ).toBe("heredoc");
   });
 
   it("refuses running a path a quoted heredoc just wrote", () => {
