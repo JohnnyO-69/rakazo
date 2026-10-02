@@ -518,6 +518,88 @@ describe("MCP loopback endpoints", () => {
   });
 });
 
+describe("private API connectors", () => {
+  function privateDeps(mcpAllowPrivateEndpoint = false) {
+    const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...data,
+      id: "install-1",
+      secretId: null,
+      version: "1.0.0",
+      digest: "sha256:fake",
+      createdAt: new Date(0),
+    }));
+    const prisma = {
+      capabilityInstall: { create },
+      $transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => run(prisma)),
+    } as unknown as PrismaClient;
+    const deps = {
+      prisma,
+      env: {
+        defaultProvider: "fake",
+        defaultModel: "fake-model",
+        webOrigin: "http://127.0.0.1:5173",
+        screenProxySecret: "fake-test-secret",
+        sandboxProvider: "fake",
+        mcpAllowPrivateEndpoint,
+      },
+      dataDir: "/tmp/rakazo-router-test",
+    } as unknown as RouterDeps;
+    return { create, handler: new RPCHandler(createRouter(deps)) };
+  }
+
+  function actor(isDeploymentOwner: boolean): Actor {
+    return {
+      spaceId: "workspace-1",
+      userId: isDeploymentOwner ? "owner-1" : "member-1",
+      email: "user@rakazo.test",
+      isDeploymentOwner,
+    };
+  }
+
+  function rpc(path: string, json: unknown) {
+    return new Request(`http://127.0.0.1/rpc/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ json }),
+    });
+  }
+
+  const installInput = {
+    kind: "api",
+    name: "Local API",
+    source: "http://localhost:4000",
+    config: {
+      auth: { type: "none" },
+      operations: [{ id: "list_items", method: "GET", path: "/items" }],
+    },
+  };
+
+  it.each([
+    ["the deployment owner", true, false],
+    ["every user under the instance flag", false, true],
+  ])("lets %s install a loopback API connector", async (_label, owner, flag) => {
+    const { create, handler } = privateDeps(flag);
+    const { response } = await handler.handle(rpc("capabilities/install", installInput), {
+      prefix: "/rpc",
+      context: { actor: actor(owner) },
+    });
+
+    expect(response.status).toBe(200);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a loopback API connector from a user who is not the deployment owner", async () => {
+    const { create, handler } = privateDeps();
+    const { response } = await handler.handle(rpc("capabilities/install", installInput), {
+      prefix: "/rpc",
+      context: { actor: actor(false) },
+    });
+
+    expect(response.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
 describe("connections.begin", () => {
   it("reuses a revoked row for the same provider instead of inserting a duplicate", async () => {
     const begin = vi.fn().mockResolvedValue({ state: "gmail-state", authorizationUrl: null });
@@ -929,7 +1011,7 @@ describe("computer screen url", () => {
   });
 });
 
-describe("computer file transfer", () => {
+describe("computer terminal and file transfer", () => {
   const actor = {
     spaceId: "workspace-1",
     userId: "user-1",
@@ -945,6 +1027,9 @@ describe("computer file transfer", () => {
 
   function setup(computer: Record<string, unknown> = {}) {
     const sandbox = {
+      connectTerminal: vi.fn().mockResolvedValue({
+        url: "https://screen.example/vnc.html?path=websockify%3Ftoken%3Dterminal-1",
+      }),
       readFile: vi.fn().mockResolvedValue(new TextEncoder().encode("hello")),
       writeFile: vi.fn().mockResolvedValue(undefined),
     };
@@ -980,6 +1065,7 @@ describe("computer file transfer", () => {
       jobs: { enqueue: vi.fn().mockResolvedValue(undefined) },
       env: {
         webOrigin: "http://127.0.0.1:5173",
+        screenProxySecret: "fake-test-secret",
         sandboxProvider: "docker",
       },
       dataDir: "/tmp/rakazo-router-test",
@@ -996,8 +1082,62 @@ describe("computer file transfer", () => {
       );
       return { status: response.status, body: await response.json() };
     };
-    return { sandbox, call };
+    return { sandbox, prisma, call };
   }
+
+  it("opens a terminal only for the user holding this bot's control lease", async () => {
+    const released = setup();
+    await expect(released.call("terminalUrl", {})).resolves.toMatchObject({ status: 403 });
+    expect(released.sandbox.connectTerminal).not.toHaveBeenCalled();
+
+    const { sandbox, call } = setup(controlled);
+    const { status, body } = await call("terminalUrl", {});
+    expect(status).toBe(200);
+    expect(sandbox.connectTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sandbox-ref-1" }),
+      { controlToken: "lease-1", cwd: "bots/bot-1" },
+      expect.anything(),
+    );
+    const url = new URL(body.json.url);
+    expect(url.origin).toBe("http://127.0.0.1:5173");
+    expect(openScreenCapability(url.pathname, "fake-test-secret")).toMatchObject({
+      scope: { botId: "bot-1", controlLeaseId: "lease-1" },
+      target: { hostname: "screen.example", interactive: true },
+    });
+  });
+
+  it("clears the row when the provider reclaimed the sandbox before the terminal opened", async () => {
+    const gone = setup(controlled);
+    gone.sandbox.connectTerminal.mockRejectedValueOnce(
+      Object.assign(new Error("Sandbox is probably not running anymore"), {
+        name: "SandboxNotFoundError",
+      }),
+    );
+    await expect(gone.call("terminalUrl", {})).resolves.toEqual({
+      status: 200,
+      body: { json: { url: null } },
+    });
+    expect(gone.prisma.computer.updateMany).toHaveBeenCalledWith({
+      where: { id: "computer-1", providerRef: "sandbox-ref-1" },
+      data: { state: "stopped", providerRef: null },
+    });
+
+    const blip = setup(controlled);
+    blip.sandbox.connectTerminal.mockRejectedValueOnce(new Error("fetch failed"));
+    await expect(blip.call("terminalUrl", {})).resolves.toMatchObject({ status: 500 });
+    expect(blip.prisma.computer.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { state: "stopped", providerRef: null } }),
+    );
+  });
+
+  it("offers no terminal on host computers", async () => {
+    const { sandbox, call } = setup({ ...controlled, kind: "desktop" });
+    await expect(call("terminalUrl", {})).resolves.toEqual({
+      status: 200,
+      body: { json: { url: null } },
+    });
+    expect(sandbox.connectTerminal).not.toHaveBeenCalled();
+  });
 
   it("uploads into the bot workspace only under control", async () => {
     const contentBase64 = Buffer.from("notes").toString("base64");
@@ -2188,7 +2328,7 @@ describe("model set default auth", () => {
             credentialId: "cred-api",
           },
         },
-        update: { modelId: spark, isDefault: true },
+        update: { modelId: spark, isDefault: true, thinkingLevel: null },
       }),
     );
   });
@@ -2278,7 +2418,7 @@ describe("model set default auth", () => {
           },
         },
         create: expect.objectContaining({ modelId: luna, isDefault: true }),
-        update: { modelId: luna, isDefault: true },
+        update: { modelId: luna, isDefault: true, thinkingLevel: null },
       }),
     );
     expect(updateMany).toHaveBeenCalledWith({
@@ -2376,7 +2516,7 @@ describe("model set default auth", () => {
             credentialId: "cred-api",
           },
         },
-        update: { modelId: luna, isDefault: true },
+        update: { modelId: luna, isDefault: true, thinkingLevel: null },
       }),
     );
   });
@@ -2695,6 +2835,109 @@ describe("bot restore computer quota", () => {
 
 afterEach(() => {
   delete process.env.SANDBOX_MAX_COMPUTERS_PER_USER;
+});
+
+describe("routines.update", () => {
+  const actor = {
+    spaceId: "space-1",
+    userId: "user-1",
+    email: "user@rakazo.test",
+    isDeploymentOwner: true,
+  } satisfies Actor;
+  const routine = {
+    id: "routine-1",
+    botId: "bot-1",
+    spaceId: "space-1",
+    userId: "user-1",
+    name: "Later",
+    prompt: "say done",
+    crons: ["@once"],
+    timezone: "UTC",
+    active: false,
+    notify: false,
+    webhookEnabled: false,
+    githubEnabled: false,
+    messageProvider: null,
+    lastRunAt: null,
+    nextRunAt: null,
+    createdAt: new Date("2026-09-01T00:00:00.000Z"),
+  };
+
+  function fixture(botArchived: boolean, archivedBeforeWrite = false) {
+    const update = vi.fn(async (args: { data: Record<string, unknown> }) => {
+      if (archivedBeforeWrite) throw Object.assign(new Error("not found"), { code: "P2025" });
+      return {
+        ...routine,
+        ...Object.fromEntries(Object.entries(args.data).filter(([, value]) => value !== undefined)),
+      };
+    });
+    const enqueue = vi.fn(async () => undefined);
+    const prisma = {
+      routine: {
+        findFirst: vi.fn(async (args: { where: { bot?: { archivedAt: null } } }) =>
+          botArchived && args.where.bot?.archivedAt === null ? null : routine,
+        ),
+        update,
+      },
+      bot: {
+        findFirst: vi.fn(async () =>
+          botArchived ? null : { id: "bot-1", thread: { id: "thread-1" }, computer: null },
+        ),
+      },
+    };
+    const handler = new RPCHandler(
+      createRouter({
+        prisma,
+        env: { sandboxProvider: "fake" },
+        events: { append: vi.fn(async () => undefined) },
+        jobs: { enqueue, cancel: vi.fn(async () => undefined) },
+      } as unknown as RouterDeps),
+    );
+    const call = () =>
+      handler.handle(
+        new Request("http://127.0.0.1/rpc/routines/update", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            json: {
+              routineId: "routine-1",
+              active: true,
+              runAt: new Date(Date.now() + 60_000).toISOString(),
+            },
+          }),
+        }),
+        { prefix: "/rpc", context: { actor } },
+      );
+    return { update, enqueue, call };
+  }
+
+  it("refuses to re-arm a routine on an archived bot without writing", async () => {
+    const { update, enqueue, call } = fixture(true);
+    const { response } = await call();
+    expect(response.status).toBe(404);
+    expect(update).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("re-arms a routine on an active bot", async () => {
+    const { update, enqueue, call } = fixture(false);
+    const { response } = await call();
+    expect(response.status).toBe(200);
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "routine-1", bot: { archivedAt: null } },
+        data: expect.objectContaining({ active: true }),
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("does not re-arm when the bot is archived between the read and the write", async () => {
+    const { enqueue, call } = fixture(false, true);
+    const { response } = await call();
+    expect(response.status).toBe(404);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
 });
 
 describe("threads.endCall", () => {

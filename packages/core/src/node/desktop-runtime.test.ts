@@ -16,6 +16,7 @@ import {
   browserCloseProgram,
   DEFAULT_DESKTOP_ENV,
   desktopControlCommand,
+  desktopTerminalCommand,
   desktopUrl,
   ensureScreenCommand,
   interactiveScreenCommand,
@@ -27,6 +28,7 @@ import {
   screenPorts,
   shellQuote,
   stopExtraScreenCommand,
+  terminalCommand,
 } from "./desktop-runtime.js";
 
 const JOINED_COMMAND = `import os, time
@@ -166,9 +168,12 @@ describe("shared Linux desktop lifecycle", () => {
       [
         "-eu",
         "-c",
-        ["bash() { return 0; }", "rm() { echo 'slot remove failed' >&2; return 1; }", script].join(
-          "\n",
-        ),
+        [
+          "flock() { :; }",
+          "bash() { return 0; }",
+          "rm() { echo 'slot remove failed' >&2; return 1; }",
+          script,
+        ].join("\n"),
       ],
       { encoding: "utf8", timeout: 5000 },
     );
@@ -200,6 +205,35 @@ describe("shared Linux desktop lifecycle", () => {
     expect(readFileSync(path.join(f.root, slot), "utf8")).toContain("new:2");
   });
 
+  it("opens a terminal only on an assigned display under the current lease", () => {
+    const f = fixture();
+    expect(f.run(desktopTerminalCommand("missing", "run:1", env, "c", "t", ".")).status).toBe(75);
+    expect(f.ensure("a").status).toBe(0);
+    expect(f.run(desktopTerminalCommand("a", "old:0", env, "c", "t", ".")).status).toBe(75);
+    expect(f.run(desktopTerminalCommand("a", "run:1", env, "c", "t", ".")).status).toBe(0);
+    expect(() => terminalCommand("c", "bad token", ".")).toThrow("invalid terminal token");
+  });
+
+  it("drops libnss_wrapper before the screen browser exec", () => {
+    const command = ensureScreenCommand(0, "bot", "token");
+    expect(command).toContain("*libnss_wrapper.so");
+    expect(command).toContain("unset LD_PRELOAD");
+    expect(command).toContain(
+      "browser=$(command -v rakazo-browser || command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)",
+    );
+    const lines = command.split("\n");
+    const unsetAt = lines.findIndex((line) => line.includes("unset LD_PRELOAD"));
+    const execAt = lines.findIndex((line) => line.startsWith("exec "));
+    expect(unsetAt).toBeGreaterThan(-1);
+    expect(execAt).toBeGreaterThan(unsetAt);
+  });
+
+  it("stops the terminal with the control lease and the screen transports", () => {
+    expect(interactiveScreenCommand(false)).toMatch(/pkill -f .*rakazo-terminal\.py/);
+    expect(interactiveScreenCommand(false)).toContain("desktop-targets/terminal-1");
+    expect(stopExtraScreenCommand(1, "a")).toMatch(/pkill -f .*sockets\/terminal-2-/);
+  });
+
   it.each([DEFAULT_DESKTOP_ENV, env])(
     "generates valid shell for every lifecycle operation ($displayStart)",
     (environment) => {
@@ -209,6 +243,8 @@ describe("shared Linux desktop lifecycle", () => {
         managedDesktopCommand("bot's id", "run:1", environment, "token"),
         releaseDesktopCommand("bot's id", "run:1", environment),
         desktopControlCommand("bot's id", "run:1", environment, true, "token"),
+        desktopTerminalCommand("bot's id", "run:1", environment, "token", "terminal", "bots/a'b"),
+        terminalCommand("token", "terminal", "/work", environment, screenPorts(1, environment)),
         interactiveScreenCommand(false, "token", screenPorts(1, environment)),
         stopExtraScreenCommand(1, "bot's id", environment),
       ]) {
@@ -302,7 +338,7 @@ describe("shared Linux desktop lifecycle", () => {
       const log = path.join(root, "closed");
       mkdirSync(bin);
       const sleeper = path.join(bin, "sleeper");
-      writeFileSync(sleeper, "#!/bin/sh\nsleep 120\n");
+      writeFileSync(sleeper, "#!/usr/bin/env python3\nimport time\ntime.sleep(120)\n");
       chmodSync(sleeper, 0o755);
       writeFileSync(
         path.join(bin, "python3"),
@@ -354,6 +390,18 @@ describe("shared Linux desktop lifecycle", () => {
         { stdio: "ignore", detached: true, env: { ...process.env, JOINED_READY: joinedReady } },
       );
       children.push(joined);
+      const launcher = spawn(
+        "/bin/sh",
+        [
+          "-c",
+          "sleep 120",
+          "launcher",
+          `--user-data-dir=${botDir}`,
+          "--remote-debugging-port=9333",
+        ],
+        { stdio: "ignore", detached: true },
+      );
+      children.push(launcher);
       const bot = start(botDir, [`--user-data-dir=${botDir}`, "--remote-debugging-port=9333"]);
       const botRenderer = start(botDir, [
         "--type=renderer",
@@ -394,6 +442,7 @@ describe("shared Linux desktop lifecycle", () => {
         );
         expect(closed).not.toContain(String(botRenderer.child.pid));
         expect(closed).not.toContain(String(botHelper.child.pid));
+        expect(closed).not.toContain(String(launcher.pid));
         expect(spawnSync("kill", ["-0", String(botRenderer.child.pid)]).status).toBe(0);
         expect(spawnSync("kill", ["-0", String(botHelper.child.pid)]).status).toBe(0);
         expect(readFileSync(bot.cookies, "utf8")).toBe("session=kept");

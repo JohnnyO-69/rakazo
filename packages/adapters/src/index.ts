@@ -7,6 +7,13 @@ export * from "./auto-review-factory.js";
 export * from "./background-job-handlers.js";
 export * from "./bot-avatar.js";
 export * from "./bot-messages.js";
+export {
+  forgetBotSecret,
+  getBotSecretMetadata,
+  listBotSecretMetadata,
+  normalizeSecretDestination,
+  storeBotSecret,
+} from "./bot-secrets.js";
 export * from "./box-emulator.js";
 export * from "./box-sandbox.js";
 export * from "./browser-emulator.js";
@@ -91,6 +98,7 @@ export * from "./pi-openai-compatible-provider.js";
 export * from "./pi-runtime.js";
 export * from "./pi-session.js";
 export * from "./pipedream-connector.js";
+export * from "./private-endpoint.js";
 export * from "./realtime.js";
 export * from "./release-watch.js";
 export * from "./remote-mcp.js";

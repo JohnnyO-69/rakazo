@@ -165,6 +165,134 @@ describe("mobile API authentication", () => {
     );
   });
 
+  it("keeps the session the server issues after revoking the others", async () => {
+    vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) =>
+      key === "rakazo.session_token" ? "session-token" : null,
+    );
+    await selectInitialSpace("space-default");
+    vi.mocked(resumeLiveNotifications).mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ token: "rotated-token", user: { id: "user-1" } })),
+    );
+
+    await changePassword("old-password", "new-password");
+
+    expect(SecureStore.setItemAsync).toHaveBeenCalledWith("rakazo.session_token", "rotated-token");
+    expect(resumeLiveNotifications).toHaveBeenCalledWith(
+      "http://127.0.0.1:3100",
+      "rotated-token",
+      "space-default",
+    );
+  });
+
+  it("drops a rotated token when sign-out clears the session before the response", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    await selectSpace("space-default");
+    vi.mocked(resumeLiveNotifications).mockClear();
+    const { fetchMock, resolveFetch, fetchStarted } = deferredFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = changePassword("old-password", "new-password");
+    await fetchStarted;
+    await clearSessionToken();
+    resolveFetch(jsonResponse({ token: "rotated-token", user: { id: "user-1" } }));
+    await pending;
+
+    expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(
+      "rakazo.session_token",
+      "rotated-token",
+    );
+    expect(resumeLiveNotifications).not.toHaveBeenCalled();
+  });
+
+  it("keeps the rotated token when the session store is unreadable at response time", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    const { fetchMock, resolveFetch, fetchStarted } = deferredFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = changePassword("old-password", "new-password");
+    await fetchStarted;
+    vi.mocked(SecureStore.getItemAsync).mockRejectedValue(new Error("keychain locked"));
+    resolveFetch(jsonResponse({ token: "rotated-token", user: { id: "user-1" } }));
+    await pending;
+
+    expect(SecureStore.setItemAsync).toHaveBeenCalledWith("rakazo.session_token", "rotated-token");
+  });
+
+  it("keeps the rotated token in memory and reports a failed keychain write", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ token: "rotated-token", user: { id: "user-1" } })),
+    );
+    vi.mocked(SecureStore.setItemAsync).mockRejectedValue(new Error("keychain unavailable"));
+
+    await expect(changePassword("old-password", "new-password")).rejects.toThrow(
+      "keychain unavailable",
+    );
+
+    await expect(authHeaders()).resolves.toMatchObject({ authorization: "Bearer rotated-token" });
+  });
+
+  it("resumes live notifications with the rotated token when the keychain write fails", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    await selectSpace("space-default");
+    vi.mocked(resumeLiveNotifications).mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ token: "rotated-token", user: { id: "user-1" } })),
+    );
+    vi.mocked(SecureStore.setItemAsync).mockRejectedValue(new Error("keychain unavailable"));
+
+    await expect(changePassword("old-password", "new-password")).rejects.toThrow(
+      "keychain unavailable",
+    );
+
+    expect(resumeLiveNotifications).toHaveBeenCalledWith(
+      "http://127.0.0.1:3100",
+      "rotated-token",
+      "space-default",
+    );
+  });
+
+  it("drops a rotated token when the server changes before the response", async () => {
+    const store = new Map<string, string>([["rakazo.session_token", "session-token"]]);
+    mockSecureStore(store);
+    await selectSpace("space-default");
+    vi.mocked(resumeLiveNotifications).mockClear();
+    const { fetchMock, resolveFetch, fetchStarted } = deferredFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = changePassword("old-password", "new-password");
+    try {
+      await fetchStarted;
+      await expect(saveApiBase("https://second-server.example")).resolves.toMatchObject({
+        ok: true,
+      });
+      resolveFetch(jsonResponse({ token: "rotated-token", user: { id: "user-1" } }));
+      await pending;
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:3100/api/auth/change-password",
+        expect.objectContaining({
+          headers: expect.objectContaining({ authorization: "Bearer session-token" }),
+        }),
+      );
+      expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(
+        "rakazo.session_token",
+        "rotated-token",
+      );
+      expect(resumeLiveNotifications).not.toHaveBeenCalled();
+    } finally {
+      await resetApiBase();
+    }
+  });
+
   it("does not send a password or bearer token to a persisted public HTTP server", async () => {
     vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) => {
       if (key === "rakazo.api_base") return "http://app.example.test";
@@ -520,6 +648,83 @@ describe("mobile API authentication", () => {
     await rpc("threads/send", { botId: "bot-1", text: "authorized content" });
     expect(calls).toEqual(["/rpc/aiConsent/status", "/rpc/aiConsent/allow", "/rpc/threads/send"]);
     expect(promptAiConsent).toHaveBeenLastCalledWith(recipient, "https://example.com/privacy");
+  });
+
+  it("coalesces concurrent mobile consent checks before sending each request once", async () => {
+    vi.mocked(promptAiConsent).mockClear();
+    vi.mocked(promptAiConsent).mockResolvedValue(true);
+    const calls: string[] = [];
+    const recipient = {
+      key: "provider",
+      name: "Example AI",
+      use: "model",
+      detail: "",
+      allowed: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        const path = new URL(String(url)).pathname;
+        calls.push(path);
+        if (path.endsWith("/status"))
+          return jsonResponse({
+            json: {
+              scope: "account-space",
+              version: "2026-09-14",
+              recipients: [recipient],
+            },
+          });
+        return jsonResponse({ json: { ok: true } });
+      }),
+    );
+
+    await Promise.all([
+      rpc("threads/send", { botId: "bot-1", text: "first" }),
+      rpc("threads/send", { botId: "bot-1", text: "second" }),
+    ]);
+
+    expect(promptAiConsent).toHaveBeenCalledTimes(1);
+    expect(calls.filter((path) => path.endsWith("/aiConsent/status"))).toHaveLength(2);
+    expect(calls.filter((path) => path.endsWith("/aiConsent/allow"))).toHaveLength(1);
+    expect(calls.filter((path) => path.endsWith("/threads/send"))).toHaveLength(2);
+  });
+
+  it("coalesces a concurrent refusal without granting or replaying the action", async () => {
+    vi.mocked(promptAiConsent).mockClear();
+    vi.mocked(promptAiConsent).mockResolvedValue(false);
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        const path = new URL(String(url)).pathname;
+        calls.push(path);
+        return jsonResponse({
+          json: {
+            scope: "account-space",
+            version: "2026-09-14",
+            recipients: [
+              {
+                key: "provider",
+                name: "Example AI",
+                use: "model",
+                detail: "",
+                allowed: false,
+              },
+            ],
+          },
+        });
+      }),
+    );
+
+    const results = await Promise.allSettled([
+      rpc("threads/send", { botId: "bot-1", text: "keep this draft" }),
+      rpc("threads/send", { botId: "bot-1", text: "keep this draft" }),
+    ]);
+
+    expect(results.every((result) => result.status === "rejected")).toBe(true);
+    expect(promptAiConsent).toHaveBeenCalledTimes(1);
+    expect(calls.filter((path) => path.endsWith("/aiConsent/allow"))).toHaveLength(0);
+    expect(calls.filter((path) => path.endsWith("/threads/send"))).toHaveLength(0);
   });
 
   it("rejects an oversized RPC response before parsing it", async () => {
@@ -2312,6 +2517,36 @@ describe("mobile thread event reduction", () => {
     expect(applyMobileThreadEvent(null, { type: "thread.progress" })).toBeNull();
   });
 });
+
+function mockSecureStore(store: Map<string, string>) {
+  vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) => store.get(key) ?? null);
+  vi.mocked(SecureStore.deleteItemAsync).mockImplementation(async (key) => {
+    store.delete(key);
+  });
+  vi.mocked(SecureStore.setItemAsync).mockImplementation(async (key, value) => {
+    store.set(key, value);
+  });
+}
+
+function deferredFetch() {
+  let resolveFetch: (response: Response) => void = () => undefined;
+  let markStarted: () => void = () => undefined;
+  const fetchStarted = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const fetchMock = vi.fn(
+    () =>
+      new Promise<Response>((resolveResponse) => {
+        resolveFetch = resolveResponse;
+        markStarted();
+      }),
+  );
+  return {
+    fetchMock,
+    fetchStarted,
+    resolveFetch: (response: Response) => resolveFetch(response),
+  };
+}
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(body), {
