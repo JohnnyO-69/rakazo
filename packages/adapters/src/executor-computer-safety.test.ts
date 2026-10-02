@@ -279,6 +279,52 @@ describe("computer lifecycle command guard", () => {
     ).toBe("heredoc");
   });
 
+  it("refuses a quoted heredoc that hides a lifecycle command in split quotes", () => {
+    for (const body of [
+      "pk''ill chromium",
+      "'pk''ill' chromium",
+      '"pk""ill" chromium',
+      "p'k'ill chromium",
+      "sys''temctl re''start chromium",
+      "rm -rf ~/.browser-''profiles/chromium",
+      "pk'ill chromium",
+      "echo `date`",
+      "echo $((1))",
+      "pk$ill chromium",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(`cat > /tmp/x.sh <<'EOF'\n${body}\nEOF`), body).toBe(
+        "heredoc",
+      );
+    }
+  });
+
+  it("refuses running a path a quoted heredoc just wrote", () => {
+    for (const command of [
+      "cat > /tmp/x.sh <<'EOF'\nhello\nEOF\nchmod +x /tmp/x.sh\n/tmp/x.sh",
+      "cat > /tmp/x.sh <<'EOF'\nhello\nEOF\n/tmp/x.sh",
+      "cat > /tmp/x.sh <<'EOF'\nhello\nEOF\nchmod +x /tmp/x.sh",
+      "tee /tmp/x.sh <<'EOF'\nhello\nEOF\n/tmp/x.sh",
+      "cat <<'EOF' | tee /tmp/x.sh\nhello\nEOF\n/tmp/x.sh",
+      "cat > ./x.sh <<'EOF'\nhello\nEOF\n./x.sh",
+      "cat <<'EOF' | tee > /tmp/x.sh\nhello\nEOF\n/tmp/x.sh",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(command), command).toBe("heredoc");
+    }
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nhello\nEOF\necho after"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nhello\nEOF\nchmod +x /tmp/other"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > /tmp/x.sh <<'EOF'\nhello\nEOF\nls /tmp/x.sh"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat <<'EOF' |\necho data\nEOF\necho done"),
+    ).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("cat <<'EOF' |\npwd\nEOF\nbash")).toBe("heredoc");
+  });
+
   it("refuses heredoc writes that a later command can execute", () => {
     for (const command of [
       "cat > /tmp/x.sh <<'EOF'\npkill chromium\nEOF\nbash /tmp/x.sh",

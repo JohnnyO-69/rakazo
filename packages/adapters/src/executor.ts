@@ -893,22 +893,267 @@ function heredocBodyHazard(body: string): string | undefined {
   return undefined;
 }
 
+function matchingParen(body: string, openIndex: number): number | undefined {
+  let depth = 1;
+  let index = openIndex + 1;
+  while (index < body.length) {
+    const character = body[index];
+    if (character === "'") {
+      const end = body.indexOf("'", index + 1);
+      if (end === -1) return undefined;
+      index = end + 1;
+      continue;
+    }
+    if (character === '"') {
+      index += 1;
+      while (index < body.length && body[index] !== '"') {
+        if (body[index] === "\\" && index + 1 < body.length) index += 2;
+        else index += 1;
+      }
+      if (index >= body.length) return undefined;
+      index += 1;
+      continue;
+    }
+    if (character === "\\") {
+      index += 2;
+      continue;
+    }
+    if (character === "(") depth += 1;
+    else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+    index += 1;
+  }
+  return undefined;
+}
+
+/** Literal text of a double-quoted span, plus command-substitution interiors. */
+function readDoubleQuoted(
+  body: string,
+  start: number,
+): { end: number; literal: string; dynamic: boolean; interiors: string[] } | undefined {
+  let literal = "";
+  let dynamic = false;
+  const interiors: string[] = [];
+  let index = start;
+  while (index < body.length) {
+    const character = body[index];
+    if (character === '"') {
+      if (dynamic && literal.length > 0) return undefined;
+      return { end: index + 1, literal: dynamic ? "" : literal, dynamic, interiors };
+    }
+    if (character === "\\") {
+      const next = body[index + 1];
+      if (next === undefined) return undefined;
+      literal += next;
+      index += 2;
+      continue;
+    }
+    if (character === "`") return undefined;
+    if (character === "$" && body[index + 1] === "(") {
+      if (body[index + 2] === "(") return undefined;
+      const close = matchingParen(body, index + 1);
+      if (close === undefined) return undefined;
+      interiors.push(body.slice(index + 2, close));
+      dynamic = true;
+      index = close + 1;
+      continue;
+    }
+    if (character === "$") {
+      dynamic = true;
+      if (body[index + 1] === "{") {
+        const close = body.indexOf("}", index + 2);
+        if (close === -1) return undefined;
+        index = close + 1;
+        continue;
+      }
+      if (/[A-Za-z_]/.test(body[index + 1] ?? "")) {
+        index += 2;
+        while (index < body.length && /[A-Za-z0-9_]/.test(body[index] ?? "")) index += 1;
+        continue;
+      }
+      index += 1;
+      continue;
+    }
+    literal += character ?? "";
+    index += 1;
+  }
+  return undefined;
+}
+
+/**
+ * Shell words of a quoted heredoc body. Adjacent quotes concatenate, so
+ * `pk''ill` is `pkill`. Undefined when a word's text cannot be known.
+ */
+function quotedHeredocWords(body: string): string[] | undefined {
+  const words: string[] = [];
+  let word = "";
+  let active = false;
+  const commit = () => {
+    if (!active) return;
+    words.push(word);
+    word = "";
+    active = false;
+  };
+  let index = 0;
+  while (index < body.length) {
+    const character = body[index] ?? "";
+    if (character === "'") {
+      const end = body.indexOf("'", index + 1);
+      if (end === -1) return undefined;
+      word += body.slice(index + 1, end);
+      active = true;
+      index = end + 1;
+      continue;
+    }
+    if (character === '"') {
+      const quoted = readDoubleQuoted(body, index + 1);
+      if (!quoted) return undefined;
+      if (quoted.dynamic && quoted.literal.length > 0) return undefined;
+      if (quoted.dynamic) {
+        for (const interior of quoted.interiors) {
+          const inner = quotedHeredocWords(interior);
+          if (!inner) return undefined;
+          words.push(...inner);
+        }
+        index = quoted.end;
+        continue;
+      }
+      word += quoted.literal;
+      active = true;
+      index = quoted.end;
+      continue;
+    }
+    if (character === "\\") {
+      const next = body[index + 1];
+      if (next === undefined) return undefined;
+      if (next !== "\n") {
+        word += next;
+        active = true;
+      }
+      index += 2;
+      continue;
+    }
+    if (character === "`") return undefined;
+    if (character === "$" && (body[index + 1] === "'" || body[index + 1] === '"')) {
+      return undefined;
+    }
+    if (character === "$" && body[index + 1] === "(") {
+      if (body[index + 2] === "(" || active) return undefined;
+      const close = matchingParen(body, index + 1);
+      if (close === undefined) return undefined;
+      const inner = quotedHeredocWords(body.slice(index + 2, close));
+      if (!inner) return undefined;
+      words.push(...inner);
+      index = close + 1;
+      continue;
+    }
+    if (character === "$") {
+      // A parameter glued to literals (`pk$ill`, `$a'pkill'`) hides the word.
+      if (active) return undefined;
+      const end = skipPlainParameter(body, index);
+      if (end === undefined) return undefined;
+      const next = body[end] ?? "";
+      if (next !== "" && !" \t\n;&|<>(){}".includes(next)) return undefined;
+      index = end;
+      continue;
+    }
+    if (" \t\n;&|<>(){}".includes(character)) {
+      if (character === "<" && body[index + 1] === "(") return undefined;
+      // `{pk,ill}` is brace expansion. A brace group is `{` then a separator.
+      if (
+        character === "{" &&
+        body[index + 1] !== undefined &&
+        !" \t\n;&|<>(){}".includes(body[index + 1] ?? "")
+      ) {
+        return undefined;
+      }
+      commit();
+      index += 1;
+      continue;
+    }
+    word += character;
+    active = true;
+    index += 1;
+  }
+  commit();
+  return words;
+}
+
 /** A quoted body is not expanded, but it can still be a script that kills the desktop. */
 function quotedHeredocLifecycleHazard(body: string): boolean {
-  const folded = body.toLowerCase();
-  if (/(?:\.browser-profiles|--user-data-dir)/.test(folded)) return true;
-  if (/(?:\/tmp\/\.x11-unix|\/tmp\/\.x\d+-lock)/.test(folded)) return true;
+  const words = quotedHeredocWords(body);
+  if (!words) return true;
   let sawService = false;
   let sawServiceAction = false;
-  for (const word of body.split(/[\s;&|]+/)) {
-    const bare = word.replace(/^['"]+|['"]+$/g, "");
-    if (bare.length === 0) continue;
-    const base = (bare.split("/").at(-1) ?? "").toLowerCase();
+  for (const word of words) {
+    const folded = word.toLowerCase();
+    if (/(?:\.browser-profiles|--user-data-dir)/.test(folded)) return true;
+    if (/(?:\/tmp\/\.x11-unix|\/tmp\/\.x\d+-lock)/.test(folded)) return true;
+    const base = folded.split("/").at(-1) ?? "";
     if (/^(?:kill|pkill|killall|xkill)$/.test(base)) return true;
     if (base === "systemctl" || base === "service") sawService = true;
     if (/^(?:stop|restart|kill)$/.test(base)) sawServiceAction = true;
   }
   return sawService && sawServiceAction;
+}
+
+/** `$name` or `${name}` only. Anything else can hide the word that runs. */
+function skipPlainParameter(body: string, index: number): number | undefined {
+  const next = body[index + 1];
+  if (next === undefined) return undefined;
+  if (next === "{") {
+    const match = /^\{[A-Za-z_][A-Za-z0-9_]*\}/.exec(body.slice(index + 1));
+    if (!match) return undefined;
+    return index + 1 + match[0].length;
+  }
+  if (/[A-Za-z_]/.test(next)) {
+    let cursor = index + 2;
+    while (cursor < body.length && /[A-Za-z0-9_]/.test(body[cursor] ?? "")) cursor += 1;
+    return cursor;
+  }
+  if (/[0-9*@#?$!-]/.test(next)) return index + 2;
+  return undefined;
+}
+
+function normalizeWrittenPath(path: string): string {
+  const collapsed = path.replaceAll(/\/+/g, "/");
+  const stripped = collapsed.startsWith("./") ? collapsed.slice(2) : collapsed;
+  return stripped.length > 1 && stripped.endsWith("/") ? stripped.slice(0, -1) : stripped;
+}
+
+function isFileWriteRedirect(op: string, target: string): boolean {
+  if (op === ">" || op === ">>" || op === "&>") return true;
+  return op === ">&" && !/^\d+$/.test(target);
+}
+
+function teeDestinationPaths(words: readonly string[]): string[] {
+  const index = primaryCommandIndex(words);
+  if (index === undefined) return [];
+  if (commandBaseAt(words, index) !== "tee") return [];
+  const paths: string[] = [];
+  for (const raw of words.slice(index + 1)) {
+    const token = literalCommandToken(raw);
+    if (!token || token === "--" || (token.startsWith("-") && token !== "-")) continue;
+    paths.push(normalizeWrittenPath(token));
+  }
+  return paths;
+}
+
+function executesWrittenHeredoc(words: readonly string[], outputs: ReadonlySet<string>): boolean {
+  if (outputs.size === 0) return false;
+  const index = primaryCommandIndex(words);
+  if (index === undefined) return false;
+  const command = literalCommandToken(words[index] ?? "");
+  if (!command) return false;
+  const base = (command.split("/").at(-1) ?? command).toLowerCase();
+  const wrote = (raw: string) => {
+    const token = literalCommandToken(raw);
+    return token !== undefined && outputs.has(normalizeWrittenPath(token));
+  };
+  if (base === "chmod") return words.slice(index + 1).some((raw) => wrote(raw));
+  return outputs.has(normalizeWrittenPath(command));
 }
 
 function braceExpansionHazard(raw: string): string | undefined {
@@ -988,8 +1233,9 @@ function isShellOrSourceCommand(words: readonly string[]): boolean {
  * Drop comments and quoted heredoc bodies, and substitute literal assignments.
  * Returns a short refusal when the command is dynamic in a way the later
  * tokenizer cannot see (quotes hiding a substitution, a heredoc that is not
- * data for cat or tee, a quoted body that names a lifecycle command, a shell,
- * source, sudo, or busybox after that heredoc, source of anything but a
+ * data for cat or tee, a quoted body that names a lifecycle command or cannot
+ * be inspected, a shell, source, sudo, or busybox after that heredoc, a later
+ * command that runs a path that heredoc wrote, source of anything but a
  * literal activate path, or a write that can plant that activate script).
  */
 function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
@@ -998,6 +1244,10 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
   const usedKeys = new Set<string>();
   const pending: PendingHeredoc[] = [];
   let heredocConsumed = false;
+  const heredocOutputs = new Set<string>();
+  const pipelineWrites: string[] = [];
+  let pipelineHasHeredoc = false;
+  const simpleWrites: string[] = [];
   let pipelineNames: string[] = [];
   let commandWords: string[] = [];
   let out = "";
@@ -1023,6 +1273,10 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
     if (redirectNext) {
       redirectNext = false;
       if (isActivateWriteTarget(redirectOp, raw, commandWords, env)) activateWrite = true;
+      const target = literalCommandToken(raw);
+      if (target && isFileWriteRedirect(redirectOp, target)) {
+        simpleWrites.push(normalizeWrittenPath(target));
+      }
       redirectOp = "";
       return;
     }
@@ -1047,11 +1301,22 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
     finishWord();
     const words = commandWords;
     commandWords = [];
+    // Only sinks in this pipeline survive, so their redirects are the heredoc's output.
+    if (pipelineHasHeredoc) {
+      for (const path of simpleWrites) pipelineWrites.push(path);
+      for (const path of teeDestinationPaths(words)) pipelineWrites.push(path);
+    }
+    simpleWrites.length = 0;
     // Remember the write across a pending heredoc so a dangerous body can still
     // refuse as heredoc. A harmless body is refused once that body is consumed.
     if (activateWrite || commandWritesActivateScript(words, env)) activateWrite = true;
     if (activateWrite && pending.length === 0) return "activate script";
-    if (heredocConsumed && isShellOrSourceCommand(words)) return "heredoc";
+    if (
+      heredocConsumed &&
+      (isShellOrSourceCommand(words) || executesWrittenHeredoc(words, heredocOutputs))
+    ) {
+      return "heredoc";
+    }
     const guaranteedBefore = guaranteed;
     if (isUnsafeSource(words)) return "source";
     const base = commandBasename(words);
@@ -1087,6 +1352,10 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
       guaranteed = guaranteedBefore && stable && !pipeMember;
     } else if (kind === "or" || kind === "background") guaranteed = false;
     else guaranteed = true;
+    if (pending.length === 0) {
+      pipelineWrites.length = 0;
+      pipelineHasHeredoc = false;
+    }
     return undefined;
   };
 
@@ -1229,6 +1498,9 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
         }
         cursor = body.end;
       }
+      for (const path of pipelineWrites) heredocOutputs.add(path);
+      pipelineWrites.length = 0;
+      pipelineHasHeredoc = false;
       pending.length = 0;
       heredocConsumed = true;
       out += "\n";
@@ -1246,6 +1518,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
       if (!delimiter) return { reason: "heredoc" };
       // Quoted delimiters suppress expansion. Unquoted bodies still expand, so they are scanned below.
       pending.push({ delimiter: delimiter.delimiter, quoted: delimiter.quoted, stripTabs });
+      pipelineHasHeredoc = true;
       index = delimiter.end;
       atWordStart = true;
       continue;
