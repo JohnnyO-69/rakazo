@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { clearAvatarStyle } from "./avatar-style";
 import { stopLiveNotifications } from "./live-notifications";
 
 const SESSION_KEY = "rakazo.session_token";
@@ -29,6 +30,12 @@ export async function saveSessionToken(token: string) {
 export async function clearSessionToken(): Promise<boolean> {
   sessionGeneration += 1;
   await stopLiveNotifications(true).catch(() => undefined);
+  const cleared = await clearStoredSessionToken();
+  await clearAvatarStyle();
+  return cleared;
+}
+
+async function clearStoredSessionToken(): Promise<boolean> {
   try {
     await SecureStore.deleteItemAsync(SESSION_KEY);
     sessionInvalidated = false;

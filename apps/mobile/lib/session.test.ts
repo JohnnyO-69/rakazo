@@ -1,5 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AVATAR_STYLE_KEY, getCachedAvatarStyle, saveAvatarStyle } from "./avatar-style.js";
 import {
   clearSessionToken,
   loadSessionToken,
@@ -32,6 +33,14 @@ describe("mobile session storage", () => {
 
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith("rakazo.session_token", "secret-token");
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("rakazo.session_token");
+  });
+
+  it("forgets the cached avatar style on sign-out", async () => {
+    await saveAvatarStyle("organic");
+    await clearSessionToken();
+
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(AVATAR_STYLE_KEY);
+    expect(getCachedAvatarStyle()).toBe("robot");
   });
 
   it("overwrites the token when SecureStore delete fails", async () => {

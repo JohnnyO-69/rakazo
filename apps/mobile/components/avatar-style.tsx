@@ -1,7 +1,9 @@
 import type { AvatarStyle, Me } from "@rakazo/contracts";
 import { usePathname } from "expo-router";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { rpc } from "../lib/api";
+import { getCachedAvatarStyle, saveAvatarStyle } from "../lib/avatar-style";
 
 const AvatarStyleContext = createContext<{
   avatarStyle: AvatarStyle;
@@ -12,19 +14,28 @@ const AvatarStyleContext = createContext<{
 });
 
 export function AvatarStyleProvider({ children }: { children: ReactNode }) {
-  const [avatarStyle, setAvatarStyle] = useState<AvatarStyle>("robot");
+  const [avatarStyle, setAvatarStyle] = useState<AvatarStyle>(getCachedAvatarStyle);
   const pathname = usePathname();
   const requestIdRef = useRef(0);
   const updatePromiseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
-    const requestId = ++requestIdRef.current;
-    void rpc<Me>("me")
-      .then((me) => {
-        if (requestId !== requestIdRef.current) return;
-        setAvatarStyle(me.avatarStyle);
-      })
-      .catch(() => undefined);
+    function refresh() {
+      const requestId = ++requestIdRef.current;
+      void rpc<Me>("me")
+        .then((me) => {
+          if (requestId !== requestIdRef.current) return;
+          setAvatarStyle(me.avatarStyle);
+          void saveAvatarStyle(me.avatarStyle);
+        })
+        .catch(() => undefined);
+    }
+    refresh();
+    // A launch or route change while offline keeps the cached style; resuming refetches it.
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") refresh();
+    });
+    return () => appState.remove();
   }, [pathname]);
 
   function updateAvatarStyle(next: AvatarStyle): Promise<void> {
@@ -34,6 +45,7 @@ export function AvatarStyleProvider({ children }: { children: ReactNode }) {
       .then((me) => {
         if (requestId !== requestIdRef.current) return;
         setAvatarStyle(me.avatarStyle);
+        void saveAvatarStyle(me.avatarStyle);
       })
       .finally(() => {
         updatePromiseRef.current = null;
