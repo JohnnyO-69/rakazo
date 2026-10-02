@@ -21,6 +21,8 @@ export function AvatarStyleProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function refresh() {
+      // An in-flight preferences/update owns the style until it finishes.
+      if (updatePromiseRef.current) return;
       const requestId = ++requestIdRef.current;
       void rpc<Me>("me")
         .then((me) => {
@@ -31,7 +33,6 @@ export function AvatarStyleProvider({ children }: { children: ReactNode }) {
         .catch(() => undefined);
     }
     refresh();
-    // A launch or route change while offline keeps the cached style; resuming refetches it.
     const appState = AppState.addEventListener("change", (state) => {
       if (state === "active") refresh();
     });

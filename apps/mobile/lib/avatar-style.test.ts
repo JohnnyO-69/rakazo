@@ -54,4 +54,48 @@ describe("mobile avatar style cache", () => {
     expect(store.has(AVATAR_STYLE_KEY)).toBe(false);
     expect(getCachedAvatarStyle()).toBe("robot");
   });
+
+  it("retries a failed persist for the same style", async () => {
+    const SecureStore = await import("expo-secure-store");
+    const { AVATAR_STYLE_KEY, saveAvatarStyle } = await import("./avatar-style");
+    vi.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(new Error("device locked"));
+    await saveAvatarStyle("organic");
+    expect(store.has(AVATAR_STYLE_KEY)).toBe(false);
+    await saveAvatarStyle("organic");
+    expect(store.get(AVATAR_STYLE_KEY)).toBe("organic");
+  });
+
+  it("overwrites robot when SecureStore cannot delete on clear", async () => {
+    const SecureStore = await import("expo-secure-store");
+    const { AVATAR_STYLE_KEY, clearAvatarStyle, getCachedAvatarStyle, saveAvatarStyle } =
+      await import("./avatar-style");
+    await saveAvatarStyle("organic");
+    vi.mocked(SecureStore.deleteItemAsync).mockRejectedValueOnce(new Error("device locked"));
+    await clearAvatarStyle();
+    expect(store.get(AVATAR_STYLE_KEY)).toBe("robot");
+    expect(getCachedAvatarStyle()).toBe("robot");
+  });
+
+  it("discards a late save that finishes after clear", async () => {
+    const SecureStore = await import("expo-secure-store");
+    const { AVATAR_STYLE_KEY, clearAvatarStyle, getCachedAvatarStyle, saveAvatarStyle } =
+      await import("./avatar-style");
+
+    let finishSave!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finishSave = resolve;
+    });
+    vi.mocked(SecureStore.setItemAsync).mockImplementationOnce(async (key, value) => {
+      await gate;
+      store.set(key, value);
+    });
+
+    const save = saveAvatarStyle("organic");
+    await clearAvatarStyle();
+    finishSave();
+    await save;
+
+    expect(store.has(AVATAR_STYLE_KEY)).toBe(false);
+    expect(getCachedAvatarStyle()).toBe("robot");
+  });
 });
