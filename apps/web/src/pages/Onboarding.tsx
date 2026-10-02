@@ -44,6 +44,7 @@ import { thinkingLevelLabel } from "../lib/model-catalog";
 import type { ModelPreflightFailure } from "../lib/model-connection-preflight";
 import {
   classifyModelConnectionFailure,
+  loadStoredModelAuth,
   modelPreflightSuccessMessage,
   runModelConnectionPreflight,
   unavailableSelectedModel,
@@ -129,6 +130,8 @@ export function OnboardingPage() {
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
   const [provider, setProvider] = useState("openrouter");
   const [modelId, setModelId] = useState("");
+  const modelIdRef = useRef(modelId);
+  modelIdRef.current = modelId;
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [reasoning, setReasoning] = useState(false);
@@ -339,18 +342,16 @@ export function OnboardingPage() {
       request: rpc.models.probeOpenAiCompatible,
       onSuccess: (models) => {
         if (!preflightStillCurrent(revision)) return;
-        setModelId((current) => {
-          const trimmed = current.trim();
-          const next = trimmed || models[0] || "";
-          if (next !== trimmed) setThinkingLevel(null);
-          // Stay in manual entry across re-probes so a typed id that matches a
-          // discovered model cannot yank the freeform field back to the Select.
-          setManualModelId(
-            (wasManual) => wasManual || (Boolean(trimmed) && !models.includes(trimmed)),
-          );
-          return next;
-        });
-        const unavailable = unavailableSelectedModel(modelId, models);
+        const trimmed = modelIdRef.current.trim();
+        const next = trimmed || models[0] || "";
+        if (next !== trimmed) setThinkingLevel(null);
+        // Stay in manual entry across re-probes so a typed id that matches a
+        // discovered model cannot yank the freeform field back to the Select.
+        setManualModelId(
+          (wasManual) => wasManual || (Boolean(trimmed) && !models.includes(trimmed)),
+        );
+        setModelId(next);
+        const unavailable = unavailableSelectedModel(trimmed, models);
         if (unavailable) {
           setPreflightFailure(unavailable);
           setNotice(null);
@@ -404,24 +405,12 @@ export function OnboardingPage() {
     setPreflightFailure(null);
     setError(null);
     setNotice(null);
-    let storedAuthKind: "api_key" | "oauth" | "openai_compatible" | null = null;
-    let credentialLookupFailed = false;
-    let credentialUnreadable = false;
-    try {
-      const credentials = await rpc.models.credentials();
-      const match = credentials.find((entry) => entry.provider === selected.provider);
-      storedAuthKind = match?.authKind ?? null;
-      credentialUnreadable = Boolean(match && !match.authKind);
-    } catch {
-      credentialLookupFailed = true;
-    }
+    const stored = await loadStoredModelAuth(selected.provider, () => rpc.models.credentials());
     if (!preflightStillCurrent(revision)) return;
     const result = await runModelConnectionPreflight({
       authKind: "oauth",
       provider: selected.provider,
-      storedAuthKind,
-      credentialLookupFailed,
-      credentialUnreadable,
+      ...stored,
     });
     if (!preflightStillCurrent(revision)) return;
     setPreflightTesting(false);

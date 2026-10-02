@@ -63,6 +63,7 @@ import { thinkingLevelLabel } from "../lib/model-catalog";
 import type { ModelPreflightFailure } from "../lib/model-connection-preflight";
 import {
   classifyModelConnectionFailure,
+  loadStoredModelAuth,
   modelPreflightSuccessMessage,
   runModelConnectionPreflight,
   unavailableSelectedModel,
@@ -94,6 +95,8 @@ export function ModelSettingsOverlay({
   const [provider, setProvider] = useState("");
   const [providerQuery, setProviderQuery] = useState("");
   const [modelId, setModelId] = useState("");
+  const modelIdRef = useRef(modelId);
+  modelIdRef.current = modelId;
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [reasoning, setReasoning] = useState(false);
@@ -172,6 +175,7 @@ export function ModelSettingsOverlay({
     setCredentials(nextCredentials);
     setMe(nextMe);
     if (selectionRevision === selectionRevisionRef.current) {
+      invalidatePreflight();
       resetOpenAiCompatibleProbe();
       setProvider(nextProvider);
       setModelId(nextModel);
@@ -408,10 +412,11 @@ export function ModelSettingsOverlay({
       request: rpc.models.probeOpenAiCompatible,
       onSuccess: (models) => {
         if (!preflightStillCurrent(revision)) return;
-        const next = modelId.trim() || models[0] || "";
-        if (next !== modelId) stageCompatibleModelId(next);
+        const current = modelIdRef.current;
+        const next = current.trim() || models[0] || "";
+        if (next !== current) stageCompatibleModelId(next);
         else setModelId(next);
-        const unavailable = unavailableSelectedModel(modelId, models);
+        const unavailable = unavailableSelectedModel(current, models);
         if (unavailable) {
           setPreflightFailure(unavailable);
           setNotice(null);
@@ -464,11 +469,12 @@ export function ModelSettingsOverlay({
     setPreflightFailure(null);
     setError(null);
     setNotice(null);
+    const stored = await loadStoredModelAuth(selected.provider, () => rpc.models.credentials());
+    if (!preflightStillCurrent(revision)) return;
     const result = await runModelConnectionPreflight({
       authKind: "oauth",
       provider: selected.provider,
-      storedAuthKind: credential?.authKind ?? null,
-      credentialUnreadable: Boolean(credential && !credential.authKind),
+      ...stored,
     });
     if (!preflightStillCurrent(revision)) return;
     setPreflightTesting(false);
@@ -911,7 +917,7 @@ export function ModelSettingsOverlay({
             >
               {oauthPending ? (
                 <Trans>Starting…</Trans>
-              ) : credential ? (
+              ) : credential?.authKind === "oauth" ? (
                 <Trans>Sign in again</Trans>
               ) : (
                 (selected.oauthLabel ?? t`Sign in`)

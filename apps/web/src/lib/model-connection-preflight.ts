@@ -119,6 +119,34 @@ export function unavailableSelectedModel(
   });
 }
 
+/** Separate a failed credential lookup from an empty list or an unreadable secret. */
+export async function loadStoredModelAuth(
+  provider: string,
+  listCredentials: () => Promise<
+    ReadonlyArray<{ provider: string; authKind?: StoredModelAuthKind }>
+  >,
+): Promise<{
+  storedAuthKind: StoredModelAuthKind | null;
+  credentialLookupFailed: boolean;
+  credentialUnreadable: boolean;
+}> {
+  try {
+    const credentials = await listCredentials();
+    const match = credentials.find((entry) => entry.provider === provider);
+    return {
+      storedAuthKind: match?.authKind ?? null,
+      credentialLookupFailed: false,
+      credentialUnreadable: Boolean(match && match.authKind === undefined),
+    };
+  } catch {
+    return {
+      storedAuthKind: null,
+      credentialLookupFailed: true,
+      credentialUnreadable: false,
+    };
+  }
+}
+
 export type ModelConnectionPreflightInput = {
   authKind: "openai-compatible" | "api-key" | "oauth";
   provider: string;

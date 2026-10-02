@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyModelConnectionFailure,
+  loadStoredModelAuth,
   runModelConnectionPreflight,
   sanitizeModelConnectionError,
   unavailableSelectedModel,
@@ -32,6 +33,37 @@ describe("unavailableSelectedModel", () => {
   });
 });
 
+describe("loadStoredModelAuth", () => {
+  it("keeps lookup failures distinct from a missing credential", async () => {
+    await expect(loadStoredModelAuth("anthropic", async () => [])).resolves.toEqual({
+      storedAuthKind: null,
+      credentialLookupFailed: false,
+      credentialUnreadable: false,
+    });
+    await expect(
+      loadStoredModelAuth("anthropic", async () => {
+        throw new Error("offline");
+      }),
+    ).resolves.toEqual({
+      storedAuthKind: null,
+      credentialLookupFailed: true,
+      credentialUnreadable: false,
+    });
+  });
+
+  it("reads the stored kind and flags a row whose kind is missing", async () => {
+    await expect(
+      loadStoredModelAuth("anthropic", async () => [
+        { provider: "openai", authKind: "oauth" },
+        { provider: "anthropic", authKind: "api_key" },
+      ]),
+    ).resolves.toMatchObject({ storedAuthKind: "api_key", credentialUnreadable: false });
+    await expect(
+      loadStoredModelAuth("anthropic", async () => [{ provider: "anthropic" }]),
+    ).resolves.toMatchObject({ storedAuthKind: null, credentialUnreadable: true });
+  });
+});
+
 describe("runModelConnectionPreflight", () => {
   it("probes catalog providers through the pinned catalog endpoint", async () => {
     const probeCatalog = vi.fn().mockResolvedValue({ models: ["gpt-test"] });
@@ -51,6 +83,19 @@ describe("runModelConnectionPreflight", () => {
       provider: "openrouter",
       apiKey: "sk-test-key-12345678",
     });
+  });
+
+  it("rejects a selected model the catalog probe did not list", async () => {
+    const result = await runModelConnectionPreflight({
+      authKind: "api-key",
+      provider: "openrouter",
+      apiKey: "sk-test-key-12345678",
+      modelId: "missing-model",
+      catalogProbe: true,
+      probeCatalog: async () => ({ models: ["gpt-test"] }),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.outcome).toBe("unavailable_model");
   });
 
   it("does not send catalog keys through the user-supplied URL probe", async () => {
