@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   deliverFinishedShells,
   formatFinishedShellCommand,
+  isRunningShellCommand,
   observeShellCommand,
   SHELL_STILL_RUNNING_NOTICE,
 } from "./shell-command-stream.js";
@@ -97,6 +98,30 @@ describe("observeShellCommand", () => {
     expect(observed.result.stdout).not.toContain("super-secret-token");
     releaseExit();
     await observed.completion;
+  });
+
+  it("withholds a secret prefix from the still-running result", async () => {
+    let releaseExit: () => void = () => undefined;
+    const exitGate = new Promise<void>((resolve) => {
+      releaseExit = resolve;
+    });
+    const observed = await observeShellCommand(
+      (async function* () {
+        yield { type: "stdout" as const, data: "prefix super-" };
+        await exitGate;
+        yield { type: "stdout" as const, data: "secret-token suffix\n" };
+        yield { type: "exit" as const, code: 0 };
+      })(),
+      { secrets: ["super-secret-token"], idleMs: 20 },
+    );
+
+    expect(isRunningShellCommand(observed.result)).toBe(true);
+    expect(observed.result.stdout).toBe("prefix ");
+    expect(observed.result.stdout).not.toContain("super-");
+    releaseExit();
+    const final = await observed.completion;
+    expect(final?.stdout).toBe("prefix [redacted] suffix\n");
+    expect(final?.stdout).not.toContain("super-secret-token");
   });
 
   it("redacts a secret split across stdout and stderr before it is joined", async () => {

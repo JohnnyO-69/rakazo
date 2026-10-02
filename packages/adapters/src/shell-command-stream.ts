@@ -176,7 +176,9 @@ export async function observeShellCommand(
     return { result: await done };
   }
   return {
-    result: { ...redact({ stdout, stderr }, false), code: null, running: true },
+    // The process is still running, so an unfinished secret prefix stays out of the
+    // tool result. The completion publishes the rest once the command exits.
+    result: { ...redact({ stdout, stderr }, true), code: null, running: true },
     completion: done,
   };
 }
