@@ -1385,6 +1385,7 @@ export function createRouter(deps: RouterDeps) {
             modelProvider: source.modelProvider,
             modelId: source.modelId,
             thinkingLevel: source.thinkingLevel,
+            disabledBuiltinTools: source.disabledBuiltinTools,
           })
           .catch((error: unknown) => {
             throw mapSpaceLifecycleError(error);
@@ -1545,6 +1546,9 @@ export function createRouter(deps: RouterDeps) {
               ? { teamChatAmbientEnabled: input.teamChatAmbientEnabled }
               : {}),
             ...(input.teamChatRules !== undefined ? { teamChatRules: input.teamChatRules } : {}),
+            ...(input.disabledBuiltinTools !== undefined
+              ? { disabledBuiltinTools: input.disabledBuiltinTools }
+              : {}),
           },
         });
         const bots = await repos.listBots(context.actor);

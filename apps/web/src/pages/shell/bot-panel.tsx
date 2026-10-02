@@ -13,6 +13,7 @@ import {
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
+  isBuiltinToolName,
 } from "@rakazo/contracts";
 import {
   Button,
@@ -212,6 +213,7 @@ export function BotSettings({
     modelProvider?: string | null;
     modelId?: string | null;
     thinkingLevel?: ThinkingLevel | null;
+    disabledBuiltinTools?: string[];
   }) => Promise<void>;
   onExport: () => Promise<void>;
   onClear: () => void;
@@ -233,6 +235,10 @@ export function BotSettings({
     bot.modelProvider && bot.modelId ? modelOptionKey(bot.modelProvider, bot.modelId) : "",
   );
   const [thinkingLevel, setThinkingLevel] = useState(bot.thinkingLevel ?? "");
+  const [disabledBuiltinTools, setDisabledBuiltinTools] = useState<string[]>(
+    bot.disabledBuiltinTools ?? [],
+  );
+  const [toolNameDraft, setToolNameDraft] = useState("");
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
   const [me, setMe] = useState<Me | null>(null);
@@ -247,6 +253,7 @@ export function BotSettings({
       description?: string;
       color?: string;
       notifyOnFinish?: boolean;
+      disabledBuiltinTools?: string[];
     }) => Promise<void>
   >(async () => undefined);
   useEffect(() => {
@@ -333,6 +340,7 @@ export function BotSettings({
     description?: string;
     color?: string;
     notifyOnFinish?: boolean;
+    disabledBuiltinTools?: string[];
   }) {
     const selected = modelKey ? parseModelOptionKey(modelKey) : null;
     const nextName = (patchOverrides?.name !== undefined ? patchOverrides.name : name).trim();
@@ -343,6 +351,10 @@ export function BotSettings({
     const nextColor = patchOverrides?.color !== undefined ? patchOverrides.color : color;
     const nextNotify =
       patchOverrides?.notifyOnFinish !== undefined ? patchOverrides.notifyOnFinish : notifyOnFinish;
+    const nextDisabledTools =
+      patchOverrides?.disabledBuiltinTools !== undefined
+        ? patchOverrides.disabledBuiltinTools
+        : disabledBuiltinTools;
 
     if (nextName) setName(nextName);
     setTitle(nextTitle);
@@ -372,6 +384,7 @@ export function BotSettings({
                 : null,
             }
           : {}),
+        disabledBuiltinTools: nextDisabledTools,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : t`Could not save`);
@@ -381,12 +394,28 @@ export function BotSettings({
   }
   executeSaveRef.current = executeSave;
 
+  function disableBuiltinTool(raw: string) {
+    const name = raw.trim();
+    if (!name) return;
+    if (!isBuiltinToolName(name)) {
+      setError(t`Unknown tool`);
+      return;
+    }
+    setToolNameDraft("");
+    setError(null);
+    if (disabledBuiltinTools.includes(name)) return;
+    const next = [...disabledBuiltinTools, name];
+    setDisabledBuiltinTools(next);
+    void enqueueSave({ disabledBuiltinTools: next });
+  }
+
   function enqueueSave(patchOverrides?: {
     name?: string;
     title?: string;
     description?: string;
     color?: string;
     notifyOnFinish?: boolean;
+    disabledBuiltinTools?: string[];
   }) {
     // Serialize full-object auto-saves so an older in-flight request cannot
     // finish after a newer one and clobber fields. Always call through a ref so
@@ -596,6 +625,46 @@ export function BotSettings({
             </NativeSelect>
           </label>
         ) : null}
+        <label htmlFor={`${ids}-disabled-tools`} className={fieldLabelClass}>
+          <Trans>Disabled tools</Trans>
+          <Input
+            id={`${ids}-disabled-tools`}
+            value={toolNameDraft}
+            placeholder="web_search"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            onChange={(event) => setToolNameDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              disableBuiltinTool(event.currentTarget.value);
+            }}
+            onBlur={(event) => {
+              if (event.currentTarget.value.trim()) disableBuiltinTool(event.currentTarget.value);
+            }}
+            className="mt-1.5 font-mono"
+          />
+        </label>
+        {disabledBuiltinTools.map((toolName) => (
+          <label
+            key={toolName}
+            htmlFor={`${ids}-disabled-${toolName}`}
+            className="mt-2 flex items-center justify-between gap-3 text-[13px] text-foreground/80"
+          >
+            <span className="font-mono">{toolName}</span>
+            <Switch
+              id={`${ids}-disabled-${toolName}`}
+              checked
+              onCheckedChange={(checked) => {
+                if (checked) return;
+                const next = disabledBuiltinTools.filter((entry) => entry !== toolName);
+                setDisabledBuiltinTools(next);
+                void enqueueSave({ disabledBuiltinTools: next });
+              }}
+            />
+          </label>
+        ))}
         {advancedOpened ? <BotCredentialsSection botId={bot.id} /> : null}
       </details>
       {error ? <p className="mt-2 text-[13px] text-destructive">{error}</p> : null}

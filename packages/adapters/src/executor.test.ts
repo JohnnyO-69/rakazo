@@ -342,6 +342,31 @@ describe("run tool selection", () => {
     expect(toolNames("call_end")).not.toContain("end_call");
   });
 
+  it("omits a disabled builtin and ignores unknown names", () => {
+    const offered = (disabledBuiltinTools?: readonly string[]) =>
+      selectBuiltinToolsForRun({
+        graphicalToolsAllowed: false,
+        pageBrowserAllowed: false,
+        groupId: null,
+        trigger: "message",
+        semanticMemoryEnabled: false,
+        messagingChannelRun: false,
+        disabledBuiltinTools,
+      }).map((tool) => tool.name);
+
+    const baseline = offered();
+    expect(baseline).toContain("web_search");
+    expect(baseline).toContain("web_fetch");
+    expect(baseline).not.toContain("computer_act");
+
+    const disabled = offered(["web_search", "not_a_tool", ""]);
+    expect(disabled).not.toContain("web_search");
+    expect(disabled).toContain("web_fetch");
+    expect(disabled).not.toContain("not_a_tool");
+    expect(disabled).not.toContain("computer_act");
+    expect(disabled).toEqual(baseline.filter((name) => name !== "web_search"));
+  });
+
   it("keeps schedule tools in group chats and still blocks create on routines", () => {
     expect(toolNames("user", "group-1")).toEqual(
       expect.arrayContaining(["schedule_create", "schedule_list", "schedule_cancel"]),
@@ -1068,6 +1093,27 @@ describe("userTurnInstructions", () => {
       archiveBot,
       ...stableTail,
     ]);
+  });
+
+  it("stops telling the model to use a disabled web tool", () => {
+    const instructions = userTurnInstructions({
+      ...base,
+      groupContext: undefined,
+      messagingContext: undefined,
+      redactedMemoryContext: undefined,
+      redactedScratchpadContext: undefined,
+      hasHistoricalContext: false,
+      agentEnvironmentInstruction: undefined,
+      botDirectory: undefined,
+      pluginLine: undefined,
+      agentSkillsLine: undefined,
+      taughtSkillsLine: undefined,
+      disabledBuiltinTools: new Set(["web_search"]),
+    }).filter(Boolean);
+
+    const computer = instructions.find((line) => line?.includes("persistent computer"));
+    expect(computer).toContain("web_fetch");
+    expect(computer).not.toContain("web_search");
   });
 });
 

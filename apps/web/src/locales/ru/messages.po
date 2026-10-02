@@ -1770,6 +1770,10 @@ msgstr "Обновление настольного приложения"
 msgid "Direct MCP"
 msgstr "Прямой MCP"
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Disabled tools"
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -3949,6 +3953,10 @@ msgstr "Удалить"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Unlink"
 msgstr "Отсоединить"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Unknown tool"
+msgstr ""
 
 #: src/components/call/CallCard.tsx
 msgid "Unmute"
