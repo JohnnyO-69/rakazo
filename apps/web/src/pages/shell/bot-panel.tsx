@@ -351,10 +351,6 @@ export function BotSettings({
     const nextColor = patchOverrides?.color !== undefined ? patchOverrides.color : color;
     const nextNotify =
       patchOverrides?.notifyOnFinish !== undefined ? patchOverrides.notifyOnFinish : notifyOnFinish;
-    const nextDisabledTools =
-      patchOverrides?.disabledBuiltinTools !== undefined
-        ? patchOverrides.disabledBuiltinTools
-        : disabledBuiltinTools;
 
     if (nextName) setName(nextName);
     setTitle(nextTitle);
@@ -384,7 +380,11 @@ export function BotSettings({
                 : null,
             }
           : {}),
-        disabledBuiltinTools: nextDisabledTools,
+        // Only the disabled-tool edits send this list. An unrelated save must
+        // not replace a newer list from another session with this panel's copy.
+        ...(patchOverrides?.disabledBuiltinTools !== undefined
+          ? { disabledBuiltinTools: patchOverrides.disabledBuiltinTools }
+          : {}),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : t`Could not save`);
