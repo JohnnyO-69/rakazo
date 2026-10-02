@@ -493,6 +493,11 @@ function isLiteralActivatePath(text: string): boolean {
   return /(?:^|\/)bin\/activate$/.test(text);
 }
 
+/** Refuse planting a script that `source …/bin/activate` would later run unchecked. */
+export function protectedActivateScriptWriteRefusal(path: string): string | undefined {
+  return isLiteralActivatePath(path) ? "activate script" : undefined;
+}
+
 function unresolvedVariableReason(name: string): string {
   const trimmed = name.replaceAll(/[\r\n]/g, "").slice(0, 48);
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) return `unresolved variable $${trimmed}`;
@@ -655,6 +660,152 @@ function isUnsafeSource(words: readonly string[]): boolean {
   const text = literalCommandToken(argument);
   if (text === undefined) return true;
   return !isLiteralActivatePath(text);
+}
+
+const EXTERNAL_ASSIGNMENT_COMMANDS = new Set([
+  "declare",
+  "getopts",
+  "local",
+  "mapfile",
+  "read",
+  "readarray",
+  "readonly",
+  "typeset",
+]);
+const ACTIVATE_DESTINATION_COMMANDS = new Set(["cp", "install", "ln", "mv"]);
+
+function commandBaseAt(words: readonly string[], index: number): string | undefined {
+  const text = literalCommandToken(words[index] ?? "");
+  if (!text) return undefined;
+  return (text.split("/").at(-1) ?? text).toLowerCase();
+}
+
+function identifierFromToken(token: string | undefined): string | undefined {
+  if (token && /^[A-Za-z_][A-Za-z0-9_]*$/.test(token)) return token;
+  return undefined;
+}
+
+/** A redirect or writer operand, resolved when it is one tracked literal. */
+function activateOperand(
+  raw: string,
+  words: readonly string[],
+  env: ReadonlyMap<string, string>,
+): string | undefined {
+  const literal = literalCommandToken(raw);
+  if (literal !== undefined) return literal;
+  const bare = raw.replaceAll(/['"]/g, "");
+  if (isLiteralActivatePath(bare)) return bare;
+  const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(bare);
+  const name = match?.[1] ?? match?.[2];
+  if (!name) return undefined;
+  for (const word of words) {
+    const parsed = parseAssignment(word);
+    if (!parsed) break;
+    if (parsed.name === name && parsed.value !== null) return parsed.value;
+  }
+  return env.get(name);
+}
+
+function isActivateWriteTarget(
+  op: string,
+  raw: string,
+  words: readonly string[],
+  env: ReadonlyMap<string, string>,
+): boolean {
+  if (op !== ">" && op !== ">>" && op !== "&>" && op !== ">&") return false;
+  const text = activateOperand(raw, words, env);
+  if (text === undefined) return false;
+  if (op === ">&" && /^\d+$/.test(text)) return false;
+  return isLiteralActivatePath(text);
+}
+
+function commandWritesActivateScript(
+  words: readonly string[],
+  env: ReadonlyMap<string, string>,
+): boolean {
+  const index = primaryCommandIndex(words);
+  if (index === undefined) return false;
+  const base = commandBaseAt(words, index);
+  if (!base) return false;
+  const args = words.slice(index + 1);
+  if (base === "dd") {
+    return args.some((raw) => {
+      const token = literalCommandToken(raw);
+      return Boolean(token?.startsWith("of=") && isLiteralActivatePath(token.slice("of=".length)));
+    });
+  }
+  if (base !== "tee" && !ACTIVATE_DESTINATION_COMMANDS.has(base)) return false;
+  const operands: string[] = [];
+  for (const raw of args) {
+    const token = literalCommandToken(raw);
+    if (token === "--" || (token?.startsWith("-") && token !== "-")) continue;
+    const value = activateOperand(raw, words, env);
+    if (value === undefined) continue;
+    operands.push(value);
+  }
+  if (base === "tee") return operands.some((token) => isLiteralActivatePath(token));
+  const destination = operands.at(-1);
+  return destination !== undefined && isLiteralActivatePath(destination);
+}
+
+function printfAssignedName(args: readonly string[]): string | null | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = literalCommandToken(args[index] ?? "");
+    if (token === undefined) return null;
+    if (token === "--") return undefined;
+    if (token === "-v") {
+      return identifierFromToken(literalCommandToken(args[index + 1] ?? "")) ?? null;
+    }
+    if (token.startsWith("-v")) return identifierFromToken(token.slice(2)) ?? null;
+    if (token.startsWith("-")) continue;
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Variables a command may assign outside a plain assignment list.
+ * `clear` drops every tracked literal: the target was not a fixed name, or a
+ * sourced script can assign anything. Undefined means this command cannot.
+ */
+function externalAssignments(
+  words: readonly string[],
+): { clear: boolean; names: readonly string[] } | undefined {
+  const index = primaryCommandIndex(words);
+  if (index === undefined) return undefined;
+  const base = commandBaseAt(words, index);
+  if (!base) return { clear: true, names: [] };
+  const args = words.slice(index + 1);
+  if (base === "source" || base === ".") return { clear: true, names: [] };
+  if (base === "for") {
+    const name = identifierFromToken(literalCommandToken(args[0] ?? ""));
+    if (!name) return { clear: true, names: [] };
+    return { clear: false, names: [name] };
+  }
+  if (base === "printf") {
+    const target = printfAssignedName(args);
+    if (target === undefined) return undefined;
+    if (target === null) return { clear: true, names: [] };
+    return { clear: false, names: [target] };
+  }
+  if (!EXTERNAL_ASSIGNMENT_COMMANDS.has(base)) return undefined;
+  const names: string[] = [];
+  if (base === "read") names.push("REPLY");
+  if (base === "mapfile" || base === "readarray") names.push("MAPFILE");
+  if (base === "getopts") names.push("OPTARG", "OPTIND");
+  for (const raw of args) {
+    const token = literalCommandToken(raw);
+    if (token === undefined) return { clear: true, names };
+    if (token.startsWith("-")) continue;
+    const parsed = parseAssignment(raw);
+    if (parsed) {
+      names.push(parsed.name);
+      continue;
+    }
+    const name = identifierFromToken(token);
+    if (name) names.push(name);
+  }
+  return { clear: false, names };
 }
 
 function readHeredocDelimiter(
@@ -838,8 +989,8 @@ function isShellOrSourceCommand(words: readonly string[]): boolean {
  * Returns a short refusal when the command is dynamic in a way the later
  * tokenizer cannot see (quotes hiding a substitution, a heredoc that is not
  * data for cat or tee, a quoted body that names a lifecycle command, a shell,
- * source, sudo, or busybox after that heredoc, or source of anything but a
- * literal activate path).
+ * source, sudo, or busybox after that heredoc, source of anything but a
+ * literal activate path, or a write that can plant that activate script).
  */
 function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
   const env = new Map<string, string>();
@@ -855,6 +1006,10 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
   let wordQuoted = false;
   let atWordStart = true;
   let redirectNext = false;
+  let redirectOp = "";
+  let activateWrite = false;
+  // IFS changes how unquoted expansions split. Refuse instead of guessing the fields.
+  let substituteLiterals = true;
   let guaranteed = true;
   let inPipeline = false;
   let index = 0;
@@ -867,23 +1022,46 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
     atWordStart = true;
     if (redirectNext) {
       redirectNext = false;
+      if (isActivateWriteTarget(redirectOp, raw, commandWords, env)) activateWrite = true;
+      redirectOp = "";
       return;
     }
     commandWords.push(raw);
+  };
+
+  const forgetExternalAssignments = (words: readonly string[]) => {
+    const assigned = externalAssignments(words);
+    if (!assigned) return;
+    if (assigned.clear) {
+      substituteLiterals = false;
+      env.clear();
+      return;
+    }
+    for (const name of assigned.names) {
+      env.delete(name);
+      if (name === "IFS") substituteLiterals = false;
+    }
   };
 
   const endSimple = (kind: ShellSeparator): string | undefined => {
     finishWord();
     const words = commandWords;
     commandWords = [];
+    // Remember the write across a pending heredoc so a dangerous body can still
+    // refuse as heredoc. A harmless body is refused once that body is consumed.
+    if (activateWrite || commandWritesActivateScript(words, env)) activateWrite = true;
+    if (activateWrite && pending.length === 0) return "activate script";
     if (heredocConsumed && isShellOrSourceCommand(words)) return "heredoc";
     const guaranteedBefore = guaranteed;
     if (isUnsafeSource(words)) return "source";
     const base = commandBasename(words);
     if (base !== undefined) pipelineNames.push(base);
+    const entries = assignmentEntries(words);
+    if (entries?.some((entry) => entry.name === "IFS")) substituteLiterals = false;
+    // A builtin, loop, or sourced script can replace a literal this command still trusts.
+    forgetExternalAssignments(words);
     const pipeMember = inPipeline || kind === "pipe";
     if (!pipeMember && kind !== "background") {
-      const entries = assignmentEntries(words);
       if (entries) {
         for (const entry of entries) {
           // A non-guaranteed write must not replace a value this command might still use.
@@ -892,7 +1070,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
         }
       }
     } else if (kind === "background") {
-      for (const entry of assignmentEntries(words) ?? []) env.delete(entry.name);
+      for (const entry of entries ?? []) env.delete(entry.name);
     }
     if (kind === "pipe") {
       inPipeline = true;
@@ -932,7 +1110,7 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
       out += expansion.raw;
     } else {
       const value = env.get(expansion.name);
-      if (value === undefined) out += expansion.raw;
+      if (value === undefined || !substituteLiterals) out += expansion.raw;
       else {
         const key = freshLiteralKey(source, usedKeys);
         literals[key] = value;
@@ -1104,10 +1282,14 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
         finishWord();
         out += op;
         atWordStart = true;
+        redirectOp = op;
         redirectNext = true;
         index += op.length;
         continue;
       }
+      // The redirect target is still the current word. Consume it before this
+      // separator clears the redirect, or `> path;` is inspected as an argument.
+      if (redirectNext) finishWord();
       out += op;
       atWordStart = true;
       redirectNext = false;
@@ -3315,6 +3497,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "write_file") {
             const filePath = String(args.path ?? "notes/result.txt");
+            if (graphical) {
+              const activateRefusal = protectedActivateScriptWriteRefusal(filePath);
+              if (activateRefusal) {
+                return finish({ error: desktopProtectionGuardMessage(activateRefusal) });
+              }
+            }
             const content = new TextEncoder().encode(textContentArg(args.content, ""));
             workspaceCheckpoint.markDirty();
             try {

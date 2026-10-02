@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   desktopProtectionGuardMessage,
   isProtectedComputerLifecycleCommand,
+  protectedActivateScriptWriteRefusal,
   protectedComputerLifecycleRefusal,
 } from "./executor.js";
 
@@ -193,6 +194,72 @@ describe("computer lifecycle command guard", () => {
       "protected command pkill",
     );
     expect(protectedComputerLifecycleRefusal("bash -c 'source /tmp/x'")).toBe("source");
+    expect(protectedComputerLifecycleRefusal('dir=/tmp/app; declare other=1; ls "$dir"')).toBe(
+      undefined,
+    );
+    expect(
+      protectedComputerLifecycleRefusal('dir=/tmp/app; printf -v count %s hi; echo "$dir"'),
+    ).toBe(undefined);
+  });
+
+  it("drops a tracked literal when a later command can assign that name", () => {
+    for (const command of [
+      "dir=x; declare dir=pkill; $dir chromium",
+      "dir=x; local dir=pkill; $dir chromium",
+      "dir=x; typeset dir=pkill; $dir chromium",
+      "dir=x; readonly dir=pkill; $dir chromium",
+      "dir=x; read dir < /tmp/cmd; $dir chromium",
+      "dir=x; printf -v dir '%s' 'pkill chromium'; $dir",
+      "dir=x; mapfile -t dir < /tmp/cmd; $dir chromium",
+      "dir=x; readarray -t dir < /tmp/cmd; $dir chromium",
+      "dir=x; getopts ab dir; $dir chromium",
+      "dir=x; for dir in 'pkill chromium'; do $dir; done",
+      "dir=x; source venv/bin/activate; $dir chromium",
+      "dir=x; . ./bin/activate; $dir chromium",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(command), command).toBe("unresolved variable $dir");
+    }
+  });
+
+  it("does not substitute expansions after IFS changes", () => {
+    expect(protectedComputerLifecycleRefusal("IFS=X; dir=pkillXchromium; $dir")).toBe(
+      "unresolved variable $dir",
+    );
+    expect(protectedComputerLifecycleRefusal('dir=/tmp/app; IFS=X; echo "$dir"')).toBe(
+      "unresolved variable $dir",
+    );
+    expect(protectedComputerLifecycleRefusal("dir=pkillXchromium IFS=X; $dir")).toBe(
+      "unresolved variable $dir",
+    );
+  });
+
+  it("refuses writes that can plant a sourced activate script", () => {
+    for (const command of [
+      "printf '%s\\n' 'pkill chromium' > venv/bin/activate",
+      "printf '%s\\n' 'pkill chromium' > 'venv/bin/activate'",
+      "printf '%s\\n' 'pkill chromium' > venv/bin/activate; source venv/bin/activate",
+      "echo hi >> ./bin/activate",
+      "echo hi &> /tmp/v/bin/activate",
+      "echo hi > /tmp/v/bin/activate && source /tmp/v/bin/activate",
+      'dest=venv/bin/activate; printf x > "$dest"',
+      "tee venv/bin/activate",
+      "cp /tmp/evil venv/bin/activate",
+      "mv /tmp/evil venv/bin/activate",
+      "install /tmp/evil venv/bin/activate",
+      "dd of=venv/bin/activate",
+    ]) {
+      expect(protectedComputerLifecycleRefusal(command), command).toBe("activate script");
+    }
+    expect(protectedComputerLifecycleRefusal("echo hi > notes.md; source venv/bin/activate")).toBe(
+      undefined,
+    );
+    expect(protectedComputerLifecycleRefusal("cp venv/bin/activate /tmp/backup")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal('dest=notes.md; printf x > "$dest"')).toBeUndefined();
+    expect(protectedActivateScriptWriteRefusal("venv/bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("./bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("/tmp/v/bin/activate")).toBe("activate script");
+    expect(protectedActivateScriptWriteRefusal("notes.md")).toBeUndefined();
+    expect(protectedActivateScriptWriteRefusal("venv/bin/activate.fish")).toBeUndefined();
   });
 
   it("refuses a quoted heredoc whose body names a desktop lifecycle command", () => {
