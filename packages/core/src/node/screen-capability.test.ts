@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ScreenCapabilityScope } from "./screen-capability.js";
 import {
   issueScreenCapability,
   openScreenCapability,
@@ -10,7 +11,7 @@ import {
   sealScreenCapability,
 } from "./screen-capability.js";
 
-const scope = {
+const scope: ScreenCapabilityScope = {
   botId: "bot",
   computerId: "computer",
   botGeneration: 2,
@@ -202,6 +203,15 @@ describe("remote screen capability reuse", () => {
     expect(
       openScreenCapability(new URL(first).pathname, "fake-secret", now + SCREEN_PROXY_TTL_MS),
     ).toBeNull();
+  });
+
+  it("keeps the original expiry when a later client reads the cached seal", () => {
+    const now = 1_000_000;
+    const first = issued(now);
+    const later = issued(now + 20 * 60_000);
+    expect(later).toBe(first);
+    const expiresAt = Number(new URL(later).pathname.match(/\/(\d+)\./)?.[1]);
+    expect(expiresAt).toBe(now + SCREEN_PROXY_TTL_MS);
   });
 
   it("mints again once the held seal is inside the refresh window, without extending the old one", () => {
