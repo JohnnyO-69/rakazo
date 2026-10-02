@@ -887,7 +887,10 @@ function isDirectoryDestination(path: string): boolean {
   return path.endsWith("/") || lastPathComponent(path) === "." || lastPathComponent(path) === "..";
 }
 
-/** Moving or linking a directory named bin can plant bin/activate inside it. */
+/**
+ * Placing a directory named bin onto another bin, or into a directory, can
+ * plant bin/activate. A destination that merely ends in bin is a file rename.
+ */
 function transfersBinDirectory(
   base: string,
   recursive: boolean,
@@ -896,8 +899,9 @@ function transfersBinDirectory(
   sources: readonly string[],
 ): boolean {
   if (base !== "mv" && base !== "ln" && !(base === "cp" && recursive)) return false;
+  if (!sources.some((source) => lastPathComponent(source) === "bin")) return false;
   if (lastPathComponent(destination) === "bin") return true;
-  return destIsDirectory && sources.some((source) => lastPathComponent(source) === "bin");
+  return destIsDirectory;
 }
 
 function copiedIntoActivates(directory: string, source: string): boolean {
@@ -1709,10 +1713,7 @@ function executesWrittenHeredoc(
   const command = literalCommandToken(words[index] ?? "");
   if (!command) return bodyDynamic;
   const base = (command.split("/").at(-1) ?? command).toLowerCase();
-  if (base === "cd") {
-    dir.cwd = nextHeredocCwd(dir.cwd, words.slice(index + 1));
-    return false;
-  }
+  if (base === "cd") return false;
   const matchesWritten = (raw: string) => {
     const token = literalCommandToken(raw);
     if (token === undefined) return false;
@@ -1720,10 +1721,19 @@ function executesWrittenHeredoc(
     if (resolved !== undefined && outputs.has(resolved)) return true;
     // `cd -` leaves the directory unknown, so a later relative name can still be the file.
     if (dir.cwd !== undefined) return false;
-    const base = normalizeWrittenPath(token).split("/").filter((part) => part.length > 0).at(-1);
+    const base = normalizeWrittenPath(token)
+      .split("/")
+      .filter((part) => part.length > 0)
+      .at(-1);
     if (base === undefined || base === "." || base === "..") return false;
     for (const output of outputs) {
-      if (output.split("/").filter((part) => part.length > 0).at(-1) === base) return true;
+      if (
+        output
+          .split("/")
+          .filter((part) => part.length > 0)
+          .at(-1) === base
+      )
+        return true;
     }
     return false;
   };
@@ -1879,11 +1889,23 @@ function prepareDesktopGuardCommand(source: string): PreparedDesktopCommand {
     const words = commandWords;
     commandWords = [];
     // Only sinks in this pipeline survive, so their redirects are the heredoc's output.
+    // Resolve them in the directory this command runs in, before a later cd moves.
     if (pipelineHasHeredoc) {
-      for (const path of simpleWrites) pipelineWrites.push(path);
-      for (const path of teeDestinationPaths(words)) pipelineWrites.push(path);
+      const placed = (path: string) => resolveExecutionPath(heredocDir.cwd, path);
+      for (const path of simpleWrites) {
+        const resolved = placed(path);
+        if (resolved !== undefined) pipelineWrites.push(resolved);
+      }
+      for (const path of teeDestinationPaths(words)) {
+        const resolved = placed(path);
+        if (resolved !== undefined) pipelineWrites.push(resolved);
+      }
     }
     simpleWrites.length = 0;
+    const commandIndex = primaryCommandIndex(words);
+    if (commandIndex !== undefined && commandBaseAt(words, commandIndex) === "cd") {
+      heredocDir.cwd = nextHeredocCwd(heredocDir.cwd, words.slice(commandIndex + 1));
+    }
     // Remember the write across a pending heredoc so a dangerous body can still
     // refuse as heredoc. A harmless body is refused once that body is consumed.
     if (activateWrite || commandWritesActivateScript(words, env)) activateWrite = true;

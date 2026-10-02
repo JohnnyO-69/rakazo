@@ -306,12 +306,15 @@ describe("computer lifecycle command guard", () => {
       "ln -sfn /tmp/x/bin venv/bin",
       "ln -s -t venv /tmp/x/bin",
       "cp -a /tmp/x/bin venv/bin",
-      "mv /tmp/notes.txt venv/bin",
     ]) {
       expect(protectedComputerLifecycleRefusal(command), command).toBe("activate script");
     }
     expect(protectedComputerLifecycleRefusal("mv /tmp/x/bin /tmp/backup")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("ln -s /tmp/x/bin /tmp/backup")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("mv /tmp/notes.txt /tmp/bin")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("mv /tmp/notes.txt venv/bin")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("ln -s /tmp/notes.txt /tmp/bin")).toBeUndefined();
+    expect(protectedComputerLifecycleRefusal("cp -r /tmp/notes.txt /tmp/bin")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("echo notes > ../notes.txt")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("echo notes > ../docs/notes.txt")).toBeUndefined();
     expect(protectedComputerLifecycleRefusal("echo notes > ../bin/activate")).toBe(
@@ -450,6 +453,22 @@ describe("computer lifecycle command guard", () => {
     expect(
       protectedComputerLifecycleRefusal("cd sub\ncat > x.sh <<'EOF'\nhello\nEOF\n./x.sh"),
     ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cd sub; cat > x.sh <<'EOF'\nhello\nEOF\ncd ..; cd sub; ./x.sh",
+      ),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cd sub; cat > x.sh <<'EOF'\nhello\nEOF\ncd ..; ./x.sh"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cd sub; cat > x.sh <<'EOF'\nhello\nEOF\n"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cd sub; cat > notes.md <<'EOF'\nhello\nEOF\n/usr/bin/git status",
+      ),
+    ).toBeUndefined();
     expect(
       protectedComputerLifecycleRefusal("cat > notes.md <<'EOF'\nhello\nEOF\ncd -\necho after"),
     ).toBeUndefined();
