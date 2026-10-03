@@ -84,4 +84,24 @@ describe("agent-environment", () => {
       }),
     ).toEqual({ stdout: "unrelated", stderr: "tail " });
   });
+
+  it("withholds an incomplete secret split across stdout and stderr", () => {
+    const secret = "ABCDEFGHIJ";
+    expect(
+      redactShellStreams({ stdout: "ABCDE", stderr: "FGH" }, [secret], { withholdPartial: true }),
+    ).toEqual({ stdout: "", stderr: "" });
+    expect(
+      redactShellStreams({ stdout: "pre ABCDE", stderr: "FGH tail" }, [secret], {
+        withholdPartial: true,
+      }),
+    ).toEqual({ stdout: "pre ", stderr: " tail" });
+    const joined = redactShellStreams({ stdout: "ABCDE", stderr: "FGH" }, [secret], {
+      withholdPartial: true,
+    });
+    expect(`${joined.stdout}${joined.stderr}`).toBe("");
+    expect(redactShellStreams({ stdout: "ABCDE", stderr: "FGH" }, [secret])).toEqual({
+      stdout: "ABCDE",
+      stderr: "FGH",
+    });
+  });
 });

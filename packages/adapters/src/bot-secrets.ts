@@ -46,6 +46,10 @@ function commandRedactionForms(value: string): string[] {
   return forms;
 }
 
+export function commandCredentialRedactions(environment: Record<string, string>): string[] {
+  return [...new Set(Object.values(environment).flatMap(commandRedactionForms))];
+}
+
 function credentialHeader(destination: BotSecretDestination, plaintext: string) {
   // A login is only typed into its site, and a command variable only reaches shell commands.
   if (destination.auth.type === "login" || destination.auth.type === "command") {
@@ -101,13 +105,17 @@ function commandCredentialName(auth: unknown, name: string): string | undefined 
 export function botSecretToolView(row: { name: string; origin: string; auth: unknown }) {
   if (commandCredentialName(row.auth, row.name) === undefined) return row;
   const variable = commandVariableName(row.name);
-  return commandVariableProblem(variable)
-    ? {
-        name: row.name,
-        auth: row.auth,
-        error: `$${variable} is reserved and is not exported. Remove it and save it under another name.`,
-      }
-    : { name: row.name, auth: row.auth, variable };
+  const problem = commandVariableProblem(variable);
+  if (problem === undefined) return { name: row.name, auth: row.auth, variable };
+  const reason =
+    problem === "reserved"
+      ? `$${variable} is reserved and is not exported.`
+      : `$${variable} is not a valid environment variable name and is not exported.`;
+  return {
+    name: row.name,
+    auth: row.auth,
+    error: `${reason} Remove it and save it under another name.`,
+  };
 }
 
 /**
@@ -162,9 +170,7 @@ export async function shellCommandEnvironment(input: {
   );
   // Encoded forms too, as secret_request does, so an accidental `base64` or URL-encoding of a
   // value is still redacted from command output.
-  input.registerRedactions([
-    ...new Set(Object.values(botEnvironment).flatMap(commandRedactionForms)),
-  ]);
+  input.registerRedactions(commandCredentialRedactions(botEnvironment));
   return { ...input.spaceEnvironment, ...botEnvironment };
 }
 

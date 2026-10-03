@@ -1,8 +1,10 @@
 import type { BotSecretDestination } from "@rakazo/contracts";
+import { redactSecrets } from "@rakazo/core";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { redactAgentCommandResult } from "./agent-environment.js";
 import {
+  commandCredentialRedactions,
   forgetBotSecret,
   listBotSecrets,
   loadBotCommandEnvironment,
@@ -219,6 +221,44 @@ describe("list_secrets", () => {
     ]);
     expect(JSON.stringify(listed)).not.toContain("fake-setup-key-1");
   });
+
+  it("reports an invalid stored command name separately from a reserved one", async () => {
+    const db = fakeDatabase();
+    const longName = "a".repeat(65);
+    await db.prisma.botSecret.create({
+      data: {
+        id: "long-name",
+        ...scope,
+        name: longName,
+        origin: "",
+        auth: command,
+        ciphertext: "unused",
+      },
+    });
+    await db.prisma.botSecret.create({
+      data: {
+        id: "reserved-path",
+        ...scope,
+        name: "path",
+        origin: "",
+        auth: command,
+        ciphertext: "unused",
+      },
+    });
+    const listed = await listBotSecrets(db.prisma, scope);
+    expect(listed).toEqual([
+      {
+        name: longName,
+        auth: command,
+        error: `$${longName.toUpperCase()} is not a valid environment variable name and is not exported. Remove it and save it under another name.`,
+      },
+      {
+        name: "path",
+        auth: command,
+        error: "$PATH is reserved and is not exported. Remove it and save it under another name.",
+      },
+    ]);
+  });
 });
 
 describe("shell command environment", () => {
@@ -302,6 +342,17 @@ describe("shell command environment", () => {
         Buffer.from("fake-good-token").toString("base64"),
       ]),
     );
+  });
+
+  it("redacts encoded command credentials before any shell command registers them", async () => {
+    const db = fakeDatabase();
+    const value = "fake token/with+chars=";
+    await save(db, "api-token", value);
+    const environment = await loadBotCommandEnvironment(db.prisma, secretStore, scope);
+    const runSecrets = commandCredentialRedactions(environment);
+    const forms = [value, Buffer.from(value).toString("base64"), encodeURIComponent(value)];
+    const redacted = redactSecrets(forms.join("\n"), runSecrets);
+    for (const form of forms) expect(redacted).not.toContain(form);
   });
 
   it("redacts base64 and URL-encoded forms of a bot variable from command output", async () => {

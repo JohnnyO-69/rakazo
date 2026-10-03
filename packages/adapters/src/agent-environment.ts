@@ -101,19 +101,30 @@ function secretPrefixSuffixLength(text: string, secret: string): number {
   return 0;
 }
 
-function withholdStreamPrefix(text: string, secrets: string[]): string {
-  let hold = 0;
-  for (const secret of secrets) hold = Math.max(hold, secretPrefixSuffixLength(text, secret));
-  if (hold === 0) return text;
-  let cut = text.length - hold;
-  if (cut > 0 && cut < text.length) {
-    const before = text.charCodeAt(cut - 1);
-    const after = text.charCodeAt(cut);
-    // Keep a surrogate pair out of the published view rather than splitting it.
-    if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) cut -= 1;
-  }
-  if (cut <= 0) return "";
-  return text.slice(0, cut);
+/** How far `text` continues `secret` from `offset`, in UTF-16 code units. */
+function secretContinuationLength(text: string, secret: string, offset: number): number {
+  const limit = Math.min(text.length, secret.length - offset);
+  let size = 0;
+  while (size < limit && text.charCodeAt(size) === secret.charCodeAt(offset + size)) size += 1;
+  return size;
+}
+
+function splitsSurrogatePair(text: string, index: number): boolean {
+  if (index <= 0 || index >= text.length) return false;
+  const before = text.charCodeAt(index - 1);
+  const after = text.charCodeAt(index);
+  return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
+}
+
+function publishWithheld(text: string, holdStart: number, holdEnd: number): string {
+  if (holdStart <= 0 && holdEnd <= 0) return text;
+  let start = holdStart > 0 ? holdStart : 0;
+  let end = holdEnd > 0 ? text.length - holdEnd : text.length;
+  // Keep a surrogate pair out of the published view rather than splitting it.
+  if (splitsSurrogatePair(text, start)) start += 1;
+  if (splitsSurrogatePair(text, end)) end -= 1;
+  if (end <= start) return "";
+  return text.slice(start, end);
 }
 
 function withholdSecretPrefix(
@@ -121,10 +132,25 @@ function withholdSecretPrefix(
   stderr: string,
   secrets: string[],
 ): { stdout: string; stderr: string } {
-  // Each stream is held on its own. A suffix of stdout+stderr stops matching once
-  // stderr appends unrelated text, which would publish a prefix still sitting in stdout.
+  let stdoutHold = 0;
+  let stderrHoldEnd = 0;
+  let stderrHoldStart = 0;
+  for (const secret of secrets) {
+    if (secret.length < 2) continue;
+    const stdoutPrefix = secretPrefixSuffixLength(stdout, secret);
+    stdoutHold = Math.max(stdoutHold, stdoutPrefix);
+    stderrHoldEnd = Math.max(stderrHoldEnd, secretPrefixSuffixLength(stderr, secret));
+    // The live view joins the streams. A prefix that ends stdout and continues into
+    // stderr is one secret fragment: holding only the stdout piece would publish the rest.
+    if (stdoutPrefix > 0) {
+      stderrHoldStart = Math.max(
+        stderrHoldStart,
+        secretContinuationLength(stderr, secret, stdoutPrefix),
+      );
+    }
+  }
   return {
-    stdout: withholdStreamPrefix(stdout, secrets),
-    stderr: withholdStreamPrefix(stderr, secrets),
+    stdout: publishWithheld(stdout, 0, stdoutHold),
+    stderr: publishWithheld(stderr, stderrHoldStart, stderrHoldEnd),
   };
 }

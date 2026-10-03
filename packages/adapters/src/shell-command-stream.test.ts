@@ -156,6 +156,37 @@ describe("observeShellCommand", () => {
     expect(final?.stdout).not.toContain("super-secret-token");
   });
 
+  it("withholds an incomplete secret split across stdout and stderr while running", async () => {
+    let releaseExit: () => void = () => undefined;
+    const exitGate = new Promise<void>((resolve) => {
+      releaseExit = resolve;
+    });
+    const seen: string[] = [];
+    const observed = await observeShellCommand(
+      (async function* () {
+        yield { type: "stdout" as const, data: "ABCDE" };
+        yield { type: "stderr" as const, data: "FGH" };
+        await exitGate;
+        yield { type: "exit" as const, code: 0 };
+      })(),
+      {
+        secrets: ["ABCDEFGHIJ"],
+        idleMs: 20,
+        onOutput: (snapshot) => {
+          seen.push(`${snapshot.stdout}${snapshot.stderr}`);
+        },
+      },
+    );
+
+    expect(isRunningShellCommand(observed.result)).toBe(true);
+    expect(`${observed.result.stdout}${observed.result.stderr}`).toBe("");
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((line) => !line.includes("ABCDE") && !line.includes("FGH"))).toBe(true);
+    releaseExit();
+    const final = await observed.completion;
+    expect(`${final?.stdout}${final?.stderr}`).toBe("ABCDEFGH");
+  });
+
   it("redacts a secret split across stdout and stderr before it is joined", async () => {
     const seen: string[] = [];
     const observed = await observeShellCommand(

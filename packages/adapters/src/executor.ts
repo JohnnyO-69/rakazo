@@ -164,6 +164,7 @@ import { loadBotMessageContext, messageBot, returnBotMessageOutcome } from "./bo
 import {
   allowPrivateHttpSecretOrigins,
   botSecretToolView,
+  commandCredentialRedactions,
   findBotSecret,
   findCommandVariableConflict,
   forgetBotSecret,
@@ -1329,7 +1330,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ]);
         const agentEnvironment = decryptAgentEnvironment(agentSecretRows, deps.secretStore);
         runSecrets.push(...Object.values(agentEnvironment));
-        runSecrets.push(...Object.values(initialBotCommandEnvironment));
+        // Encoded forms too: read_file redacts with these values before any shell command runs.
+        runSecrets.push(...commandCredentialRedactions(initialBotCommandEnvironment));
         const agentEnvironmentInstruction = formatAgentEnvironmentInstruction({
           ...agentEnvironment,
           ...initialBotCommandEnvironment,
