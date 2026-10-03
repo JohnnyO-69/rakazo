@@ -334,7 +334,36 @@ describe("hosted voice playback controls", () => {
       ]),
     ).resolves.toBe(false);
     expect(ControllableAudio.instances).toHaveLength(0);
+    expect(getVoicePlaybackState()).toEqual({ status: "idle", canPause: false });
     expect(vi.mocked(rpc).mock.calls.filter(([proc]) => proc === "voice/prepare")).toHaveLength(1);
+  });
+
+  it("shows Stop while the first clip is still preparing, and idle if Stop cancels it", async () => {
+    let releasePrepare: (() => void) | undefined;
+    vi.mocked(rpc).mockImplementation(async (proc) => {
+      if (proc === "aiConsent/status") return { version: "2026-09-14", recipients: [] } as never;
+      await new Promise<void>((resolve) => {
+        releasePrepare = resolve;
+      });
+      return { ready: true, utterances: ["Read this"] } as never;
+    });
+
+    const spoken = speakText("Read this", { botId: "bot-1", messageId: "msg-1" });
+    await waitFor(() => releasePrepare !== undefined);
+    expect(getVoicePlaybackState()).toEqual({
+      status: "playing",
+      botId: "bot-1",
+      messageId: "msg-1",
+      canPause: false,
+    });
+    expect(ControllableAudio.instances).toHaveLength(0);
+
+    stopVoicePlayback();
+    expect(getVoicePlaybackState()).toEqual({ status: "idle", canPause: false });
+    releasePrepare?.();
+    await expect(spoken).resolves.toBe(false);
+    expect(ControllableAudio.instances).toHaveLength(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
   it("stops a queue immediately and never starts the remaining messages", async () => {

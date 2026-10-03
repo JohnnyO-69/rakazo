@@ -37,7 +37,7 @@ export function VoicePlayerBar({
   const speakerMember = playback.botId
     ? members?.find((member) => member.botId === playback.botId)
     : undefined;
-  const speakerName = speakerBot?.name ?? speakerMember?.name;
+  const speakerName = speakerBot?.name || speakerMember?.name || t("Bot");
   const speakerColor = playback.botId
     ? resolvePersonaColorDef(playback.botId, speakerBot?.color ?? speakerMember?.color).light
     : undefined;

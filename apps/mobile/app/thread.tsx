@@ -1647,7 +1647,7 @@ function Thread() {
               onAnswer={answerMessage}
               onOpenBot={openBot}
               onPreviewMarkdown={setMarkdownPreview}
-              onPlay={() => speak(message)}
+              onPlay={onCall ? undefined : () => speak(message)}
               actionProps={actionProps}
             />
           </Pressable>
@@ -2655,7 +2655,7 @@ const MessageBubble = memo(function MessageBubble({
   onAnswer: (message: MobileMessage, answer: string, username?: string) => Promise<void>;
   onOpenBot: (botId: string, name: string) => void;
   onPreviewMarkdown: (target: MarkdownArtifactPreviewTarget) => void;
-  onPlay: () => void;
+  onPlay?: () => void;
   actionProps: MessageActionProps;
 }) {
   const colorScheme = useResolvedAppearance();

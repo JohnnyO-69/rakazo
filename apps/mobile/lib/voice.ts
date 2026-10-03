@@ -127,6 +127,18 @@ export async function speakText(text: string, opts: SpeechOptions = {}): Promise
 
 async function speakPrepared(text: string, opts: SpeechOptions, epoch: number): Promise<boolean> {
   if (!isCurrentSpeech(epoch)) return false;
+  // Stop has to work before a player exists. Pause stays hidden until one does.
+  const prepareControl: VoiceControl = {
+    pause() {},
+    resume() {},
+    stop() {
+      setPlayback(IDLE_PLAYBACK, null);
+    },
+  };
+  setPlayback(
+    { status: "playing", botId: opts.botId, messageId: opts.messageId, canPause: false },
+    prepareControl,
+  );
   let useDeviceVoice = false;
   try {
     useDeviceVoice = await loadDeviceVoiceEnabled();
@@ -156,7 +168,8 @@ async function speakPrepared(text: string, opts: SpeechOptions, epoch: number): 
   }
 
   const generation = startHostedSpeechSession();
-  activeControl?.stop();
+  // The prepare control only owns the dock; stopping it would hide Stop.
+  if (activeControl !== prepareControl) activeControl?.stop();
   if (!isCurrentSpeech(epoch)) return false;
   const session = new HostedSession(generation);
   const control: VoiceControl = {
