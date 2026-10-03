@@ -65,37 +65,47 @@ describe("Pi model catalog", () => {
   });
 
   it("pins catalog probes to registry base URLs and leaves user URLs gated", async () => {
-    const openrouter = catalogProviderProbeBaseUrl("openrouter");
-    expect(openrouter).toMatch(/^https:\/\/openrouter\.ai\//);
-    expect(listPiCatalog().find((entry) => entry.provider === "openrouter")?.catalogProbe).toBe(
-      true,
-    );
+    const expected = {
+      openrouter: "https://openrouter.ai/api/v1",
+      openai: "https://api.openai.com/v1",
+      groq: "https://api.groq.com/openai/v1",
+    } as const;
+    for (const [provider, baseUrl] of Object.entries(expected)) {
+      expect(catalogProviderProbeBaseUrl(provider)).toBe(baseUrl);
+      expect(listPiCatalog().find((entry) => entry.provider === provider)?.catalogProbe).toBe(true);
+    }
     expect(catalogProviderProbeBaseUrl("openai-compatible")).toBeNull();
     expect(catalogProviderProbeBaseUrl("anthropic")).toBeNull();
+    expect(catalogProviderProbeBaseUrl("cloudflare-workers-ai")).toBeNull();
+    expect(
+      listPiCatalog().find((entry) => entry.provider === "cloudflare-workers-ai")?.catalogProbe,
+    ).toBeUndefined();
 
     const previous = process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
     delete process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
     try {
       await expect(
-        probeOpenAiCompatibleModels({ baseUrl: openrouter!, apiKey: "sk-test-key" }, async () => {
-          throw new Error("user-supplied probe should be rejected before fetch");
-        }),
+        probeOpenAiCompatibleModels(
+          { baseUrl: expected.openrouter, apiKey: "sk-test-key" },
+          async () => {
+            throw new Error("user-supplied probe should be rejected before fetch");
+          },
+        ),
       ).rejects.toThrow(/Public model endpoints are blocked/);
 
-      let requestedUrl = "";
-      const fetchImpl = async (input: RequestInfo | URL) => {
-        requestedUrl = input instanceof Request ? input.url : String(input);
-        return new Response(JSON.stringify({ object: "list", data: [{ id: "pinned-model" }] }), {
-          status: 200,
-        });
-      };
-      await expect(
-        probeCatalogProviderModels(
-          { provider: "openrouter", apiKey: "sk-test-key-12345678" },
-          fetchImpl,
-        ),
-      ).resolves.toEqual(["pinned-model"]);
-      expect(requestedUrl).toContain(openrouter);
+      for (const [provider, baseUrl] of Object.entries(expected)) {
+        let requestedUrl = "";
+        const fetchImpl = async (input: RequestInfo | URL) => {
+          requestedUrl = input instanceof Request ? input.url : String(input);
+          return new Response(JSON.stringify({ object: "list", data: [{ id: "pinned-model" }] }), {
+            status: 200,
+          });
+        };
+        await expect(
+          probeCatalogProviderModels({ provider, apiKey: "sk-test-key-12345678" }, fetchImpl),
+        ).resolves.toEqual(["pinned-model"]);
+        expect(requestedUrl).toContain(baseUrl);
+      }
     } finally {
       if (previous === undefined) delete process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC;
       else process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = previous;

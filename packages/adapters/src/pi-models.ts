@@ -26,7 +26,7 @@ export type PiCatalogEntry = {
   reasoning?: boolean;
   thinkingLevels?: ThinkingLevel[];
   placeholder?: boolean;
-  /** Provider models share one pinned HTTPS OpenAI-completions base URL. */
+  /** Provider models share one pinned HTTPS models-list base URL. */
   catalogProbe?: boolean;
 };
 
@@ -55,6 +55,9 @@ export async function probeCatalogProviderModels(
   });
 }
 
+/** Wire protocols whose registry base URL also serves GET {base}/models. */
+const CATALOG_PROBE_APIS = new Set(["openai-completions", "openai-responses"]);
+
 function pinnedOpenAiCompletionsBaseUrl(
   providerId: string,
   models: ReadonlyArray<{ api: string; baseUrl?: string }>,
@@ -64,8 +67,10 @@ function pinnedOpenAiCompletionsBaseUrl(
   }
   const urls = new Set<string>();
   for (const model of models) {
-    if (model.api !== "openai-completions" || !model.baseUrl) continue;
+    if (!CATALOG_PROBE_APIS.has(model.api) || !model.baseUrl) continue;
     const trimmed = model.baseUrl.replace(/\/+$/, "");
+    // Account-scoped templates such as {CLOUDFLARE_ACCOUNT_ID} are not probe URLs.
+    if (trimmed.includes("{") || trimmed.includes("}")) return null;
     let url: URL;
     try {
       url = new URL(trimmed);
