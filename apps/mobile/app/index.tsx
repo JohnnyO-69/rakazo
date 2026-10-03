@@ -26,7 +26,6 @@ import { BotAvatar } from "../components/bot-avatar";
 import { BotOrganizeModal } from "../components/bot-organize-modal";
 import { GroupAvatar } from "../components/group-avatar";
 import { NativeSymbol } from "../components/native-symbol";
-import { VoicePlayerBar } from "../components/voice-player-bar";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import {
   activityStatusLabel,
@@ -676,7 +675,6 @@ export default function Home() {
           )
         }
       />
-      <VoicePlayerBar bots={bots} style={{ marginTop: 8, marginBottom: insets.bottom + 8 }} />
       {organizeChat && organizeTarget ? (
         <BotOrganizeModal
           bot={organizeChat}

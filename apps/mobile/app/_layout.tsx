@@ -6,9 +6,11 @@ import { useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AvatarStyleProvider } from "../components/avatar-style";
 import { CallCard } from "../components/CallCard";
 import { ComputerUpdateProgress } from "../components/computer-update-progress";
+import { VoicePlayerBar } from "../components/voice-player-bar";
 import { currentApiBase, loadApiBase, loadSessionToken, selectedSpaceId } from "../lib/api";
 import { loadAppearancePreference, mobileTokens } from "../lib/appearance";
 import { loadAvatarStyle } from "../lib/avatar-style";
@@ -32,6 +34,7 @@ export default function Layout() {
     );
   }, []);
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const [ready, setReady] = useState(false);
   const [appearanceReady, setAppearanceReady] = useState(false);
   const resolved = useResolvedAppearance();
@@ -147,6 +150,7 @@ export default function Layout() {
               </Stack>
               <ComputerUpdateProgress />
               <CallCard />
+              <VoicePlayerBar bots={[]} style={{ marginTop: 8, marginBottom: insets.bottom + 8 }} />
             </ThemeProvider>
           </AvatarStyleProvider>
         ) : (

@@ -1,3 +1,4 @@
+import { createAudioPlayer } from "expo-audio";
 import * as SecureStore from "expo-secure-store";
 import * as Speech from "expo-speech";
 import { Platform } from "react-native";
@@ -19,7 +20,19 @@ import {
 } from "./voice";
 
 vi.mock("./ai-consent", () => ({ promptAiConsent: vi.fn() }));
-vi.mock("expo-file-system", () => ({ File: class {}, Paths: {} }));
+vi.mock("expo-file-system", () => ({
+  File: class {
+    uri = "file:///cache/rakazo-voice.mp3";
+    create() {}
+    write() {}
+    delete() {}
+  },
+  Paths: { cache: "cache" },
+}));
+vi.mock("expo-audio", () => ({
+  createAudioPlayer: vi.fn(),
+  setAudioModeAsync: vi.fn(async () => undefined),
+}));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: vi.fn(),
   setItemAsync: vi.fn(),
@@ -467,6 +480,73 @@ describe("hosted voice playback controls", () => {
     expect(ControllableAudio.instances).toHaveLength(1);
     expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
   });
+
+  it("does not fail a paused native clip when the startup watchdog elapses", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.stubGlobal("Audio", undefined);
+    class NativePlayer {
+      static instances: NativePlayer[] = [];
+      playing = false;
+      private listeners = new Set<(status: Record<string, unknown>) => void>();
+
+      constructor() {
+        NativePlayer.instances.push(this);
+      }
+
+      play() {
+        this.playing = true;
+      }
+
+      pause() {
+        this.playing = false;
+      }
+
+      release() {}
+
+      addListener(_event: string, listener: (status: Record<string, unknown>) => void) {
+        this.listeners.add(listener);
+        return { remove: () => this.listeners.delete(listener) };
+      }
+    }
+    NativePlayer.instances = [];
+    vi.mocked(createAudioPlayer).mockImplementation(
+      () => new NativePlayer() as unknown as ReturnType<typeof createAudioPlayer>,
+    );
+
+    let spoken: Promise<boolean> | undefined;
+    try {
+      spoken = speakText("Read this", { botId: "bot-1" });
+      await waitFor(() => NativePlayer.instances.length === 1);
+      const player = NativePlayer.instances[0]!;
+      await waitFor(() => player.playing);
+
+      pauseVoicePlayback();
+      expect(getVoicePlaybackState()).toEqual({
+        status: "paused",
+        botId: "bot-1",
+        canPause: true,
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(player.playing).toBe(false);
+      expect(getVoicePlaybackState()).toEqual({
+        status: "paused",
+        botId: "bot-1",
+        canPause: true,
+      });
+
+      resumeVoicePlayback();
+      expect(player.playing).toBe(true);
+      const rejected = expect(spoken).rejects.toThrow("Could not play that clip.");
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(getVoicePlaybackState().status).toBe("playing");
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejected;
+    } finally {
+      stopVoicePlayback();
+      await spoken?.catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
 });
 
 async function flushDeviceSpeechImport() {
@@ -521,63 +601,24 @@ describe("on-device speech", () => {
     expect(getVoicePlaybackState()).toEqual({ status: "idle", canPause: false });
   });
 
-  it("prefers a higher-quality network voice on Android, and caches the choice per language", async () => {
-    Platform.OS = "android";
+  it("speaks with the platform default voice and does not select a network voice", async () => {
     vi.mocked(SecureStore.getItemAsync).mockResolvedValue("1");
-    vi.mocked(Speech.getAvailableVoicesAsync).mockResolvedValue([
-      { identifier: "en-us-x-iol-local", name: "English (local)", language: "en-US" },
-      { identifier: "en-us-x-iol-network", name: "English (network)", language: "en-US" },
-    ] as never);
-    const calls: Array<Parameters<typeof Speech.speak>[1]> = [];
-    vi.mocked(Speech.speak).mockImplementation((_text, options) => {
-      calls.push(options);
-      options?.onDone?.();
-    });
+    for (const os of ["ios", "android"] as const) {
+      Platform.OS = os;
+      const calls: Array<Parameters<typeof Speech.speak>[1]> = [];
+      vi.mocked(Speech.speak).mockImplementation((_text, options) => {
+        calls.push(options);
+        options?.onDone?.();
+      });
 
-    await expect(speakWithDeviceVoice("Hello")).resolves.toBe(true);
-    expect(calls[0]?.voice).toBe("en-us-x-iol-network");
-    expect(calls[0]?.language).toBe("en-US");
+      await expect(speakWithDeviceVoice("Bonjour")).resolves.toBe(true);
 
-    vi.mocked(Speech.getAvailableVoicesAsync).mockClear();
-    await expect(speakWithDeviceVoice("Hello again")).resolves.toBe(true);
-    expect(Speech.getAvailableVoicesAsync).not.toHaveBeenCalled();
-    expect(calls[1]?.voice).toBe("en-us-x-iol-network");
-  });
-
-  it("falls back to the platform default voice when no network voice is installed", async () => {
-    Platform.OS = "android";
-    vi.mocked(SecureStore.getItemAsync).mockResolvedValue("1");
-    const { activateUiLocale } = await import("./i18n");
-    activateUiLocale("zh-CN"); // a language not cached by the test above
-    vi.mocked(Speech.getAvailableVoicesAsync).mockResolvedValue([
-      { identifier: "zh-cn-x-local", name: "Chinese (local)", language: "zh-CN" },
-    ] as never);
-    const calls: Array<Parameters<typeof Speech.speak>[1]> = [];
-    vi.mocked(Speech.speak).mockImplementation((_text, options) => {
-      calls.push(options);
-      options?.onDone?.();
-    });
-
-    try {
-      await expect(speakWithDeviceVoice("Hello")).resolves.toBe(true);
+      expect(Speech.getAvailableVoicesAsync).not.toHaveBeenCalled();
       expect(calls[0]?.voice).toBeUndefined();
-    } finally {
-      activateUiLocale("en");
-    }
-  });
-
-  it("does not fail speech when the voice list cannot be read", async () => {
-    Platform.OS = "android";
-    vi.mocked(SecureStore.getItemAsync).mockResolvedValue("1");
-    const { activateUiLocale } = await import("./i18n");
-    activateUiLocale("ru"); // a language not cached by earlier tests
-    vi.mocked(Speech.getAvailableVoicesAsync).mockRejectedValue(new Error("no TTS engine"));
-    vi.mocked(Speech.speak).mockImplementation((_text, options) => options?.onDone?.());
-
-    try {
-      await expect(speakWithDeviceVoice("Hello")).resolves.toBe(true);
-    } finally {
-      activateUiLocale("en");
+      expect(calls[0]?.language).toBeUndefined();
+      expect(rpc).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      vi.mocked(Speech.speak).mockReset();
     }
   });
 

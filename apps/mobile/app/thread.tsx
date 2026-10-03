@@ -82,7 +82,6 @@ import {
 } from "../components/markdown-artifact-preview";
 import { NativeSymbol } from "../components/native-symbol";
 import { VoiceChatCard } from "../components/VoiceChatCard";
-import { VoicePlayerBar } from "../components/voice-player-bar";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import {
   applyMobileThreadEvent,
@@ -194,6 +193,16 @@ function isWorkingStatus(status: string | undefined): boolean {
     status === "waiting_input" ||
     status === "waiting_takeover"
   );
+}
+
+const ATTACHMENT_PLACEHOLDER_LINE = /^\[(?:image|file|chart): .*\]$/;
+
+function speakableMessageText(message: MobileMessage): string {
+  return blockText(message)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !ATTACHMENT_PLACEHOLDER_LINE.test(line))
+    .join("\n");
 }
 
 type NotificationRouteState = "loading" | "ready" | "failed";
@@ -1332,16 +1341,20 @@ function Thread() {
 
   const speak = useCallback(
     (message: MobileMessage) => {
-      const messages = snap?.messages ?? [];
-      const startIndex = messages.findIndex((candidate) => candidate.id === message.id);
-      const fromHere = startIndex === -1 ? [message] : messages.slice(startIndex);
-      const items = fromHere
-        .filter((candidate) => candidate.role === "bot" && blockText(candidate).trim())
-        .map((candidate) => ({
-          text: blockText(candidate),
-          botId: candidate.botId ?? botId ?? snap?.members?.[0]?.botId ?? "",
-          messageId: candidate.id,
-        }));
+      const startIndex = visibleMessages.findIndex((candidate) => candidate.id === message.id);
+      const fromHere = startIndex === -1 ? [message] : visibleMessages.slice(startIndex);
+      const items = fromHere.flatMap((candidate) => {
+        if (candidate.role !== "bot") return [];
+        const text = speakableMessageText(candidate);
+        if (!text) return [];
+        return [
+          {
+            text,
+            botId: candidate.botId ?? botId ?? snap?.members?.[0]?.botId ?? "",
+            messageId: candidate.id,
+          },
+        ];
+      });
       if (items.length === 0) return;
       void speakQueue(items)
         .then((spoken) => {
@@ -1352,7 +1365,7 @@ function Thread() {
           Alert.alert(t("Could not speak"), err instanceof Error ? err.message : t("Try again.")),
         );
     },
-    [botId, snap?.members, snap?.messages],
+    [botId, snap?.members, visibleMessages],
   );
 
   async function startVoiceCall() {
@@ -1864,11 +1877,6 @@ function Thread() {
           </Pressable>
         ) : null}
       </View>
-      <VoicePlayerBar
-        bots={mentionBots}
-        members={snap?.members}
-        style={{ marginTop: 8, marginBottom: 8, marginHorizontal: 0 }}
-      />
       <View style={{ paddingBottom: keyboardVisible ? 12 : Math.max(insets.bottom + 12, 24) }}>
         {replyTarget ? (
           <View

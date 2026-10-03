@@ -6,7 +6,7 @@ import { promptAiConsent } from "./ai-consent";
 import type { ApiRequestContext } from "./api";
 import { aiConsentCoalesceKey, captureApiRequestContext, rpc } from "./api";
 import { loadDeviceVoiceEnabled } from "./device-voice";
-import { dateLocaleForUi, t } from "./i18n";
+import { t } from "./i18n";
 
 type SpeechOptions = { voiceId?: string; botId?: string; messageId?: string };
 export const VOICE_RESPONSE_TIMEOUT_MS = 70_000;
@@ -245,8 +245,6 @@ async function speakOnDevice(
     Platform.OS === "ios" &&
     typeof pausable.pause === "function" &&
     typeof pausable.resume === "function";
-  const language = dateLocaleForUi();
-  const voice = await pickBestVoiceIdentifier(Speech, language);
   if (!isCurrentDeviceSpeechSession(session) || !isCurrentSpeech(mine)) return true;
   const control: VoiceControl = {
     pause: () => {
@@ -270,44 +268,13 @@ async function speakOnDevice(
   try {
     for (const utterance of utterances) {
       if (!isCurrentDeviceSpeechSession(session) || !isCurrentSpeech(mine)) return true;
-      await speakOneUtterance(Speech, utterance, { language, voice });
+      await speakOneUtterance(Speech, utterance);
     }
     finished = isCurrentDeviceSpeechSession(session) && isCurrentSpeech(mine);
     return true;
   } finally {
     releasePlayback(mine, isCurrentDeviceSpeechSession(session), finished);
   }
-}
-
-let cachedVoice: { language: string; identifier: string | undefined } | null = null;
-
-/**
- * Android ships both a small on-device voice model and, on many devices, a
- * higher-quality "network" one per language; the OS default isn't always the
- * better one. Prefer it when installed. iOS's built-in voices don't have this
- * gap, so this only runs on Android, and any lookup failure just falls back
- * to the platform default (undefined = "don't override").
- */
-async function pickBestVoiceIdentifier(
-  Speech: typeof ExpoSpeech,
-  language: string,
-): Promise<string | undefined> {
-  if (Platform.OS !== "android") return undefined;
-  if (cachedVoice?.language === language) return cachedVoice.identifier;
-  let identifier: string | undefined;
-  try {
-    const voices: Array<{ identifier?: string; name?: string; language?: string }> =
-      await Speech.getAvailableVoicesAsync();
-    const base = language.split("-")[0]?.toLowerCase() ?? language.toLowerCase();
-    const matching = voices.filter((voice) => voice.language?.toLowerCase().startsWith(base));
-    identifier =
-      matching.find((voice) => /network/i.test(voice.identifier ?? ""))?.identifier ??
-      matching.find((voice) => /network/i.test(voice.name ?? ""))?.identifier;
-  } catch {
-    identifier = undefined;
-  }
-  cachedVoice = { language, identifier };
-  return identifier;
 }
 
 async function loadExpoSpeech(): Promise<typeof ExpoSpeech> {
@@ -323,15 +290,12 @@ async function loadExpoSpeech(): Promise<typeof ExpoSpeech> {
   return Speech as typeof ExpoSpeech;
 }
 
-function speakOneUtterance(
-  Speech: typeof ExpoSpeech,
-  text: string,
-  options: { language?: string; voice?: string } = {},
-): Promise<void> {
+function speakOneUtterance(Speech: typeof ExpoSpeech, text: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    // No language or voice override: the platform default stays on device.
+    // Forcing the UI locale mispronounces replies written in another language,
+    // and Android's "network" voices upload the text.
     Speech.speak(text, {
-      language: options.language,
-      voice: options.voice,
       onDone: () => resolve(),
       // Speech.stop() reports onStopped, not onDone.
       onStopped: () => resolve(),
@@ -537,7 +501,7 @@ async function playWithNativeAudio(bytes: Uint8Array, session?: HostedSession): 
           finish();
           return;
         }
-        if (status.playing && status.duration > 0) {
+        if (status.playing && status.duration > 0 && !session?.isPaused) {
           clearTimeout(timer);
           timer = setTimeout(
             () => finish(new Error(t("Could not play that clip."))),
@@ -546,7 +510,13 @@ async function playWithNativeAudio(bytes: Uint8Array, session?: HostedSession): 
         }
       });
       session?.setPlayer({
-        pause: () => player.pause(),
+        pause: () => {
+          player.pause();
+          // A long pause is not a stalled start. Leaving this timer armed
+          // rejects the clip and drops Resume.
+          clearTimeout(timer);
+          timer = undefined;
+        },
         resume: () => {
           player.play();
           if (!timer) armStartupWatchdog();
