@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ComputerKeyboardCommand, ComputerKeyName } from "../lib/computer-keyboard";
@@ -56,14 +56,12 @@ export function ComputerKeyboardBar({
   function onChangeText(next: string) {
     const edit = normalizeComputerKeyboardEdit(draft, next);
     const latched = control;
-    for (const command of commandsForKeyboardChange(edit.changes, latched)) send(command);
-    if (edit.returns > 0) {
+    const commands = commandsForKeyboardChange(edit.changes, latched);
+    if (commands.some((command) => command.type === "key" && command.name === "Return")) {
       returnAt.current = Date.now();
-      for (let index = 0; index < edit.returns; index += 1) emitReturn(latched);
     }
-    if (latched && (edit.changes.text || edit.changes.backspaces > 0 || edit.returns > 0)) {
-      setControl(false);
-    }
+    for (const command of commands) send(command);
+    if (latched && commands.length > 0) setControl(false);
     setDraft(edit.draft);
     if (next.length < 1) inputRef.current?.focus();
   }
@@ -82,32 +80,19 @@ export function ComputerKeyboardBar({
   }
 
   const keys = keySpecs(t);
-  const keyStyle = {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 40,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    borderWidth: 1,
-    borderColor: tokens.border,
-    borderRadius: 10,
-    backgroundColor: tokens.muted,
-    paddingHorizontal: 2,
-  };
+  const keyChrome = { borderColor: tokens.border, backgroundColor: tokens.muted };
+  const labelColor = { color: tokens.foreground };
 
   return (
     <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        borderTopWidth: 1,
-        borderTopColor: tokens.border,
-        backgroundColor: tokens.background,
-        paddingHorizontal: 8,
-        paddingTop: 8,
-        paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 8),
-      }}
+      style={[
+        styles.bar,
+        {
+          borderTopColor: tokens.border,
+          backgroundColor: tokens.background,
+          paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 8),
+        },
+      ]}
     >
       <TextInput
         ref={inputRef}
@@ -122,7 +107,7 @@ export function ComputerKeyboardBar({
         spellCheck={false}
         keyboardAppearance={appearance}
         accessibilityLabel={t("Computer keyboard")}
-        style={{ position: "absolute", width: 1, height: 1, opacity: 0.02, bottom: 0, left: 0 }}
+        style={styles.input}
       />
       <Pressable
         accessibilityRole="button"
@@ -130,16 +115,10 @@ export function ComputerKeyboardBar({
         accessibilityState={{ selected: open }}
         onPress={() => (open ? inputRef.current?.blur() : inputRef.current?.focus())}
         hitSlop={4}
-        style={{
-          width: 40,
-          minHeight: 40,
-          alignItems: "center",
-          justifyContent: "center",
-          borderWidth: 1,
-          borderColor: open ? tokens.primary : tokens.border,
-          borderRadius: 10,
-          backgroundColor: open ? tokens.primary : tokens.muted,
-        }}
+        style={[
+          styles.toggle,
+          open ? { borderColor: tokens.primary, backgroundColor: tokens.primary } : keyChrome,
+        ]}
       >
         <NativeSymbol
           ios="keyboard"
@@ -155,12 +134,9 @@ export function ComputerKeyboardBar({
           accessibilityLabel={key.accessibilityLabel}
           onPress={() => press(key.name)}
           hitSlop={4}
-          style={keyStyle}
+          style={[styles.key, keyChrome]}
         >
-          <Text
-            numberOfLines={1}
-            style={{ color: tokens.foreground, fontSize: 13, fontWeight: "600" }}
-          >
+          <Text numberOfLines={1} style={[styles.keyLabel, labelColor]}>
             {key.label}
           </Text>
         </Pressable>
@@ -171,19 +147,17 @@ export function ComputerKeyboardBar({
         accessibilityState={{ selected: control }}
         onPress={() => setControl((value) => !value)}
         hitSlop={4}
-        style={{
-          ...keyStyle,
-          borderColor: control ? tokens.primary : tokens.border,
-          backgroundColor: control ? tokens.primary : tokens.muted,
-        }}
+        style={[
+          styles.key,
+          control ? { borderColor: tokens.primary, backgroundColor: tokens.primary } : keyChrome,
+        ]}
       >
         <Text
           numberOfLines={1}
-          style={{
-            color: control ? tokens.primaryForeground : tokens.foreground,
-            fontSize: 13,
-            fontWeight: "600",
-          }}
+          style={[
+            styles.keyLabel,
+            { color: control ? tokens.primaryForeground : tokens.foreground },
+          ]}
         >
           Ctrl
         </Text>
@@ -195,9 +169,9 @@ export function ComputerKeyboardBar({
           accessibilityLabel={key.accessibilityLabel}
           onPress={() => press(key.name)}
           hitSlop={4}
-          style={keyStyle}
+          style={[styles.key, keyChrome]}
         >
-          <Text numberOfLines={1} style={{ color: tokens.foreground, fontSize: 16 }}>
+          <Text numberOfLines={1} style={[styles.arrowLabel, labelColor]}>
             {key.label}
           </Text>
         </Pressable>
@@ -205,3 +179,42 @@ export function ComputerKeyboardBar({
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  bar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderTopWidth: 1,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+  },
+  input: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    opacity: 0.02,
+    bottom: 0,
+    left: 0,
+  },
+  toggle: {
+    width: 40,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+  },
+  key: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 2,
+  },
+  keyLabel: { fontSize: 13, fontWeight: "600" },
+  arrowLabel: { fontSize: 16 },
+});

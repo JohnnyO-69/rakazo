@@ -565,7 +565,9 @@ function ScreenWebView({
   return (
     <WebView
       ref={webViewRef}
-      key={sourceUrl.current}
+      // Reload when control enables the native keyboard. The boot script only
+      // runs on load, and a view-only page never attaches the key bridge.
+      key={`${nativeKeyboard ? "keys" : "view"}:${sourceUrl.current}`}
       source={{ uri: sourceUrl.current }}
       injectedJavaScriptBeforeContentLoaded={
         nativeKeyboard ? NATIVE_COMPUTER_KEYBOARD_BOOT : undefined

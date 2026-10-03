@@ -19,15 +19,56 @@ describe("computer keyboard edits", () => {
       COMPUTER_KEYBOARD_SEED,
       `${COMPUTER_KEYBOARD_SEED}a\n`,
     );
-    expect(edit.changes).toEqual({ backspaces: 0, text: "a" });
-    expect(edit.returns).toBe(1);
+    expect(edit.changes).toEqual({ backspaces: 0, text: "a\n" });
     expect(edit.draft.endsWith("a")).toBe(true);
+    expect(edit.draft.includes("\n")).toBe(false);
+    expect(commandsForKeyboardChange(edit.changes, false)).toEqual([
+      { type: "text", text: "a" },
+      { type: "key", name: "Return" },
+    ]);
     expect(nextComputerKeyboardDraft("")).toBe(COMPUTER_KEYBOARD_SEED);
   });
 
-  it("sends Ctrl as a chord on the next characters", () => {
+  it("keeps a return between the characters on either side", () => {
+    const pasted = normalizeComputerKeyboardEdit(
+      COMPUTER_KEYBOARD_SEED,
+      `${COMPUTER_KEYBOARD_SEED}a\nb`,
+    );
+    expect(pasted.changes).toEqual({ backspaces: 0, text: "a\nb" });
+    expect(pasted.draft.endsWith("ab")).toBe(true);
+    expect(commandsForKeyboardChange(pasted.changes, false)).toEqual([
+      { type: "text", text: "a" },
+      { type: "key", name: "Return" },
+      { type: "text", text: "b" },
+    ]);
+
+    const windows = normalizeComputerKeyboardEdit(
+      COMPUTER_KEYBOARD_SEED,
+      `${COMPUTER_KEYBOARD_SEED}a\r\nb`,
+    );
+    expect(commandsForKeyboardChange(windows.changes, false)).toEqual([
+      { type: "text", text: "a" },
+      { type: "key", name: "Return" },
+      { type: "text", text: "b" },
+    ]);
+  });
+
+  it("sends Ctrl as a chord on only the next key", () => {
     expect(commandsForKeyboardChange({ backspaces: 0, text: "c" }, true)).toEqual([
       { type: "char", text: "c", control: true },
+    ]);
+    expect(commandsForKeyboardChange({ backspaces: 0, text: "cd" }, true)).toEqual([
+      { type: "char", text: "c", control: true },
+      { type: "text", text: "d" },
+    ]);
+    expect(commandsForKeyboardChange({ backspaces: 2, text: "e" }, true)).toEqual([
+      { type: "key", name: "Backspace", control: true },
+      { type: "backspace", count: 1 },
+      { type: "text", text: "e" },
+    ]);
+    expect(commandsForKeyboardChange({ backspaces: 0, text: "\nb" }, true)).toEqual([
+      { type: "key", name: "Return", control: true },
+      { type: "text", text: "b" },
     ]);
     expect(commandsForKeyboardChange({ backspaces: 2, text: "" }, false)).toEqual([
       { type: "backspace", count: 2 },

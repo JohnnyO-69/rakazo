@@ -50,17 +50,17 @@ export function nextComputerKeyboardDraft(next: string): string {
   return next;
 }
 
-/** Strip returns out of a phone text edit so they can be sent as Enter. */
+/**
+ * Keep returns in the inserted delta so they stay between the characters around
+ * them. The stored draft has no returns; the command list turns them into Enter.
+ */
 export function normalizeComputerKeyboardEdit(
   oldValue: string,
   nextValue: string,
-): { changes: { backspaces: number; text: string }; returns: number; draft: string } {
-  const returns = nextValue.match(/\r\n|\n|\r/g)?.length ?? 0;
-  const normalized = nextValue.replace(/\r\n|\r|\n/g, "");
+): { changes: { backspaces: number; text: string }; draft: string } {
   return {
-    changes: computerKeyboardChanges(oldValue, normalized),
-    returns,
-    draft: nextComputerKeyboardDraft(normalized),
+    changes: computerKeyboardChanges(oldValue, nextValue),
+    draft: nextComputerKeyboardDraft(nextValue.replace(/\r\n|\r|\n/g, "")),
   };
 }
 
@@ -69,10 +69,13 @@ export function commandsForKeyboardChange(
   control: boolean,
 ): ComputerKeyboardCommand[] {
   const commands: ComputerKeyboardCommand[] = [];
+  let controlPending = control;
   if (changes.backspaces > 0) {
-    if (control) {
-      for (let index = 0; index < changes.backspaces; index += 1) {
-        commands.push({ type: "key", name: "Backspace", control: true });
+    if (controlPending) {
+      commands.push({ type: "key", name: "Backspace", control: true });
+      controlPending = false;
+      if (changes.backspaces > 1) {
+        commands.push({ type: "backspace", count: changes.backspaces - 1 });
       }
     } else {
       commands.push({ type: "backspace", count: changes.backspaces });
@@ -85,10 +88,24 @@ export function commandsForKeyboardChange(
     commands.push({ type: "text", text: plain });
     plain = "";
   };
-  for (const character of changes.text) {
-    if (control) {
+  const characters = Array.from(changes.text);
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index] ?? "";
+    if (character === "\r" || character === "\n") {
+      if (character === "\r" && characters[index + 1] === "\n") index += 1;
+      flush();
+      commands.push(
+        controlPending
+          ? { type: "key", name: "Return", control: true }
+          : { type: "key", name: "Return" },
+      );
+      controlPending = false;
+      continue;
+    }
+    if (controlPending) {
       flush();
       commands.push({ type: "char", text: character, control: true });
+      controlPending = false;
       continue;
     }
     plain += character;
