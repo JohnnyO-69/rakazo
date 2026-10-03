@@ -56,6 +56,9 @@ export function resumeVoicePlayback(): void {
 }
 
 export function stopVoicePlayback(): void {
+  // Bump even when nothing is audible yet. The next queued message may already
+  // be preparing, with no player for Stop to reach.
+  playbackEpoch += 1;
   speechQueue = [];
   activeControl?.stop();
 }
@@ -73,6 +76,27 @@ export function stopSpeaking(): void {
 export type SpeechQueueItem = SpeechOptions & { text: string };
 
 let speechQueue: SpeechQueueItem[] = [];
+/** Invalidates in-flight speak calls. Stop and a new Play/queue each bump it. */
+let playbackEpoch = 0;
+
+function isCurrentSpeech(epoch: number): boolean {
+  return epoch === playbackEpoch;
+}
+
+function beginSpeech(): number {
+  playbackEpoch += 1;
+  speechQueue = [];
+  // Replacing activeControl leaves the previous player running.
+  activeControl?.stop();
+  return playbackEpoch;
+}
+
+function releasePlayback(epoch: number, stillOwner: boolean, keepForQueue: boolean): void {
+  if (!stillOwner || !isCurrentSpeech(epoch)) return;
+  // The next queued message is about to prepare. Idle here hides the dock for that gap.
+  if (keepForQueue && speechQueue.length > 0) return;
+  setPlayback(IDLE_PLAYBACK, null);
+}
 
 /**
  * Speaks each item in order; stops early if stopVoicePlayback() clears the
@@ -80,20 +104,29 @@ let speechQueue: SpeechQueueItem[] = [];
  * the user when no voice is set up.
  */
 export async function speakQueue(items: SpeechQueueItem[]): Promise<boolean> {
+  const epoch = beginSpeech();
   speechQueue = items;
-  return advanceSpeechQueue();
+  return advanceSpeechQueue(epoch);
 }
 
-async function advanceSpeechQueue(): Promise<boolean> {
+async function advanceSpeechQueue(epoch: number): Promise<boolean> {
+  // A newer Play or Stop owns the outcome. False would look like "no voice".
+  if (!isCurrentSpeech(epoch)) return true;
   const next = speechQueue.shift();
   if (!next) return false;
   const { text, ...opts } = next;
-  const spoken = await speakText(text, opts);
-  if (spoken && speechQueue.length > 0) await advanceSpeechQueue();
+  const spoken = await speakPrepared(text, opts, epoch);
+  if (!isCurrentSpeech(epoch)) return true;
+  if (spoken && speechQueue.length > 0) await advanceSpeechQueue(epoch);
   return spoken;
 }
 
 export async function speakText(text: string, opts: SpeechOptions = {}): Promise<boolean> {
+  return speakPrepared(text, opts, beginSpeech());
+}
+
+async function speakPrepared(text: string, opts: SpeechOptions, epoch: number): Promise<boolean> {
+  if (!isCurrentSpeech(epoch)) return false;
   let useDeviceVoice = false;
   try {
     useDeviceVoice = await loadDeviceVoiceEnabled();
@@ -102,16 +135,29 @@ export async function speakText(text: string, opts: SpeechOptions = {}): Promise
     // through hosted voice after the user opted for on-device only.
     useDeviceVoice = true;
   }
-  if (useDeviceVoice) return speakWithDeviceVoice(text, opts.botId, opts.messageId);
+  if (!isCurrentSpeech(epoch)) return false;
+  if (useDeviceVoice) {
+    const spoken = await speakOnDevice(text, opts.botId, opts.messageId, epoch);
+    if (!isCurrentSpeech(epoch)) return false;
+    if (!spoken && playback.status !== "idle") setPlayback(IDLE_PLAYBACK, null);
+    return spoken;
+  }
   const requestContext = await captureApiRequestContext();
+  if (!isCurrentSpeech(epoch)) return false;
   const prepared = await rpc<{ ready: boolean; utterances: string[] }>(
     "voice/prepare",
     { text, voiceId: opts.voiceId, botId: opts.botId },
     { requestContext },
   );
-  if (!prepared.ready) return false;
+  if (!isCurrentSpeech(epoch)) return false;
+  if (!prepared.ready) {
+    if (playback.status !== "idle") setPlayback(IDLE_PLAYBACK, null);
+    return false;
+  }
 
   const generation = startHostedSpeechSession();
+  activeControl?.stop();
+  if (!isCurrentSpeech(epoch)) return false;
   const session = new HostedSession(generation);
   const control: VoiceControl = {
     pause: () => {
@@ -137,13 +183,17 @@ export async function speakText(text: string, opts: SpeechOptions = {}): Promise
     { status: "playing", botId: opts.botId, messageId: opts.messageId, canPause: true },
     control,
   );
+  let finished = false;
   try {
     for (const utterance of prepared.utterances) {
-      if (session.isStopped) break;
-      await playMpeg(await renderUtterance(utterance, opts, requestContext), session);
+      if (session.isStopped || !isCurrentSpeech(epoch)) break;
+      const audio = await renderUtterance(utterance, opts, requestContext);
+      if (session.isStopped || !isCurrentSpeech(epoch)) break;
+      await playMpeg(audio, session);
     }
+    finished = !session.isStopped && isCurrentSpeech(epoch);
   } finally {
-    if (isCurrentHostedSpeechSession(generation)) setPlayback(IDLE_PLAYBACK, null);
+    releasePlayback(epoch, isCurrentHostedSpeechSession(generation), finished);
   }
   return true;
 }
@@ -163,15 +213,26 @@ export async function speakWithDeviceVoice(
   botId?: string,
   messageId?: string,
 ): Promise<boolean> {
+  return speakOnDevice(text, botId, messageId);
+}
+
+async function speakOnDevice(
+  text: string,
+  botId?: string,
+  messageId?: string,
+  epoch?: number,
+): Promise<boolean> {
   const utterances = toUtterances(text);
   if (utterances.length === 0) return false;
+  const mine = epoch ?? beginSpeech();
+  if (!isCurrentSpeech(mine)) return false;
   // Claim the session before importing so a newer call cannot start during
   // that await and then overlap this call's remaining chunks.
   const session = startDeviceSpeechSession();
   const Speech = await loadExpoSpeech();
-  if (!isCurrentDeviceSpeechSession(session)) return true;
+  if (!isCurrentDeviceSpeechSession(session) || !isCurrentSpeech(mine)) return true;
   await Speech.stop();
-  if (!isCurrentDeviceSpeechSession(session)) return true;
+  if (!isCurrentDeviceSpeechSession(session) || !isCurrentSpeech(mine)) return true;
 
   // Android's TextToSpeech engine has no pause/resume, only stop; iOS's does.
   // Feature-detect rather than trust the platform alone: support has moved
@@ -186,6 +247,7 @@ export async function speakWithDeviceVoice(
     typeof pausable.resume === "function";
   const language = dateLocaleForUi();
   const voice = await pickBestVoiceIdentifier(Speech, language);
+  if (!isCurrentDeviceSpeechSession(session) || !isCurrentSpeech(mine)) return true;
   const control: VoiceControl = {
     pause: () => {
       if (!canPause) return;
@@ -204,14 +266,16 @@ export async function speakWithDeviceVoice(
     },
   };
   setPlayback({ status: "playing", botId, messageId, canPause }, control);
+  let finished = false;
   try {
     for (const utterance of utterances) {
-      if (!isCurrentDeviceSpeechSession(session)) return true;
+      if (!isCurrentDeviceSpeechSession(session) || !isCurrentSpeech(mine)) return true;
       await speakOneUtterance(Speech, utterance, { language, voice });
     }
+    finished = isCurrentDeviceSpeechSession(session) && isCurrentSpeech(mine);
     return true;
   } finally {
-    if (isCurrentDeviceSpeechSession(session)) setPlayback(IDLE_PLAYBACK, null);
+    releasePlayback(mine, isCurrentDeviceSpeechSession(session), finished);
   }
 }
 

@@ -360,6 +360,113 @@ describe("hosted voice playback controls", () => {
 
     expect(notify).not.toHaveBeenCalled();
   });
+
+  it("stops the clip already playing when another speakText starts", async () => {
+    const first = speakText("Read this", { botId: "bot-1", messageId: "msg-1" });
+    await waitFor(() => ControllableAudio.instances.length === 1);
+    const firstAudio = ControllableAudio.instances[0]!;
+    await waitFor(() => firstAudio.paused === false);
+
+    const second = speakText("Other", { botId: "bot-2", messageId: "msg-2" });
+    expect(firstAudio.paused).toBe(true);
+
+    await waitFor(() => ControllableAudio.instances.length === 2);
+    const secondAudio = ControllableAudio.instances[1]!;
+    await waitFor(() => secondAudio.paused === false);
+    expect(getVoicePlaybackState()).toMatchObject({
+      status: "playing",
+      messageId: "msg-2",
+      canPause: true,
+    });
+    expect(ControllableAudio.instances.filter((audio) => !audio.paused)).toEqual([secondAudio]);
+
+    secondAudio.onended?.();
+    await waitFor(() => ControllableAudio.instances.length === 3);
+    const secondTail = ControllableAudio.instances[2]!;
+    await waitFor(() => secondTail.paused === false);
+    expect(firstAudio.paused).toBe(true);
+    secondTail.onended?.();
+
+    await expect(first).resolves.toBe(true);
+    await expect(second).resolves.toBe(true);
+    expect(ControllableAudio.instances).toHaveLength(3);
+    expect(getVoicePlaybackState().status).toBe("idle");
+  });
+
+  it("drops a queue that is already running when a new queue starts", async () => {
+    vi.mocked(rpc).mockImplementation(async (proc, body) => {
+      if (proc === "aiConsent/status") return { version: "2026-09-14", recipients: [] } as never;
+      const text = (body as { text?: string } | undefined)?.text ?? "";
+      return { ready: true, utterances: [text] } as never;
+    });
+    const first = speakQueue([
+      { text: "A1", botId: "bot-1", messageId: "a1" },
+      { text: "A2", botId: "bot-1", messageId: "a2" },
+      { text: "A3", botId: "bot-1", messageId: "a3" },
+    ]);
+    await waitFor(() => ControllableAudio.instances.length === 1);
+    await waitFor(() => ControllableAudio.instances[0]!.paused === false);
+
+    const second = speakQueue([
+      { text: "B1", botId: "bot-1", messageId: "b1" },
+      { text: "B2", botId: "bot-1", messageId: "b2" },
+    ]);
+    expect(ControllableAudio.instances[0]!.paused).toBe(true);
+
+    const played: Array<string | undefined> = [];
+    const seen = new Set<ControllableAudio>([ControllableAudio.instances[0]!]);
+    for (let step = 0; step < 40 && played.length < 2; step++) {
+      await Promise.resolve();
+      for (const audio of ControllableAudio.instances) {
+        if (seen.has(audio) || audio.paused) continue;
+        seen.add(audio);
+        played.push(getVoicePlaybackState().messageId);
+        audio.onended?.();
+      }
+    }
+
+    await expect(first).resolves.toBe(true);
+    await expect(second).resolves.toBe(true);
+    expect(played).toEqual(["b1", "b2"]);
+    expect(ControllableAudio.instances).toHaveLength(3);
+    expect(getVoicePlaybackState().status).toBe("idle");
+  });
+
+  it("does not play the next queued message when Stop lands while it is preparing", async () => {
+    let releasePrepare: (() => void) | undefined;
+    let prepareCalls = 0;
+    vi.mocked(rpc).mockImplementation(async (proc, body) => {
+      if (proc === "aiConsent/status") return { version: "2026-09-14", recipients: [] } as never;
+      prepareCalls += 1;
+      if (prepareCalls === 2) {
+        await new Promise<void>((resolve) => {
+          releasePrepare = resolve;
+        });
+      }
+      const text = (body as { text?: string } | undefined)?.text ?? "";
+      return { ready: true, utterances: [text] } as never;
+    });
+
+    const queued = speakQueue([
+      { text: "First", botId: "bot-1", messageId: "msg-1" },
+      { text: "Second", botId: "bot-1", messageId: "msg-2" },
+    ]);
+    await waitFor(() => ControllableAudio.instances.length === 1);
+    await waitFor(() => ControllableAudio.instances[0]!.paused === false);
+    ControllableAudio.instances[0]!.onended?.();
+    await waitFor(() => prepareCalls === 2);
+    expect(getVoicePlaybackState().status).toBe("playing");
+
+    stopVoicePlayback();
+    expect(getVoicePlaybackState().status).toBe("idle");
+    releasePrepare?.();
+    for (let step = 0; step < 20; step++) await Promise.resolve();
+    if (ControllableAudio.instances.length > 1) ControllableAudio.instances[1]!.onended?.();
+
+    await expect(queued).resolves.toBe(true);
+    expect(ControllableAudio.instances).toHaveLength(1);
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+  });
 });
 
 async function flushDeviceSpeechImport() {
