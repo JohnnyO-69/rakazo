@@ -141,7 +141,7 @@ test("activity filters keep retry when a refresh fails", async ({ page }) => {
   let phase: Phase = "ok";
   let releaseHang: (() => void) | null = null;
   let hang: Promise<void> | null = null;
-  let waiting = 0;
+  let released = false;
   const run = {
     runId: "run-filter",
     botId: "bot-filter",
@@ -157,14 +157,14 @@ test("activity filters keep retry when a refresh fails", async ({ page }) => {
   };
 
   await page.route("**/rpc/runs/list", async (route) => {
-    if (phase === "hang") {
+    if (phase === "hang" && !released) {
       hang ??= new Promise((resolve) => {
         releaseHang = () => {
+          released = true;
           phase = "empty";
           resolve();
         };
       });
-      waiting += 1;
       await hang;
     }
     if (phase === "fail") {
@@ -205,7 +205,7 @@ test("activity filters keep retry when a refresh fails", async ({ page }) => {
   await retry.click();
   await expect(aside.getByText("Loading activity…")).toBeVisible();
   await expect(aside.getByText("No runs match these filters.")).toHaveCount(0);
-  await expect.poll(() => waiting).toBe(2);
+  await expect.poll(() => releaseHang !== null).toBe(true);
   releaseHang?.();
   await expect(aside.getByText("Loading activity…")).toBeHidden({ timeout: 20_000 });
   await expect(retry).toHaveCount(0);
