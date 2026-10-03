@@ -469,7 +469,11 @@ export function ModelSettingsOverlay({
     setPreflightFailure(null);
     setError(null);
     setNotice(null);
-    const stored = await loadStoredModelAuth(selected.provider, () => rpc.models.credentials());
+    const stored = await loadStoredModelAuth(
+      selected.provider,
+      () => rpc.models.credentials(),
+      selected.id,
+    );
     if (!preflightStillCurrent(revision)) return;
     const result = await runModelConnectionPreflight({
       authKind: "oauth",

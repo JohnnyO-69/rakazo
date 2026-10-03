@@ -104,10 +104,10 @@ test("settings preflight distinguishes a stored API key from sign-in", async ({
   await settings.getByRole("button", { name: "Test API key" }).click();
   await held;
   await apiKey.fill("sk-openrouter-edited");
-  await expect(settings.getByText("Connection OK")).toHaveCount(0);
+  await expect(settings.getByText("Models list OK")).toHaveCount(0);
   releaseProbe();
   await expect(settings.getByRole("button", { name: "Test API key" })).toBeEnabled();
-  await expect(settings.getByText("Connection OK")).toHaveCount(0);
+  await expect(settings.getByText("Models list OK")).toHaveCount(0);
   await expect(settings.getByText("was not listed")).toHaveCount(0);
 
   holdProbe = false;
@@ -115,7 +115,7 @@ test("settings preflight distinguishes a stored API key from sign-in", async ({
   const catalogAlert = settings.getByRole("alert");
   await expect(catalogAlert).toHaveCount(1);
   await expect(catalogAlert).toContainText("was not listed");
-  await expect(settings.getByText("Connection OK")).toHaveCount(0);
+  await expect(settings.getByText("Models list OK")).toHaveCount(0);
 
   await page.getByPlaceholder("Search providers").fill("Anthropic");
   await settings.getByRole("button").filter({ hasText: "Anthropic" }).first().click();
