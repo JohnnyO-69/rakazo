@@ -50,17 +50,19 @@ export function nextComputerKeyboardDraft(next: string): string {
   return next;
 }
 
-/**
- * Keep returns in the inserted delta so they stay between the characters around
- * them. The stored draft has no returns; the command list turns them into Enter.
- */
+/** One newline per Return so a later Backspace deletes that break before the text before it. */
+function withReturnBoundaries(value: string): string {
+  return value.replace(/\r\n|\r/g, "\n");
+}
+
 export function normalizeComputerKeyboardEdit(
   oldValue: string,
   nextValue: string,
 ): { changes: { backspaces: number; text: string }; draft: string } {
+  const next = withReturnBoundaries(nextValue);
   return {
-    changes: computerKeyboardChanges(oldValue, nextValue),
-    draft: nextComputerKeyboardDraft(nextValue.replace(/\r\n|\r|\n/g, "")),
+    changes: computerKeyboardChanges(oldValue, next),
+    draft: nextComputerKeyboardDraft(next),
   };
 }
 
@@ -121,4 +123,50 @@ export function computerKeyboardScript(command: ComputerKeyboardCommand): string
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
   return `window.rakazoComputerKeyboard?.run(${json});true;`;
+}
+
+export const COMPUTER_KEYBOARD_READY_MESSAGE = "rakazo-computer-keyboard-ready";
+
+const COMPUTER_KEYBOARD_READY_POLLS = 300;
+
+export function computerKeyboardReadyProbe(session: string): string {
+  const message = JSON.stringify(`${COMPUTER_KEYBOARD_READY_MESSAGE}:${session}`)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  return `(function(){var left=${COMPUTER_KEYBOARD_READY_POLLS};function tick(){var bridge=window.rakazoComputerKeyboard;if(bridge&&typeof bridge.run==="function"&&window.ReactNativeWebView){window.ReactNativeWebView.postMessage(${message});return;}left-=1;if(left>0)setTimeout(tick,100);}tick();})();true;`;
+}
+
+export function isComputerKeyboardReadyMessage(data: string, session: string): boolean {
+  return data === `${COMPUTER_KEYBOARD_READY_MESSAGE}:${session}`;
+}
+
+/** Hold commands until the screen page has installed the keyboard bridge, then flush in order. */
+export function createComputerKeyboardBridge(): {
+  push(command: ComputerKeyboardCommand): ComputerKeyboardCommand[];
+  ready(): ComputerKeyboardCommand[];
+  reset(): void;
+} {
+  let accepting = false;
+  const pending: ComputerKeyboardCommand[] = [];
+  return {
+    push(command) {
+      if (!accepting) {
+        pending.push(command);
+        return [];
+      }
+      return [command];
+    },
+    ready() {
+      if (accepting) return [];
+      accepting = true;
+      const flushed = pending.slice();
+      pending.length = 0;
+      return flushed;
+    },
+    reset() {
+      accepting = false;
+      pending.length = 0;
+    },
+  };
 }

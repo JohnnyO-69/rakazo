@@ -6,6 +6,7 @@ import type { ComputerKeyboardCommand, ComputerKeyName } from "../lib/computer-k
 import {
   COMPUTER_KEYBOARD_SEED,
   commandsForKeyboardChange,
+  nextComputerKeyboardDraft,
   normalizeComputerKeyboardEdit,
 } from "../lib/computer-keyboard";
 import { useI18n } from "../lib/i18n";
@@ -72,6 +73,7 @@ export function ComputerKeyboardBar({
     returnAt.current = now;
     emitReturn(control);
     if (control) setControl(false);
+    setDraft((current) => nextComputerKeyboardDraft(`${current}\n`));
   }
 
   function press(name: ComputerKeyName) {
@@ -102,6 +104,7 @@ export function ComputerKeyboardBar({
         onBlur={() => setOpen(false)}
         onSubmitEditing={onSubmitEditing}
         blurOnSubmit={false}
+        multiline
         autoCapitalize="none"
         autoCorrect={false}
         spellCheck={false}

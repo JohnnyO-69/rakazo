@@ -28,7 +28,14 @@ import {
   retainScreenSource,
   SCREEN_URL_OPEN_ATTEMPTS,
 } from "../lib/computer";
-import { computerKeyboardScript, NATIVE_COMPUTER_KEYBOARD_BOOT } from "../lib/computer-keyboard";
+import type { ComputerKeyboardCommand } from "../lib/computer-keyboard";
+import {
+  computerKeyboardReadyProbe,
+  computerKeyboardScript,
+  createComputerKeyboardBridge,
+  isComputerKeyboardReadyMessage,
+  NATIVE_COMPUTER_KEYBOARD_BOOT,
+} from "../lib/computer-keyboard";
 import { createComputerRefresh } from "../lib/computer-refresh";
 import { useI18n } from "../lib/i18n";
 import { useMobileTokens } from "../lib/native";
@@ -51,11 +58,32 @@ export default function Computer() {
   const [computerOpen, setComputerOpen] = useState(false);
   const autoBooted = useRef<string | null>(null);
   const screenWebViewRef = useRef<WebView>(null);
+  const keyboardGate = useRef({
+    key: "",
+    session: 0,
+    bridge: createComputerKeyboardBridge(),
+  });
 
   const embeddedScreenUrl = embeddableScreenUrl(screenUrl, currentApiBase());
   useEffect(() => setScreenError(null), [embeddedScreenUrl]);
 
   const hasControl = computer?.controlHolder === "user" && computer.controlBotId === botId;
+  const keyboardSurfaceKey = `${computerOpen}:${hasControl}:${embeddedScreenUrl ?? ""}`;
+  if (keyboardGate.current.key !== keyboardSurfaceKey) {
+    keyboardGate.current = {
+      key: keyboardSurfaceKey,
+      session: keyboardGate.current.session + 1,
+      bridge: createComputerKeyboardBridge(),
+    };
+  }
+  const keyboardSession = String(keyboardGate.current.session);
+
+  function injectKeyboardCommands(commands: ComputerKeyboardCommand[]) {
+    const webView = screenWebViewRef.current;
+    if (!webView) return;
+    for (const command of commands) webView.injectJavaScript(computerKeyboardScript(command));
+  }
+
   const label = computerLabel(computer?.mode, name);
 
   useLayoutEffect(() => {
@@ -469,7 +497,13 @@ export default function Computer() {
                     url={embeddedScreenUrl}
                     interactive={hasControl}
                     nativeKeyboard={hasControl}
+                    keyboardSession={keyboardSession}
                     webViewRef={screenWebViewRef}
+                    onKeyboardMessage={(data) => {
+                      const gate = keyboardGate.current;
+                      if (!isComputerKeyboardReadyMessage(data, String(gate.session))) return;
+                      injectKeyboardCommands(gate.bridge.ready());
+                    }}
                     onError={() => {
                       refreshController.invalidateScreen();
                       setScreenError(
@@ -490,7 +524,7 @@ export default function Computer() {
               {hasControl ? (
                 <ComputerKeyboardBar
                   onCommand={(command) => {
-                    screenWebViewRef.current?.injectJavaScript(computerKeyboardScript(command));
+                    injectKeyboardCommands(keyboardGate.current.bridge.push(command));
                   }}
                 />
               ) : null}
@@ -550,13 +584,17 @@ function ScreenWebView({
   url,
   interactive,
   nativeKeyboard = false,
+  keyboardSession,
   webViewRef,
+  onKeyboardMessage,
   onError,
 }: {
   url: string;
   interactive: boolean;
   nativeKeyboard?: boolean;
+  keyboardSession?: string;
   webViewRef?: RefObject<WebView | null>;
+  onKeyboardMessage?: (data: string) => void;
   onError: () => void;
 }) {
   const tokens = useMobileTokens();
@@ -571,6 +609,16 @@ function ScreenWebView({
       source={{ uri: sourceUrl.current }}
       injectedJavaScriptBeforeContentLoaded={
         nativeKeyboard ? NATIVE_COMPUTER_KEYBOARD_BOOT : undefined
+      }
+      injectedJavaScript={
+        nativeKeyboard && keyboardSession ? computerKeyboardReadyProbe(keyboardSession) : undefined
+      }
+      onMessage={
+        nativeKeyboard
+          ? (event) => {
+              onKeyboardMessage?.(event.nativeEvent.data);
+            }
+          : undefined
       }
       style={{ flex: 1, backgroundColor: tokens.background }}
       pointerEvents={interactive ? "auto" : "none"}
