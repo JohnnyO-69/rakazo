@@ -366,6 +366,18 @@ describe("hosted voice playback controls", () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
+  it("clears the dock when voice prepare rejects", async () => {
+    vi.mocked(rpc).mockImplementation(async (proc) => {
+      if (proc === "aiConsent/status") return { version: "2026-09-14", recipients: [] } as never;
+      throw new Error("prepare failed");
+    });
+
+    await expect(speakText("Read this", { botId: "bot-1", messageId: "msg-1" })).rejects.toThrow(
+      "prepare failed",
+    );
+    expect(getVoicePlaybackState()).toEqual({ status: "idle", canPause: false });
+  });
+
   it("stops a queue immediately and never starts the remaining messages", async () => {
     const queued = speakQueue([
       { text: "First", botId: "bot-1", messageId: "msg-1" },

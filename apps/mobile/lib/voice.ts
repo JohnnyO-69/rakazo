@@ -139,76 +139,84 @@ async function speakPrepared(text: string, opts: SpeechOptions, epoch: number): 
     { status: "playing", botId: opts.botId, messageId: opts.messageId, canPause: false },
     prepareControl,
   );
-  let useDeviceVoice = false;
   try {
-    useDeviceVoice = await loadDeviceVoiceEnabled();
-  } catch {
-    // A read failure must not be treated as "off": that would send reply text
-    // through hosted voice after the user opted for on-device only.
-    useDeviceVoice = true;
-  }
-  if (!isCurrentSpeech(epoch)) return false;
-  if (useDeviceVoice) {
-    const spoken = await speakOnDevice(text, opts.botId, opts.messageId, epoch);
-    if (!isCurrentSpeech(epoch)) return false;
-    if (!spoken && playback.status !== "idle") setPlayback(IDLE_PLAYBACK, null);
-    return spoken;
-  }
-  const requestContext = await captureApiRequestContext();
-  if (!isCurrentSpeech(epoch)) return false;
-  const prepared = await rpc<{ ready: boolean; utterances: string[] }>(
-    "voice/prepare",
-    { text, voiceId: opts.voiceId, botId: opts.botId },
-    { requestContext },
-  );
-  if (!isCurrentSpeech(epoch)) return false;
-  if (!prepared.ready) {
-    if (playback.status !== "idle") setPlayback(IDLE_PLAYBACK, null);
-    return false;
-  }
-
-  const generation = startHostedSpeechSession();
-  // The prepare control only owns the dock; stopping it would hide Stop.
-  if (activeControl !== prepareControl) activeControl?.stop();
-  if (!isCurrentSpeech(epoch)) return false;
-  const session = new HostedSession(generation);
-  const control: VoiceControl = {
-    pause: () => {
-      session.pause();
-      setPlayback(
-        { status: "paused", botId: opts.botId, messageId: opts.messageId, canPause: true },
-        control,
-      );
-    },
-    resume: () => {
-      session.resume();
-      setPlayback(
-        { status: "playing", botId: opts.botId, messageId: opts.messageId, canPause: true },
-        control,
-      );
-    },
-    stop: () => {
-      session.stop();
-      setPlayback(IDLE_PLAYBACK, null);
-    },
-  };
-  setPlayback(
-    { status: "playing", botId: opts.botId, messageId: opts.messageId, canPause: true },
-    control,
-  );
-  let finished = false;
-  try {
-    for (const utterance of prepared.utterances) {
-      if (session.isStopped || !isCurrentSpeech(epoch)) break;
-      const audio = await renderUtterance(utterance, opts, requestContext);
-      if (session.isStopped || !isCurrentSpeech(epoch)) break;
-      await playMpeg(audio, session);
+    let useDeviceVoice = false;
+    try {
+      useDeviceVoice = await loadDeviceVoiceEnabled();
+    } catch {
+      // A read failure must not be treated as "off": that would send reply text
+      // through hosted voice after the user opted for on-device only.
+      useDeviceVoice = true;
     }
-    finished = !session.isStopped && isCurrentSpeech(epoch);
+    if (!isCurrentSpeech(epoch)) return false;
+    if (useDeviceVoice) {
+      const spoken = await speakOnDevice(text, opts.botId, opts.messageId, epoch);
+      if (!isCurrentSpeech(epoch)) return false;
+      if (!spoken && playback.status !== "idle") setPlayback(IDLE_PLAYBACK, null);
+      return spoken;
+    }
+    const requestContext = await captureApiRequestContext();
+    if (!isCurrentSpeech(epoch)) return false;
+    const prepared = await rpc<{ ready: boolean; utterances: string[] }>(
+      "voice/prepare",
+      { text, voiceId: opts.voiceId, botId: opts.botId },
+      { requestContext },
+    );
+    if (!isCurrentSpeech(epoch)) return false;
+    if (!prepared.ready) {
+      if (playback.status !== "idle") setPlayback(IDLE_PLAYBACK, null);
+      return false;
+    }
+
+    const generation = startHostedSpeechSession();
+    // The prepare control only owns the dock; stopping it would hide Stop.
+    if (activeControl !== prepareControl) activeControl?.stop();
+    if (!isCurrentSpeech(epoch)) return false;
+    const session = new HostedSession(generation);
+    const control: VoiceControl = {
+      pause: () => {
+        session.pause();
+        setPlayback(
+          { status: "paused", botId: opts.botId, messageId: opts.messageId, canPause: true },
+          control,
+        );
+      },
+      resume: () => {
+        session.resume();
+        setPlayback(
+          { status: "playing", botId: opts.botId, messageId: opts.messageId, canPause: true },
+          control,
+        );
+      },
+      stop: () => {
+        session.stop();
+        setPlayback(IDLE_PLAYBACK, null);
+      },
+    };
+    setPlayback(
+      { status: "playing", botId: opts.botId, messageId: opts.messageId, canPause: true },
+      control,
+    );
+    let finished = false;
+    try {
+      for (const utterance of prepared.utterances) {
+        if (session.isStopped || !isCurrentSpeech(epoch)) break;
+        const audio = await renderUtterance(utterance, opts, requestContext);
+        if (session.isStopped || !isCurrentSpeech(epoch)) break;
+        await playMpeg(audio, session);
+      }
+      finished = !session.isStopped && isCurrentSpeech(epoch);
+    } finally {
+      releasePlayback(epoch, isCurrentHostedSpeechSession(generation), finished);
+    }
+    return true;
   } finally {
-    releasePlayback(epoch, isCurrentHostedSpeechSession(generation), finished);
+    // A thrown or abandoned prepare must not leave the dock up. A newer Play
+    // has already replaced this control.
+    if (isCurrentSpeech(epoch) && activeControl === prepareControl) {
+      setPlayback(IDLE_PLAYBACK, null);
+    }
   }
-  return true;
 }
 
 let deviceSpeechSession = 0;
