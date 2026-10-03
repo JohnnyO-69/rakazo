@@ -128,6 +128,14 @@ function setField(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+async function submitToolName(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    setField(input, value);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await flush();
+}
+
 async function renderSettings(onSave: (patch: SavePatch) => Promise<void>) {
   await act(async () => {
     root.render(
@@ -174,6 +182,118 @@ describe("BotSettings disabled tools", () => {
     await flush();
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ disabledBuiltinTools: [] }));
+  });
+
+  it("drops a failed disable so the same name can be saved again", async () => {
+    let fail = true;
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async () => {
+      if (fail) throw new Error("Network failed");
+    });
+    await renderSettings(onSave);
+
+    const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]');
+    if (!input) throw new Error("Missing tool field");
+    await submitToolName(input, "web_search");
+
+    expect(container.textContent).toContain("Network failed");
+    expect(container.textContent).toContain("remember");
+    expect(container.querySelector('[id$="-disabled-web_search"]')).toBeNull();
+
+    fail = false;
+    await submitToolName(input, "web_search");
+
+    expect(onSave).toHaveBeenCalledTimes(2);
+    expect(onSave.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({ disabledBuiltinTools: ["remember", "web_search"] }),
+    );
+    expect(container.querySelector('[id$="-disabled-web_search"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Network failed");
+  });
+
+  it("restores a tool when turning it back on fails", async () => {
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async () => {
+      throw new Error("Network failed");
+    });
+    await renderSettings(onSave);
+
+    const toggle = container.querySelector<HTMLButtonElement>('[id$="-disabled-remember"]');
+    if (!toggle) throw new Error("Missing tool toggle");
+    await act(async () => {
+      toggle.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain("Network failed");
+    expect(container.querySelector('[id$="-disabled-remember"]')).not.toBeNull();
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ disabledBuiltinTools: [] }));
+  });
+
+  it("keeps a newer disable when an earlier save fails", async () => {
+    let releaseFirst: (() => void) | undefined;
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async (patch) => {
+      const tools = patch.disabledBuiltinTools ?? [];
+      if (tools.includes("web_search") && !tools.includes("web_fetch")) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        throw new Error("Network failed");
+      }
+    });
+    await renderSettings(onSave);
+
+    const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]');
+    if (!input) throw new Error("Missing tool field");
+    await submitToolName(input, "web_search");
+    expect(releaseFirst).toBeTypeOf("function");
+    await submitToolName(input, "web_fetch");
+
+    expect(container.querySelector('[id$="-disabled-web_search"]')).not.toBeNull();
+    expect(container.querySelector('[id$="-disabled-web_fetch"]')).not.toBeNull();
+
+    await act(async () => {
+      releaseFirst?.();
+    });
+    await flush();
+    await flush();
+
+    expect(onSave).toHaveBeenCalledTimes(2);
+    expect(onSave.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        disabledBuiltinTools: ["remember", "web_search", "web_fetch"],
+      }),
+    );
+    expect(container.querySelector('[id$="-disabled-web_search"]')).not.toBeNull();
+    expect(container.querySelector('[id$="-disabled-web_fetch"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Network failed");
+  });
+
+  it("returns to the last saved list when a later disable also fails", async () => {
+    let releaseFirst: (() => void) | undefined;
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async (patch) => {
+      const tools = patch.disabledBuiltinTools ?? [];
+      if (tools.includes("web_search") && !tools.includes("web_fetch")) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      throw new Error("Network failed");
+    });
+    await renderSettings(onSave);
+
+    const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]');
+    if (!input) throw new Error("Missing tool field");
+    await submitToolName(input, "web_search");
+    await submitToolName(input, "web_fetch");
+    await act(async () => {
+      releaseFirst?.();
+    });
+    await flush();
+    await flush();
+
+    expect(container.textContent).toContain("Network failed");
+    expect(container.querySelector('[id$="-disabled-remember"]')).not.toBeNull();
+    expect(container.querySelector('[id$="-disabled-web_search"]')).toBeNull();
+    expect(container.querySelector('[id$="-disabled-web_fetch"]')).toBeNull();
   });
 
   it("clears an unknown-tool error while the name is edited and keeps other errors", async () => {

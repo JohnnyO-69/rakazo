@@ -244,6 +244,9 @@ export function BotSettings({
   const [disabledBuiltinTools, setDisabledBuiltinTools] = useState<string[]>(
     bot.disabledBuiltinTools ?? [],
   );
+  // The list on screen is updated before the save returns. This stays on the
+  // last list the server accepted so a rejection can undo that preview.
+  const persistedDisabledToolsRef = useRef(disabledBuiltinTools);
   const [toolNameDraft, setToolNameDraft] = useState("");
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
@@ -395,8 +398,20 @@ export function BotSettings({
           : {}),
       });
       savedDescriptionRef.current = nextDescription;
+      if (patchOverrides?.disabledBuiltinTools !== undefined) {
+        persistedDisabledToolsRef.current = [...patchOverrides.disabledBuiltinTools];
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t`Could not save`);
+      // Leaving the rejected name in the list makes the next attempt a no-op,
+      // so the tool stays enabled on the server and looks disabled here.
+      // A newer edit is left alone; its own save still has the latest list.
+      const rejectedTools = patchOverrides?.disabledBuiltinTools;
+      if (rejectedTools !== undefined) {
+        setDisabledBuiltinTools((current) =>
+          sameStringList(current, rejectedTools) ? [...persistedDisabledToolsRef.current] : current,
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -710,6 +725,10 @@ export function BotSettings({
       </div>
     </div>
   );
+}
+
+function sameStringList(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
 }
 
 function modelOptionKey(provider: string, modelId: string) {
