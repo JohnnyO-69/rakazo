@@ -508,6 +508,38 @@ describe("computer lifecycle command guard", () => {
     ).toBe("heredoc");
   });
 
+  it("refuses an absolute run of a relative heredoc write after cd", () => {
+    expect(
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/work/x.sh"),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/work/sub/x.sh",
+      ),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd -\n/work/x.sh"),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd -\n/work/sub/x.sh"),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\nchmod +x /work/x.sh",
+      ),
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd -\n/opt/tools/x.sh",
+      ),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/opt/tools/other.sh",
+      ),
+    ).toBeUndefined();
+  });
+
   it("refuses running a path a quoted heredoc just wrote", () => {
     for (const command of [
       "cat > /tmp/x.sh <<'EOF'\nhello\nEOF\nchmod +x /tmp/x.sh\n/tmp/x.sh",
