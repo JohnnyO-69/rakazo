@@ -111,10 +111,14 @@ describe("storing a command variable", () => {
     await expect(save(db, "odd", "line one\nline two with 'quotes' $HOME ;")).resolves.toBe(
       undefined,
     );
+    await expect(save(db, "pair", "ok\uD800\uDC00")).resolves.toBeUndefined();
   });
 
   it("refuses a value an environment variable cannot carry", async () => {
     await expect(save(fakeDatabase(), "nul", "a\0b")).rejects.toThrow(
+      "Credential cannot be used with this authentication method",
+    );
+    await expect(save(fakeDatabase(), "surrogate", "a\uD800b")).rejects.toThrow(
       "Credential cannot be used with this authentication method",
     );
   });
@@ -256,6 +260,48 @@ describe("shell command environment", () => {
     expect(output.stdout).toContain("NETBIRD_SETUP_KEY=");
     expect(`${output.stdout}${output.stderr}`).not.toContain("fake-bot-setup-key");
     expect(`${output.stdout}${output.stderr}`).not.toContain("fake-space-only");
+  });
+
+  it("does not let one unencodable stored value abort the shell environment", async () => {
+    const db = fakeDatabase();
+    await save(db, "good-token", "fake-good-token");
+    const bad = "pre\uD800post";
+    await db.prisma.botSecret.create({
+      data: {
+        id: "stored-bad",
+        userId: scope.userId,
+        spaceId: scope.spaceId,
+        botId: scope.botId,
+        name: "bad-token",
+        origin: "",
+        auth: command,
+        ciphertext: "stored-bad-ciphertext",
+      },
+    });
+    // The cipher's UTF-8 round trip replaces an unpaired surrogate, so this loader
+    // stands in for a row whose plaintext still contains one.
+    const store = {
+      load(ciphertext: string, recordId: string) {
+        return recordId === "stored-bad" ? bad : secretStore.load(ciphertext, recordId);
+      },
+    };
+    const redactions: string[] = [];
+    const env = await shellCommandEnvironment({
+      prisma: db.prisma,
+      secretStore: store,
+      scope,
+      spaceEnvironment: {},
+      registerRedactions: (values) => redactions.push(...values),
+    });
+    expect(env).toEqual({ BAD_TOKEN: bad, GOOD_TOKEN: "fake-good-token" });
+    expect(new Set(redactions)).toEqual(
+      new Set([
+        bad,
+        Buffer.from(bad).toString("base64"),
+        "fake-good-token",
+        Buffer.from("fake-good-token").toString("base64"),
+      ]),
+    );
   });
 
   it("redacts base64 and URL-encoded forms of a bot variable from command output", async () => {

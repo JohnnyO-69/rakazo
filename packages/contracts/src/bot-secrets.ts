@@ -90,6 +90,10 @@ const RESERVED_COMMAND_VARIABLE_NAMES = new Set([
   "NODE_TLS_REJECT_UNAUTHORIZED",
   "GIT_SSL_CAINFO",
   "GIT_SSL_NO_VERIFY",
+  // OpenSSL config, engine, and module paths can load attacker-controlled code.
+  "OPENSSL_CONF",
+  "OPENSSL_ENGINES",
+  "OPENSSL_MODULES",
   // Commands and programs git and ssh run on their own behalf.
   "GIT_SSH",
   "GIT_SSH_COMMAND",

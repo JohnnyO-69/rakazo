@@ -100,6 +100,38 @@ describe("observeShellCommand", () => {
     await observed.completion;
   });
 
+  it("withholds a stdout secret prefix when stderr has unrelated text", async () => {
+    let releaseExit: () => void = () => undefined;
+    const exitGate = new Promise<void>((resolve) => {
+      releaseExit = resolve;
+    });
+    const seen: Array<{ stdout: string; stderr: string }> = [];
+    const observed = await observeShellCommand(
+      (async function* () {
+        yield { type: "stdout" as const, data: "prefix super-" };
+        yield { type: "stderr" as const, data: "unrelated noise" };
+        await exitGate;
+        yield { type: "exit" as const, code: 0 };
+      })(),
+      {
+        secrets: ["super-secret-token"],
+        idleMs: 20,
+        onOutput: (snapshot) => {
+          seen.push({ stdout: snapshot.stdout, stderr: snapshot.stderr });
+        },
+      },
+    );
+
+    expect(isRunningShellCommand(observed.result)).toBe(true);
+    expect(observed.result.stdout).toBe("prefix ");
+    expect(observed.result.stderr).toBe("unrelated noise");
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((snapshot) => !snapshot.stdout.includes("super-"))).toBe(true);
+    expect(seen.some((snapshot) => snapshot.stderr === "unrelated noise")).toBe(true);
+    releaseExit();
+    await observed.completion;
+  });
+
   it("withholds a secret prefix from the still-running result", async () => {
     let releaseExit: () => void = () => undefined;
     const exitGate = new Promise<void>((resolve) => {

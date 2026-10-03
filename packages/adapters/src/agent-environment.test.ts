@@ -70,4 +70,18 @@ describe("agent-environment", () => {
       stderr: "",
     });
   });
+
+  it("withholds a stdout secret prefix when stderr has unrelated text", () => {
+    const secret = "super-secret-token";
+    expect(
+      redactShellStreams({ stdout: "prefix super-", stderr: "unrelated noise" }, [secret], {
+        withholdPartial: true,
+      }),
+    ).toEqual({ stdout: "prefix ", stderr: "unrelated noise" });
+    expect(
+      redactShellStreams({ stdout: "unrelated", stderr: "tail super-" }, [secret], {
+        withholdPartial: true,
+      }),
+    ).toEqual({ stdout: "unrelated", stderr: "tail " });
+  });
 });

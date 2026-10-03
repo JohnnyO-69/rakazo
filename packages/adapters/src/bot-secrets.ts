@@ -25,6 +25,27 @@ const metadata = { name: true, origin: true, auth: true } as const;
 
 const UNUSABLE_CREDENTIAL = "Credential cannot be used with this authentication method";
 
+/** `encodeURIComponent` throws on an unpaired surrogate. */
+function percentEncoded(value: string): string | undefined {
+  try {
+    return encodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function commandRedactionForms(value: string): string[] {
+  const forms = [value];
+  try {
+    forms.push(Buffer.from(value).toString("base64"));
+  } catch {
+    // The plaintext form is still registered when the bytes cannot be encoded.
+  }
+  const encoded = percentEncoded(value);
+  if (encoded !== undefined) forms.push(encoded);
+  return forms;
+}
+
 function credentialHeader(destination: BotSecretDestination, plaintext: string) {
   // A login is only typed into its site, and a command variable only reaches shell commands.
   if (destination.auth.type === "login" || destination.auth.type === "command") {
@@ -142,13 +163,7 @@ export async function shellCommandEnvironment(input: {
   // Encoded forms too, as secret_request does, so an accidental `base64` or URL-encoding of a
   // value is still redacted from command output.
   input.registerRedactions([
-    ...new Set(
-      Object.values(botEnvironment).flatMap((value) => [
-        value,
-        Buffer.from(value).toString("base64"),
-        encodeURIComponent(value),
-      ]),
-    ),
+    ...new Set(Object.values(botEnvironment).flatMap(commandRedactionForms)),
   ]);
   return { ...input.spaceEnvironment, ...botEnvironment };
 }
@@ -204,8 +219,11 @@ export async function storeBotSecret(input: {
   const destination = normalizeSecretDestination(input.destination);
   if (destination.auth.type === "login") decodeLoginSecret(plaintext);
   else if (destination.auth.type === "command") {
-    // An environment variable value cannot carry a NUL byte; the command would never start.
-    if (plaintext.includes("\0")) throw new Error(UNUSABLE_CREDENTIAL);
+    // NUL cannot be an environment value. An unpaired surrogate cannot be percent-encoded
+    // later, and that throw would abort every subsequent shell command for this bot.
+    if (plaintext.includes("\0") || percentEncoded(plaintext) === undefined) {
+      throw new Error(UNUSABLE_CREDENTIAL);
+    }
   } else credentialHeader(destination, plaintext);
   // Serialize credential updates and deletions for a bot, including concurrent first saves.
   await tx.$queryRaw`SELECT id FROM bots WHERE id = ${scope.botId} FOR UPDATE`;
