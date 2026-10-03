@@ -52,6 +52,7 @@ export async function probeCatalogProviderModels(
   if (!baseUrl) throw new Error("This provider cannot be tested without saving.");
   return probeOpenAiCompatibleModels({ baseUrl, apiKey: input.apiKey }, fetchImpl, signal, {
     allowPublic: true,
+    catalogProbe: true,
   });
 }
 

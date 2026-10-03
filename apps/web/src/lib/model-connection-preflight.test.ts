@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   classifyModelConnectionFailure,
   loadStoredModelAuth,
+  modelPreflightSuccessMessage,
   runModelConnectionPreflight,
   sanitizeModelConnectionError,
   unavailableSelectedModel,
@@ -178,5 +179,15 @@ describe("runModelConnectionPreflight", () => {
       expect(result.failure.outcome).toBe("unknown");
       expect(result.failure.message).toMatch(/Could not check stored credentials/);
     }
+  });
+});
+
+describe("modelPreflightSuccessMessage", () => {
+  it("reports how many models the list returned", () => {
+    expect(modelPreflightSuccessMessage(1)).toBe("Connection OK. 1 model available.");
+    expect(modelPreflightSuccessMessage(466)).toBe("Connection OK. 466 models available.");
+    expect(modelPreflightSuccessMessage(0)).toBe(
+      "Server reachable. No models listed — enter a model id manually.",
+    );
   });
 });

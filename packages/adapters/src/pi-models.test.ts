@@ -112,6 +112,32 @@ describe("Pi model catalog", () => {
     }
   });
 
+  it("accepts catalog model lists larger than the custom-server probe cap", async () => {
+    const ids = Array.from({ length: 600 }, (_, index) => {
+      const suffix = String(index).padStart(4, "0");
+      return `vendor/catalog-model-${suffix}-${"x".repeat(120)}`;
+    });
+    const payload = JSON.stringify({ object: "list", data: ids.map((id) => ({ id })) });
+    expect(Buffer.byteLength(payload)).toBeGreaterThan(64 * 1024);
+    expect(ids).toHaveLength(600);
+
+    const fetchImpl = async () =>
+      new Response(payload, {
+        status: 200,
+        headers: { "content-length": String(Buffer.byteLength(payload)) },
+      });
+
+    await expect(
+      probeCatalogProviderModels(
+        { provider: "openrouter", apiKey: "sk-test-key-12345678" },
+        fetchImpl,
+      ),
+    ).resolves.toEqual(ids);
+    await expect(
+      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+    ).rejects.toThrow(/too large/i);
+  });
+
   it("adds a configured OpenRouter model that is newer than the static catalog", async () => {
     vi.stubEnv("PI_DEFAULT_PROVIDER", " openrouter ");
     vi.stubEnv("PI_DEFAULT_MODEL", " rakazo-test/unknown-future-model ");

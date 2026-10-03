@@ -276,5 +276,5 @@ export function modelPreflightSuccessMessage(modelCount: number): string {
   if (modelCount === 0) {
     return "Server reachable. No models listed — enter a model id manually.";
   }
-  return `Connection OK. ${modelCount} model${modelCount === 1 ? "" : "s"} available (models list only, no chat request).`;
+  return `Connection OK. ${modelCount} model${modelCount === 1 ? "" : "s"} available.`;
 }
