@@ -220,6 +220,8 @@ describe("mobile computer screen", () => {
     expect(src).toContain("Take control");
     expect(src).toContain("Release");
     expect(src).toContain("Close computer");
+    expect(src).toContain("ComputerKeyboardBar");
+    expect(src).toContain("NATIVE_COMPUTER_KEYBOARD_BOOT");
     expect(src).toContain("currentApiBase()");
     expect(src).toContain("SafeAreaProvider");
     expect(src).toContain("readScreenUrl");

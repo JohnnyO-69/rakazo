@@ -1,14 +1,17 @@
 import type { ComputerMode, ComputerReleaseReason } from "@rakazo/contracts";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
+import type { RefObject } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import {
   initialWindowMetrics,
   SafeAreaProvider,
   SafeAreaView,
 } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
+import { ComputerKeyboardBar } from "../components/computer-keyboard-bar";
 import { ComputerMaintenanceActions } from "../components/computer-maintenance-actions";
 import { ComputerModePicker } from "../components/computer-mode-picker";
 import { NativeSymbol } from "../components/native-symbol";
@@ -25,6 +28,7 @@ import {
   retainScreenSource,
   SCREEN_URL_OPEN_ATTEMPTS,
 } from "../lib/computer";
+import { computerKeyboardScript, NATIVE_COMPUTER_KEYBOARD_BOOT } from "../lib/computer-keyboard";
 import { createComputerRefresh } from "../lib/computer-refresh";
 import { useI18n } from "../lib/i18n";
 import { useMobileTokens } from "../lib/native";
@@ -46,6 +50,7 @@ export default function Computer() {
   const switching = switchingCount > 0;
   const [computerOpen, setComputerOpen] = useState(false);
   const autoBooted = useRef<string | null>(null);
+  const screenWebViewRef = useRef<WebView>(null);
 
   const embeddedScreenUrl = embeddableScreenUrl(screenUrl, currentApiBase());
   useEffect(() => setScreenError(null), [embeddedScreenUrl]);
@@ -359,7 +364,10 @@ export default function Computer() {
               </View>
             </SafeAreaView>
           ) : (
-            <View style={{ flex: 1, backgroundColor: tokens.background }}>
+            <KeyboardAvoidingView
+              behavior="height"
+              style={{ flex: 1, backgroundColor: tokens.background }}
+            >
               <SafeAreaView
                 edges={["top", "left", "right"]}
                 style={{
@@ -460,6 +468,8 @@ export default function Computer() {
                   <ScreenWebView
                     url={embeddedScreenUrl}
                     interactive={hasControl}
+                    nativeKeyboard={hasControl}
+                    webViewRef={screenWebViewRef}
                     onError={() => {
                       refreshController.invalidateScreen();
                       setScreenError(
@@ -477,7 +487,14 @@ export default function Computer() {
                   </View>
                 )}
               </View>
-            </View>
+              {hasControl ? (
+                <ComputerKeyboardBar
+                  onCommand={(command) => {
+                    screenWebViewRef.current?.injectJavaScript(computerKeyboardScript(command));
+                  }}
+                />
+              ) : null}
+            </KeyboardAvoidingView>
           )}
         </SafeAreaProvider>
       </Modal>
@@ -532,10 +549,14 @@ function ComputerReleaseActions({
 function ScreenWebView({
   url,
   interactive,
+  nativeKeyboard = false,
+  webViewRef,
   onError,
 }: {
   url: string;
   interactive: boolean;
+  nativeKeyboard?: boolean;
+  webViewRef?: RefObject<WebView | null>;
   onError: () => void;
 }) {
   const tokens = useMobileTokens();
@@ -543,8 +564,12 @@ function ScreenWebView({
   sourceUrl.current = retainScreenSource(sourceUrl.current, url);
   return (
     <WebView
+      ref={webViewRef}
       key={sourceUrl.current}
       source={{ uri: sourceUrl.current }}
+      injectedJavaScriptBeforeContentLoaded={
+        nativeKeyboard ? NATIVE_COMPUTER_KEYBOARD_BOOT : undefined
+      }
       style={{ flex: 1, backgroundColor: tokens.background }}
       pointerEvents={interactive ? "auto" : "none"}
       javaScriptEnabled

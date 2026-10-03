@@ -93,6 +93,8 @@ test("touch users can open and dismiss the remote computer keyboard", async ({
   await expect(keyboardButton).toBeVisible();
   await expect(trackpadButton).toBeVisible();
   await expect(pasteButton).toBeVisible();
+  await expect(page.getByRole("button", { name: "Escape" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ctrl" })).toBeVisible();
 
   await trackpadButton.click();
   await expect(page.getByRole("button", { name: "Use direct touch" })).toBeVisible();
@@ -117,6 +119,26 @@ test("touch users can open and dismiss the remote computer keyboard", async ({
   expect(forwardedKeysyms).toEqual(
     Array.from("mobile typing", (character) => character.codePointAt(0)),
   );
+  await page.evaluate(() => {
+    Reflect.set(globalThis, "__rfbKeys", []);
+  });
+  await page.getByRole("button", { name: "Escape" }).click();
+  await page.getByRole("button", { name: "Tab" }).click();
+  await page.getByRole("button", { name: "Left" }).click();
+  await page.getByRole("button", { name: "Ctrl" }).click();
+  await expect(page.getByRole("button", { name: "Ctrl" })).toHaveAttribute("aria-pressed", "true");
+  await keyboardInput.pressSequentially("c");
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(globalThis, "__rfbKeys")))
+    .toEqual([
+      [0xff1b, "Escape"],
+      [0xff09, "Tab"],
+      [0xff51, "ArrowLeft"],
+      [0xffe3, "ControlLeft", true],
+      [99, undefined, true],
+      [99, undefined, false],
+      [0xffe3, "ControlLeft", false],
+    ]);
   await captureScreenshot(page, testInfo, "mobile-computer-keyboard-open");
 
   await page.getByRole("button", { name: "Hide keyboard" }).click();
@@ -175,4 +197,5 @@ test("desktop embed hides touch computer chrome", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Paste" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show keyboard" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Use trackpad" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Escape" })).toHaveCount(0);
 });
