@@ -508,36 +508,42 @@ describe("computer lifecycle command guard", () => {
     ).toBe("heredoc");
   });
 
-  it("refuses an absolute run of a relative heredoc write after cd", () => {
+  it("allows an unrelated absolute path with the same basename as a relative heredoc write", () => {
     expect(
-      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/work/x.sh"),
-    ).toBe("heredoc");
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\n/opt/tools/x.sh"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\nchmod +x /opt/tools/x.sh"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/opt/tools/x.sh"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd -\n/opt/tools/x.sh"),
+    ).toBeUndefined();
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\nchmod +x /opt/tools/x.sh",
+      ),
+    ).toBeUndefined();
     expect(
       protectedComputerLifecycleRefusal(
         "cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/work/sub/x.sh",
       ),
-    ).toBe("heredoc");
+    ).toBeUndefined();
     expect(
       protectedComputerLifecycleRefusal("cat > x.sh <<'EOF'\nhello\nEOF\ncd -\n/work/x.sh"),
-    ).toBe("heredoc");
-    expect(
-      protectedComputerLifecycleRefusal("cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd -\n/work/sub/x.sh"),
-    ).toBe("heredoc");
-    expect(
-      protectedComputerLifecycleRefusal(
-        "cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\nchmod +x /work/x.sh",
-      ),
-    ).toBe("heredoc");
-    expect(
-      protectedComputerLifecycleRefusal(
-        "cat > sub/x.sh <<'EOF'\nhello\nEOF\ncd -\n/opt/tools/x.sh",
-      ),
     ).toBeUndefined();
     expect(
       protectedComputerLifecycleRefusal(
-        "cat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/opt/tools/other.sh",
+        "cd /work\ncat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\n/work/x.sh",
       ),
-    ).toBeUndefined();
+    ).toBe("heredoc");
+    expect(
+      protectedComputerLifecycleRefusal(
+        "cd /work\ncat > x.sh <<'EOF'\nhello\nEOF\ncd /tmp\nchmod +x /work/x.sh",
+      ),
+    ).toBe("heredoc");
   });
 
   it("refuses running a path a quoted heredoc just wrote", () => {

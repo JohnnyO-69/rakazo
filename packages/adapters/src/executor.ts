@@ -1926,17 +1926,9 @@ function executesWrittenHeredoc(
     if (token === undefined) return false;
     const resolved = resolveExecutionPath(dir.cwd, token);
     if (resolved !== undefined && outputs.has(resolved)) return true;
-    // A relative write has no absolute prefix. After cd, including `cd -`, an
-    // absolute run of that same path does not compare equal, but it still names
-    // the file when the absolute path ends with the relative write.
-    if (token.startsWith("/")) {
-      if (resolved === undefined || !resolved.startsWith("/")) return false;
-      for (const output of outputs) {
-        if (output.length === 0 || output.startsWith("/")) continue;
-        if (resolved.endsWith(`/${output}`)) return true;
-      }
-      return false;
-    }
+    // A relative write has no known absolute directory. An absolute path matches
+    // only a recorded path, not a shared basename or suffix.
+    if (token.startsWith("/")) return false;
     // `cd -` leaves the directory unknown, so a later relative name can still be the file.
     if (dir.cwd !== undefined) return false;
     const name = pathTail(token);
