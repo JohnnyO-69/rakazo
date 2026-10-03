@@ -227,7 +227,8 @@ describe("mobile computer screen", () => {
     expect(src).toContain("readScreenUrl");
     expect(src).toContain("SCREEN_URL_OPEN_ATTEMPTS");
     expect(src).toContain("retainScreenSource");
-    expect(src).toContain("key={sourceUrl.current}");
+    expect(src).toContain(`key={\`$\{nativeKeyboard ? "keys" : "view"}:$\{sourceUrl.current}\`}`);
     expect(src).not.toContain("key={url}");
+    expect(src).not.toContain("key={sourceUrl.current}");
   });
 });
