@@ -67,12 +67,15 @@ export function computerKeyboardPadding(draft: string): number {
 }
 
 /**
- * Appends and end deletions match a remote caret at the end of the draft.
- * A change inside the seed padding would backspace or retype characters the remote never got.
+ * Appends and end deletions of sent text match a remote caret at the end of the draft.
+ * A deletion that enters the unsent seed is rejected, as is any other change inside that padding.
  * A correction in the typed suffix is replayed from the first changed character through the end.
  */
 export function isRemoteAlignedKeyboardEdit(oldValue: string, newValue: string): boolean {
-  if (newValue.startsWith(oldValue) || oldValue.startsWith(newValue)) return true;
+  if (oldValue.startsWith(newValue)) {
+    return newValue.length >= computerKeyboardPadding(oldValue);
+  }
+  if (newValue.startsWith(oldValue)) return true;
   let index = 0;
   const limit = Math.min(oldValue.length, newValue.length);
   while (index < limit && oldValue.charAt(index) === newValue.charAt(index)) index += 1;

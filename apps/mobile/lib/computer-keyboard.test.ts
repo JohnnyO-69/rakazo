@@ -88,6 +88,42 @@ describe("computer keyboard edits", () => {
     expect(wiped.changes).toEqual({ backspaces: 3, text: "" });
   });
 
+  it("rejects a deletion that enters the unsent seed", () => {
+    const intoSeed = normalizeComputerKeyboardEdit(
+      COMPUTER_KEYBOARD_SEED,
+      COMPUTER_KEYBOARD_SEED.slice(0, -1),
+    );
+    expect(intoSeed.aligned).toBe(false);
+    expect(intoSeed.draft).toBe(COMPUTER_KEYBOARD_SEED);
+    expect(intoSeed.changes).toEqual({ backspaces: 0, text: "" });
+
+    const cleared = normalizeComputerKeyboardEdit(COMPUTER_KEYBOARD_SEED, "");
+    expect(cleared.aligned).toBe(false);
+    expect(cleared.draft).toBe(COMPUTER_KEYBOARD_SEED);
+    expect(cleared.changes).toEqual({ backspaces: 0, text: "" });
+
+    const partialSeed = COMPUTER_KEYBOARD_SEED.slice(0, 40);
+    expect(isRemoteAlignedKeyboardEdit(partialSeed, partialSeed.slice(0, -1))).toBe(false);
+    expect(isRemoteAlignedKeyboardEdit(partialSeed, `${partialSeed}a`)).toBe(true);
+
+    const typed = normalizeComputerKeyboardEdit(
+      COMPUTER_KEYBOARD_SEED,
+      `${COMPUTER_KEYBOARD_SEED}a`,
+    );
+    const deletedTyped = normalizeComputerKeyboardEdit(typed.draft, COMPUTER_KEYBOARD_SEED);
+    expect(deletedTyped.aligned).toBe(true);
+    expect(deletedTyped.changes).toEqual({ backspaces: 1, text: "" });
+    expect(deletedTyped.draft).toBe(COMPUTER_KEYBOARD_SEED);
+
+    const acrossBoundary = normalizeComputerKeyboardEdit(
+      typed.draft,
+      COMPUTER_KEYBOARD_SEED.slice(0, -1),
+    );
+    expect(acrossBoundary.aligned).toBe(false);
+    expect(acrossBoundary.draft).toBe(typed.draft);
+    expect(acrossBoundary.changes).toEqual({ backspaces: 0, text: "" });
+  });
+
   it("drops an edit inside the seed padding and keeps a correction in the typed suffix", () => {
     const draft = `${COMPUTER_KEYBOARD_SEED}ab`;
     expect(computerKeyboardPadding(draft)).toBe(COMPUTER_KEYBOARD_SEED.length);
