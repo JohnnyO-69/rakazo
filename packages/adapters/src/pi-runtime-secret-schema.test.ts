@@ -177,6 +177,26 @@ describe("prepareRequestSecretArguments", () => {
     expect(out).toEqual({ label: "c", purpose: "otp", connectionId: "abc" });
   });
 
+  it("folds a top-level credential object and a JSON string into credential", () => {
+    expect(
+      prepareRequestSecretArguments({
+        label: "API key",
+        purpose: "api_key",
+        name: sampleCredential.name,
+        origin: sampleCredential.origin,
+        auth: sampleCredential.auth,
+      }),
+    ).toEqual({ label: "API key", purpose: "api_key", credential: sampleCredential });
+    expect(
+      prepareRequestSecretArguments({
+        label: "API key",
+        purpose: "api_key",
+        credential: JSON.stringify(sampleCredential),
+        connectionId: "  ",
+      }),
+    ).toEqual({ label: "API key", purpose: "api_key", credential: sampleCredential });
+  });
+
   it("omits credential and connectionId when absent rather than sending empties", () => {
     // The executor rejects a call that carries both, so neither may be faked in.
     expect(prepareRequestSecretArguments({ label: "c", purpose: "otp" })).toEqual({

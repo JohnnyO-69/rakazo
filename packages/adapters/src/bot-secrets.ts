@@ -61,6 +61,71 @@ export function normalizeSecretDestination(value: unknown): BotSecretDestination
   return { ...parsed.data, origin: new URL(parsed.data.origin).origin };
 }
 
+export type RequestSecretDestinationResult = {
+  /** Metadata only. The protected value is never part of this result. */
+  destination?: BotSecretDestination;
+  connectionId?: string;
+  error?: string;
+};
+
+/**
+ * The model-facing schema is one object, so a credential often arrives beside
+ * `connectionId`, as a JSON string, or as top-level `name` / `origin` / `auth`
+ * instead of a nested `credential`. A destination that normalizes is the masked
+ * reusable path. `connectionId` applies only when no credential was supplied.
+ */
+export function resolveRequestSecretDestination(
+  args: Record<string, unknown>,
+): RequestSecretDestinationResult {
+  const credential = credentialArgument(args);
+  if (credential !== undefined) {
+    try {
+      return { destination: normalizeSecretDestination(credential) };
+    } catch (error) {
+      return {
+        error:
+          error instanceof Error && error.message.startsWith("Invalid credential destination")
+            ? error.message
+            : "Specify a credential name, HTTPS origin, and auth method.",
+      };
+    }
+  }
+  const connectionId = connectionIdArgument(args.connectionId);
+  if (connectionId) return { connectionId };
+  return { error: "Provide either a reusable credential destination or a connectionId." };
+}
+
+/** Credential object from `credential`, a JSON string of that object, or top-level fields. */
+export function credentialArgument(args: Record<string, unknown>): unknown {
+  if (Object.hasOwn(args, "credential") && args.credential != null && args.credential !== "") {
+    return parsedCredentialObject(args.credential);
+  }
+  if (Object.hasOwn(args, "name") && Object.hasOwn(args, "origin") && Object.hasOwn(args, "auth")) {
+    return { name: args.name, origin: args.origin, auth: args.auth };
+  }
+  return undefined;
+}
+
+export function connectionIdArgument(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") return undefined;
+  return trimmed;
+}
+
+function parsedCredentialObject(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return value;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch {
+    return value;
+  }
+  return value;
+}
+
 export function sameSecretDestination(
   left: BotSecretDestination,
   right: BotSecretDestination,

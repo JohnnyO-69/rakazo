@@ -6,6 +6,7 @@ import {
   normalizeSecretDestination,
   requestWithBotSecret,
   resolveLoginFill,
+  resolveRequestSecretDestination,
 } from "./bot-secrets.js";
 import { EncryptedSecretStore } from "./secrets.js";
 
@@ -251,6 +252,106 @@ describe("authenticated secret requests", () => {
       error: expect.stringContaining("Authenticated request failed"),
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveRequestSecretDestination", () => {
+  const documented = {
+    label: "API key",
+    purpose: "api_key",
+    credential: destination,
+  };
+  const plantedSecret = "not-a-real-secret-value";
+
+  it("accepts the documented credential shape", () => {
+    expect(resolveRequestSecretDestination(documented)).toEqual({ destination });
+  });
+
+  it("accepts a valid credential object supplied beside connectionId", () => {
+    // The flattened tool schema allows both fields, and the executor used to
+    // reject that pair before it ever checked that the credential was valid.
+    const resolved = resolveRequestSecretDestination({
+      ...documented,
+      connectionId: "conn_1",
+      credential: { ...destination, value: plantedSecret },
+    });
+    expect(resolved).toEqual({ destination });
+    expect(resolved.connectionId).toBeUndefined();
+    expect(JSON.stringify(resolved)).not.toContain(plantedSecret);
+    expect(resolved.error).toBeUndefined();
+  });
+
+  it("accepts a credential object supplied as top-level name, origin, and auth", () => {
+    expect(
+      resolveRequestSecretDestination({
+        label: "API key",
+        purpose: "api_key",
+        name: destination.name,
+        origin: destination.origin,
+        auth: destination.auth,
+        secret: plantedSecret,
+      }),
+    ).toEqual({ destination });
+  });
+
+  it("accepts a credential object supplied as a JSON string", () => {
+    expect(
+      resolveRequestSecretDestination({
+        label: "API key",
+        purpose: "api_key",
+        credential: JSON.stringify({ ...destination, value: plantedSecret }),
+      }),
+    ).toEqual({ destination });
+  });
+
+  it("accepts the documented website login shape", () => {
+    const login = {
+      name: "example_login",
+      origin: "https://login.example.test",
+      auth: { type: "login" as const },
+    };
+    expect(
+      resolveRequestSecretDestination({
+        label: "Example sign-in",
+        purpose: "password",
+        credential: login,
+      }),
+    ).toEqual({ destination: login });
+  });
+
+  it("keeps the connector path when only connectionId is supplied", () => {
+    expect(
+      resolveRequestSecretDestination({
+        label: "Code",
+        purpose: "otp",
+        connectionId: " conn_1 ",
+      }),
+    ).toEqual({ connectionId: "conn_1" });
+  });
+
+  it("does not treat a blank connectionId as a second destination", () => {
+    expect(resolveRequestSecretDestination({ ...documented, connectionId: "  " })).toEqual({
+      destination,
+    });
+    expect(
+      resolveRequestSecretDestination({ label: "Code", purpose: "otp", connectionId: "null" }),
+    ).toEqual({
+      error: "Provide either a reusable credential destination or a connectionId.",
+    });
+  });
+
+  it("names the failing credential field instead of asking for a destination again", () => {
+    const resolved = resolveRequestSecretDestination({
+      label: "API key",
+      purpose: "api_key",
+      credential: { ...destination, name: "Bad Name" },
+      connectionId: "conn_1",
+    });
+    expect(resolved.destination).toBeUndefined();
+    expect(resolved.connectionId).toBeUndefined();
+    expect(resolved.error).toMatch(/Invalid credential destination — name:/);
+    expect(resolved.error).not.toMatch(/reusable credential destination/);
+    expect(resolved.error).not.toBe("Specify a credential name, HTTPS origin, and auth method.");
   });
 });
 
