@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDeploymentModel } from "./deployment-model.js";
 
-// Pi falls back to process.env for host credentials, so blank the ones a developer
-// machine or CI host may carry; each case states its own.
+// Host credentials come from the process, so blank the ones a developer machine or CI
+// host may carry; each case states its own.
 const HOST_CREDENTIAL_ENV = [
   "AWS_PROFILE",
   "AWS_ACCESS_KEY_ID",
@@ -48,10 +48,10 @@ describe("resolveDeploymentModel", () => {
   });
 
   it("runs a provider that authenticates from the host without a key", () => {
+    vi.stubEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/credentials/example");
     const taskRole = {
       PI_DEFAULT_PROVIDER: "amazon-bedrock",
       PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5",
-      AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/example",
     };
     expect(resolveDeploymentModel(taskRole)).toEqual({
       provider: "amazon-bedrock",
@@ -63,13 +63,19 @@ describe("resolveDeploymentModel", () => {
 
   it("needs both host credentials and an explicit model for a keyless provider", () => {
     const provider = { PI_DEFAULT_PROVIDER: "amazon-bedrock" };
+    const model = { ...provider, PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5" };
+    expect(resolveDeploymentModel(model).configured).toBe(false);
+    vi.stubEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/credentials/example");
+    expect(resolveDeploymentModel(provider).configured).toBe(false);
+  });
+
+  it("ignores credentials that only the passed env carries, since a run could not use them", () => {
     expect(
-      resolveDeploymentModel({ ...provider, PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5" })
-        .configured,
-    ).toBe(false);
-    expect(
-      resolveDeploymentModel({ ...provider, AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/x" })
-        .configured,
+      resolveDeploymentModel({
+        PI_DEFAULT_PROVIDER: "amazon-bedrock",
+        PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5",
+        AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/example",
+      }).configured,
     ).toBe(false);
   });
 });

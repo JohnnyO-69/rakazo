@@ -8,13 +8,6 @@ export const DEFAULT_OPENROUTER_MODEL_ID = "openai/gpt-6-luna";
  */
 const HOST_CREDENTIALS = "<authenticated>";
 
-/** Pi takes a string-only env; `process.env` may carry undefined values. */
-function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );
-}
-
 /**
  * The deployment-wide model default: which provider a run falls back to when no user
  * credential applies, and the key for that provider.
@@ -22,7 +15,9 @@ function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
  * `configured` is whether that default can run: the provider has a deployment key, or it
  * authenticates from the host and `PI_DEFAULT_MODEL` names the model, since no default model
  * id is assumed for such a provider. Host credentials are never returned as `key`; Pi
- * resolves them itself when a run passes no key.
+ * resolves them itself when a run passes no key. They are read from the process, where the
+ * runtime authenticates from, never from `env`: credentials only `env` carries could not be
+ * used by a run.
  *
  * Vendor env names and model ids live here, in the adapter layer, not in core.
  */
@@ -42,7 +37,7 @@ export function resolveDeploymentModel(env: NodeJS.ProcessEnv = process.env) {
   const explicitModel = env.PI_DEFAULT_MODEL?.trim();
   const key = keys[provider];
   const hostCredentials =
-    !key && Boolean(explicitModel) && getEnvApiKey(provider, definedEnv(env)) === HOST_CREDENTIALS;
+    !key && Boolean(explicitModel) && getEnvApiKey(provider) === HOST_CREDENTIALS;
   return {
     provider,
     model: explicitModel || models[provider] || models.openrouter!,
