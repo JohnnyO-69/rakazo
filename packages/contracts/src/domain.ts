@@ -1,5 +1,10 @@
 import * as z from "zod";
 import { BotAvatarValueSchema } from "./bot-avatar.js";
+import {
+  CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
+  cloudflareGatewayRouting,
+  isCloudflareAiGatewayProvider,
+} from "./cloudflare-ai-gateway.js";
 import { ThreadMessageSchema } from "./events.js";
 import { Id, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
 import { McpHeadersSchema, McpRemoteEndpointSchema, McpTransportSchema } from "./mcp.js";
@@ -946,6 +951,8 @@ export const ModelCredentialSchema = z.object({
   hasKey: z.boolean(),
   isDefault: z.boolean(),
   baseUrl: z.string().optional(),
+  accountId: z.string().optional(),
+  gatewayId: z.string().optional(),
   modelId: z.string().optional(),
   reasoning: z.boolean().optional(),
   thinkingLevel: ThinkingLevelSchema.nullable().optional(),
@@ -963,6 +970,8 @@ export const ModelConnectInputSchema = z
   .object({
     provider: z.string(),
     apiKey: z.string().optional(),
+    accountId: z.string().optional(),
+    gatewayId: z.string().optional(),
     baseUrl: z.string().optional(),
     label: z.string().optional(),
     modelId: z.string().optional(),
@@ -984,6 +993,20 @@ export const ModelConnectInputSchema = z
         message: "Maximum output tokens cannot exceed the context limit",
         path: ["maxTokens"],
       });
+    }
+    if (isCloudflareAiGatewayProvider(value.provider)) {
+      const hasKey = (value.apiKey?.trim() ?? "").length > 0;
+      const touchesRouting = value.accountId !== undefined || value.gatewayId !== undefined;
+      if (
+        (hasKey || touchesRouting) &&
+        !cloudflareGatewayRouting({ accountId: value.accountId, gatewayId: value.gatewayId })
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
+          path: ["accountId"],
+        });
+      }
     }
     if (value.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
       if (!value.baseUrl?.trim()) {

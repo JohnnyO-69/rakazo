@@ -1,3 +1,7 @@
+import {
+  CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
+  CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
+} from "@rakazo/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModelConnectPlaintext, modelCredentialDto } from "./model-connect.js";
 import { parseModelSecret, serializeModelSecret } from "./pi-oauth.js";
@@ -150,6 +154,61 @@ describe("openai-codex API key guard", () => {
     expect(buildModelConnectPlaintext({ provider: "anthropic", apiKey: "sk-test-key-123" })).toBe(
       "sk-test-key-123",
     );
+    expect(
+      buildModelConnectPlaintext({
+        provider: "openai",
+        apiKey: "sk-test-key-123",
+        accountId: "acct1234",
+        gatewayId: "gateway-1",
+      }),
+    ).toBe("sk-test-key-123");
+  });
+
+  it("stores Cloudflare AI Gateway routing with the key and keeps it on a limit update", () => {
+    const input = {
+      provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
+      apiKey: "cf-test-key-value",
+      accountId: "acct1234",
+      gatewayId: "gateway-1",
+    };
+    const plaintext = buildModelConnectPlaintext(input);
+    expect(parseModelSecret(plaintext)).toEqual({
+      kind: "api_key",
+      key: "cf-test-key-value",
+      accountId: "acct1234",
+      gatewayId: "gateway-1",
+    });
+    expect(
+      parseModelSecret(
+        buildModelConnectPlaintext(
+          { provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID, maxTokens: 4096 },
+          plaintext,
+        ),
+      ),
+    ).toEqual({
+      kind: "api_key",
+      key: "cf-test-key-value",
+      maxTokens: 4096,
+      accountId: "acct1234",
+      gatewayId: "gateway-1",
+    });
+    expect(
+      modelCredentialDto(
+        {
+          id: "cred-cf",
+          provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
+          label: "Cloudflare AI Gateway",
+          isDefault: false,
+        },
+        plaintext,
+      ),
+    ).toMatchObject({ accountId: "acct1234", gatewayId: "gateway-1" });
+    expect(() =>
+      buildModelConnectPlaintext({
+        provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
+        apiKey: "cf-test-key-value",
+      }),
+    ).toThrow(CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE);
   });
 });
 

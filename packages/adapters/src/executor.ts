@@ -179,6 +179,7 @@ import { type CloudAgentConnection, cloudAgentsEnabled } from "./cloud-agent-fac
 import { executeCloudAgentTool } from "./cloud-agent-service.js";
 import { validCloudAgentArgs } from "./cloud-agent-tools.js";
 import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
+import { cloudflareGatewayProviderEnv } from "./cloudflare-ai-gateway.js";
 import {
   collectLogIds,
   mergeConnectedPlugins,
@@ -2931,6 +2932,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       provider,
       id: modelId,
       apiKey: resolved.oauth ? undefined : resolved.apiKey,
+      ...cloudflareRunFields(resolved),
       baseUrl: resolved.baseUrl,
       reasoning: resolved.reasoning,
       maxTokens: resolved.maxTokens,
@@ -3005,6 +3007,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         provider,
         id,
         apiKey: resolved.oauth ? undefined : resolved.apiKey,
+        ...cloudflareRunFields(resolved),
         baseUrl: resolved.baseUrl,
         reasoning: resolved.reasoning,
         maxTokens: resolved.maxTokens,
@@ -4221,6 +4224,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       runtime: deps.runtime,
                       checker: checker!,
                       apiKey: judgeKey.oauth ? undefined : judgeKey.apiKey,
+                      accountId: judgeKey.accountId,
+                      gatewayId: judgeKey.gatewayId,
                       baseUrl: judgeKey.baseUrl,
                       reasoning: judgeKey.reasoning,
                       oauth: judgeKey.oauth
@@ -6185,6 +6190,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 provider: runModelProvider,
                 id: runModelId,
                 apiKey: resolved.oauth ? undefined : resolved.apiKey,
+                ...cloudflareRunFields(resolved),
                 baseUrl: resolved.baseUrl,
                 reasoning: resolved.reasoning,
                 maxTokens: resolved.maxTokens,
@@ -7606,6 +7612,8 @@ async function resolveModelKey(
   registerSecrets?: (values: string[]) => void,
 ): Promise<{
   apiKey?: string;
+  accountId?: string;
+  gatewayId?: string;
   baseUrl?: string;
   reasoning?: boolean;
   maxTokens?: number;
@@ -7627,7 +7635,10 @@ async function resolveModelKey(
       const row = await deps.prisma.secret.findFirst({
         where: { id: credential.secretId, userId, spaceId: null },
       });
-      if (!row) return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
+      if (!row) {
+        cloudflareGatewayProviderEnv({ provider });
+        return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
+      }
       const plaintext = deps.secretStore.load(row.ciphertext, row.id);
       registerSecrets?.(secretValuesToRedact(parseModelSecret(plaintext)));
       const persist = persistStoredModelSecret(
@@ -7691,8 +7702,13 @@ async function resolveModelKey(
           (resolved.secret.visionModelIds === undefined &&
             credential.supportsImages === true &&
             credential.defaultModel?.trim() === modelId.trim()));
+      const accountId = resolved.secret.kind === "api_key" ? resolved.secret.accountId : undefined;
+      const gatewayId = resolved.secret.kind === "api_key" ? resolved.secret.gatewayId : undefined;
+      cloudflareGatewayProviderEnv({ provider, accountId, gatewayId });
       return {
         apiKey: resolved.apiKey,
+        accountId,
+        gatewayId,
         baseUrl,
         reasoning:
           resolved.secret.kind === "openai_compatible" ? resolved.secret.reasoning : undefined,
@@ -7745,7 +7761,18 @@ async function resolveModelKey(
       };
     });
   }
+  cloudflareGatewayProviderEnv({ provider });
   return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
+}
+
+function cloudflareRunFields(resolved: { accountId?: string; gatewayId?: string }): {
+  accountId?: string;
+  gatewayId?: string;
+} {
+  return {
+    ...(resolved.accountId ? { accountId: resolved.accountId } : {}),
+    ...(resolved.gatewayId ? { gatewayId: resolved.gatewayId } : {}),
+  };
 }
 
 export function selectRunConnections<
