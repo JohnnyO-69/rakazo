@@ -11,7 +11,17 @@ const fakeAgentState = vi.hoisted(() => ({
     | "parent-limit"
     | "parent-parallel"
     | "ask-pause"
-    | "nested-ask-pause",
+    | "nested-ask-pause"
+    | "tools-then-empty-failure"
+    | "tools-then-final-text",
+  terminalMessage: undefined as
+    | {
+        role: "assistant";
+        content: Array<{ type: "text"; text: string } | { type: "toolCall" }>;
+        stopReason?: string;
+        errorMessage?: string;
+      }
+    | undefined,
   emitFinalAfterFollowUp: true,
   abortCount: 0,
   tools: [] as Array<{
@@ -131,6 +141,51 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
             toolResults: [],
           });
         }
+        return;
+      }
+
+      if (
+        fakeAgentState.mode === "tools-then-empty-failure" ||
+        fakeAgentState.mode === "tools-then-final-text"
+      ) {
+        const target =
+          this.tools.find((tool) => tool.name === fakeAgentState.invoke.name) ?? this.tools[0];
+        if (!target) throw new Error("expected tool was not exposed");
+        const rawArgs = fakeAgentState.invoke.args;
+        const args = target.prepareArguments?.(rawArgs) ?? rawArgs;
+        this.emit({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "I will check the destination first.",
+          },
+        });
+        this.emit({ type: "tool_execution_start", toolName: target.name, args });
+        await target.execute("call-1", args);
+        this.emit({
+          type: "turn_end",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "I will check the destination first." },
+              { type: "toolCall", id: "call-1", name: target.name, arguments: args },
+            ],
+          },
+          toolResults: [{ toolCallId: "call-1", result: { ok: true } }],
+        });
+        const terminal = fakeAgentState.terminalMessage ?? {
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: "" }],
+          stopReason: "length",
+        };
+        this.state.messages.push(terminal);
+        this.emit({ type: "message_start", message: terminal });
+        this.emit({ type: "message_end", message: terminal });
+        this.emit({
+          type: "turn_end",
+          message: terminal,
+          toolResults: [],
+        });
         return;
       }
 
@@ -305,6 +360,7 @@ describe("Pi connector tool dispatch", () => {
     fakeAgentState.steeredMessages = [];
     fakeAgentState.followUpMessages = [];
     fakeAgentState.emitFinalAfterFollowUp = true;
+    fakeAgentState.terminalMessage = undefined;
     fakeAgentState.initialMessages = [];
     fakeAgentState.promptInputs = [];
     fakeAgentState.promptImages = [];
@@ -779,6 +835,102 @@ describe("Pi connector tool dispatch", () => {
     expect(events.at(-1)).toEqual({
       type: "done",
       text: "I completed the tool step but could not produce a final response. Please ask me to continue.",
+    });
+  });
+
+  it("fails when tools succeeded and the final assistant content is an empty provider error", async () => {
+    fakeAgentState.mode = "tools-then-empty-failure";
+    fakeAgentState.terminalMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "" }],
+      stopReason: "length",
+      errorMessage: "This model's maximum context length is 131072 tokens.",
+    };
+    const runtime = new PiAgentRuntime();
+    const events: unknown[] = [];
+
+    const consume = async () => {
+      for await (const event of runtime.run(
+        {
+          botId: "b",
+          threadId: "t",
+          runId: "tools-then-empty-failure",
+          prompt: "send the update and report back",
+          instructions: "Use the destination tool, then tell the user what happened.",
+          history: [],
+          tools: [destinationTool],
+          model: { provider: "test", id: "dispatch-test-model" },
+          emptyResponseText: "The delegated bot completed its turn without a written summary.",
+          executeTool: vi.fn(async () => ({ ok: true })),
+        },
+        {
+          operationId: "tools-then-empty-failure",
+          traceId: "tools-then-empty-failure",
+          spaceId: "w",
+          userId: "u",
+          signal: new AbortController().signal,
+        },
+      )) {
+        events.push(event);
+      }
+    };
+
+    await expect(consume()).rejects.toThrow(
+      "This model's maximum context length is 131072 tokens.",
+    );
+    expect(events).not.toContainEqual({
+      type: "text",
+      text: "The delegated bot completed its turn without a written summary.",
+    });
+    expect(events).not.toContainEqual({
+      type: "text",
+      text: "I completed the tool step but could not produce a final response. Please ask me to continue.",
+    });
+    expect(fakeAgentState.followUpMessages).toHaveLength(0);
+  });
+
+  it("emits final assistant text that arrives only on the completed message after tools", async () => {
+    fakeAgentState.mode = "tools-then-final-text";
+    fakeAgentState.terminalMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "The inbox has 3 unread notes." }],
+      stopReason: "stop",
+    };
+    const runtime = new PiAgentRuntime();
+    const events: unknown[] = [];
+
+    for await (const event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "tools-then-final-text",
+        prompt: "check the inbox and report back",
+        instructions: "Use the destination tool, then tell the user what happened.",
+        history: [],
+        tools: [destinationTool],
+        model: { provider: "test", id: "dispatch-test-model" },
+        emptyResponseText: "The delegated bot completed its turn without a written summary.",
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      {
+        operationId: "tools-then-final-text",
+        traceId: "tools-then-final-text",
+        spaceId: "w",
+        userId: "u",
+        signal: new AbortController().signal,
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({ type: "text", text: "The inbox has 3 unread notes." });
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      text: "I will check the destination first.The inbox has 3 unread notes.",
+    });
+    expect(events).not.toContainEqual({
+      type: "text",
+      text: "The delegated bot completed its turn without a written summary.",
     });
   });
 

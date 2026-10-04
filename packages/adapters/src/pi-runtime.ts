@@ -334,6 +334,7 @@ export class PiAgentRuntime implements AgentRuntime {
         signal.addEventListener("abort", onAbort);
 
         let streamed = "";
+        let currentMessageStreamed = "";
         let toolCalls = 0;
         let toolActivityShowing = false;
         let silentToolContinuations = 0;
@@ -354,6 +355,9 @@ export class PiAgentRuntime implements AgentRuntime {
               activity: true,
             });
           }
+          if (event.type === "message_start" && event.message.role === "assistant") {
+            currentMessageStreamed = "";
+          }
           if (
             event.type === "message_update" &&
             event.assistantMessageEvent.type === "text_delta"
@@ -366,15 +370,14 @@ export class PiAgentRuntime implements AgentRuntime {
                 queue.push({ type: "progress", text: "", activity: true });
               }
               streamed += delta;
+              currentMessageStreamed += delta;
               queue.push({ type: "text", text: delta });
             }
           }
           if (event.type === "turn_end") {
             const messageText =
               event.message.role === "assistant" ? assistantText(event.message) : "";
-            const hasToolCalls =
-              event.message.role === "assistant" &&
-              event.message.content.some((part) => part.type === "toolCall");
+            const hasToolCalls = messageHasToolCall(event.message);
             const hasToolResults = event.toolResults.length > 0;
 
             // Text in a turn that also contains a tool call is narration, not a final
@@ -387,6 +390,9 @@ export class PiAgentRuntime implements AgentRuntime {
                 toolWorkPendingFinal = false;
                 silentToolContinuations = 0;
               } else if (
+                // A provider failure is not an empty success. Do not schedule
+                // another model turn that would hide the error.
+                !providerFailureText(event.message) &&
                 !host.pausePending &&
                 silentToolContinuations < MAX_SILENT_TOOL_CONTINUATIONS
               ) {
@@ -403,7 +409,19 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
             const text = assistantText(event.message);
-            if (text && !streamed) {
+            const streamedThisMessage = currentMessageStreamed;
+            currentMessageStreamed = "";
+            if (
+              text &&
+              !messageHasToolCall(event.message) &&
+              !streamedThisMessage.includes(text) &&
+              !streamed.endsWith(text)
+            ) {
+              // Final text that never arrived as deltas (common after a tool turn
+              // whose earlier narration already filled `streamed`).
+              streamed += text;
+              queue.push({ type: "text", text });
+            } else if (text && !streamed) {
               streamed = text;
               queue.push({ type: "text", text });
             }
@@ -445,9 +463,24 @@ export class PiAgentRuntime implements AgentRuntime {
         // errorMessage set. Treat that as a soft stop so the turn still ends
         // with a durable assistant message instead of a failed run.
         const budgetExceeded = host.toolCallBudget.exceeded;
-        const error = agent.state.errorMessage;
+        const terminalMessage = agent.state.messages.at(-1);
+        // pi-agent-core records ordinary provider failures as an empty assistant
+        // message (stopReason "error" / "length") and still resolves the run.
+        // state.errorMessage covers the error stop; the message itself covers a
+        // length stop and any failure that never landed on state.
+        const providerFailure =
+          !budgetExceeded && terminalMessage ? providerFailureText(terminalMessage) : undefined;
+        const error = agent.state.errorMessage || providerFailure;
         if (error && !budgetExceeded) {
           throw new Error(sanitizeProviderError(model.provider, error));
+        }
+        if (!budgetExceeded && terminalMessage && !messageHasToolCall(terminalMessage)) {
+          const terminalText = assistantText(terminalMessage);
+          if (terminalText.trim() && !streamed.includes(terminalText)) {
+            queue.push({ type: "text", text: terminalText });
+            streamed += terminalText;
+            toolWorkPendingFinal = false;
+          }
         }
         if (budgetExceeded) {
           const budgetMessage = toolCallBudgetExceededMessage(host.toolCallBudget.limit);
@@ -1253,7 +1286,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     // Shared-budget abort leaves errorMessage on the nested agent; surface it as a
     // completed stop rather than a failed subagent chip.
     const budgetExceeded = host.toolCallBudget.exceeded;
-    const error = nested.state.errorMessage;
+    const error = nested.state.errorMessage || providerFailureText(nested.state.messages.at(-1));
     if (error && !budgetExceeded) {
       const message = sanitizeProviderError(subagentModel.provider, error);
       host.queue.push({ type: "subagent", agentId, name, task, status: "failed", result: message });
@@ -1724,6 +1757,41 @@ function assistantText(message: unknown): string {
         : "",
     )
     .join("");
+}
+
+function messageHasToolCall(message: unknown): boolean {
+  if (!message || typeof message !== "object" || !("content" in message)) return false;
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (part) => !!part && typeof part === "object" && "type" in part && part.type === "toolCall",
+  );
+}
+
+/** Provider failure with no written answer. Aborts stay on the existing cancel path. */
+export function providerFailureText(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  if (!("role" in message) || message.role !== "assistant") return undefined;
+  const stopReason =
+    "stopReason" in message && typeof message.stopReason === "string"
+      ? message.stopReason
+      : undefined;
+  if (stopReason === "aborted") return undefined;
+  const errorMessage =
+    "errorMessage" in message &&
+    typeof message.errorMessage === "string" &&
+    message.errorMessage.trim()
+      ? message.errorMessage.trim()
+      : undefined;
+  const text = assistantText(message).trim();
+  if (stopReason === "error") {
+    return errorMessage || "The model failed before writing a response.";
+  }
+  if (stopReason === "length" && !text) {
+    return errorMessage || "The model hit its output limit before writing a response.";
+  }
+  if (errorMessage && !text) return errorMessage;
+  return undefined;
 }
 
 function sanitizeSensitiveText(message: string) {
