@@ -133,7 +133,7 @@ describe("account preferences", () => {
 describe("model setup gate", () => {
   function modelGateDeps(options: {
     agentRuntime: string;
-    deploymentModelKey?: string;
+    deploymentModelConfigured?: boolean;
     deploymentModelCredentialCipher?: string;
   }) {
     const prisma = {
@@ -161,7 +161,7 @@ describe("model setup gate", () => {
         agentRuntime: options.agentRuntime,
         defaultProvider: "openrouter",
         defaultModel: "test-model",
-        deploymentModelKey: options.deploymentModelKey,
+        deploymentModelConfigured: options.deploymentModelConfigured,
         webOrigin: "http://127.0.0.1:5173",
         screenProxySecret: "fake-test-secret",
         sandboxProvider: "fake",
@@ -217,10 +217,10 @@ describe("model setup gate", () => {
     });
   });
 
-  it("accepts a deployment model key as model configuration", async () => {
+  it("accepts a configured deployment model as model configuration", async () => {
     const { actor, handler } = modelGateDeps({
       agentRuntime: "pi",
-      deploymentModelKey: "fake-deployment-key",
+      deploymentModelConfigured: true,
     });
 
     const response = await call(handler, actor, "me", null);

@@ -1,8 +1,28 @@
+import { getEnvApiKey } from "@earendil-works/pi-ai/compat";
+
 export const DEFAULT_OPENROUTER_MODEL_ID = "openai/gpt-6-luna";
+
+/**
+ * What Pi reports for a provider that authenticates from the host instead of a key: an AWS
+ * profile or task role for Amazon Bedrock, Application Default Credentials for Vertex.
+ */
+const HOST_CREDENTIALS = "<authenticated>";
+
+/** Pi takes a string-only env; `process.env` may carry undefined values. */
+function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
 
 /**
  * The deployment-wide model default: which provider a run falls back to when no user
  * credential applies, and the key for that provider.
+ *
+ * `configured` is whether that default can run: the provider has a deployment key, or it
+ * authenticates from the host and `PI_DEFAULT_MODEL` names the model, since no default model
+ * id is assumed for such a provider. Host credentials are never returned as `key`; Pi
+ * resolves them itself when a run passes no key.
  *
  * Vendor env names and model ids live here, in the adapter layer, not in core.
  */
@@ -19,9 +39,14 @@ export function resolveDeploymentModel(env: NodeJS.ProcessEnv = process.env) {
     openrouter: DEFAULT_OPENROUTER_MODEL_ID,
     anthropic: "claude-sonnet-5",
   };
+  const explicitModel = env.PI_DEFAULT_MODEL?.trim();
+  const key = keys[provider];
+  const hostCredentials =
+    !key && Boolean(explicitModel) && getEnvApiKey(provider, definedEnv(env)) === HOST_CREDENTIALS;
   return {
     provider,
-    model: env.PI_DEFAULT_MODEL?.trim() || models[provider] || models.openrouter!,
-    key: keys[provider],
+    model: explicitModel || models[provider] || models.openrouter!,
+    key,
+    configured: Boolean(key) || hostCredentials,
   };
 }

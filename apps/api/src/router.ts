@@ -545,7 +545,7 @@ export interface RouterDeps {
     teamChatJudgeModel?: string;
     defaultProvider: string;
     defaultModel: string;
-    deploymentModelKey?: string;
+    deploymentModelConfigured?: boolean;
     webOrigin: string;
     privacyPolicyUrl?: string;
     screenProxySecret: string;
@@ -5736,7 +5736,7 @@ async function modelSetup(deps: RouterDeps, actor: Actor) {
     findDefaultModelCredential(deps.prisma, actor),
     deps.prisma.deploymentSettings.findUnique({ where: { id: "default" } }),
   ]);
-  const hasDeployment = Boolean(deps.env.deploymentModelKey);
+  const hasDeployment = Boolean(deps.env.deploymentModelConfigured);
   return {
     credential,
     settings,
