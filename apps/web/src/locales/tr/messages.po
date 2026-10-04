@@ -18,6 +18,10 @@ msgid " (unread)"
 msgstr " (okunmadı)"
 
 #: src/pages/ModelSettingsOverlay.tsx
+msgid "Server credentials stay in use until you connect a key."
+msgstr "Bir anahtar bağlayana kadar sunucu kimlik bilgileri kullanılmaya devam eder."
+
+#: src/pages/ModelSettingsOverlay.tsx
 msgid "Use server credentials"
 msgstr "Sunucu kimlik bilgilerini kullan"
 

@@ -878,6 +878,15 @@ export default function Models() {
     </View>
   );
 
+  const serverCredentialsNote = (
+    <Text style={styles.secondary}>
+      {t("Uses this server's own {source} credentials to access {provider}.", {
+        source: me?.hostCredentialSource ?? "",
+        provider: selected?.providerName ?? provider,
+      })}
+    </Text>
+  );
+
   const compatKeySection =
     isOpenAiCompatible && acceptsKey ? (
       <View style={styles.keySection}>
@@ -1385,6 +1394,7 @@ export default function Models() {
             </>
           ) : credential ? (
             <>
+              {provider === me?.hostCredentialProvider ? serverCredentialsNote : null}
               {connectedStatusRow}
               <Text style={styles.sectionTitle}>{t("Model")}</Text>
               {catalogModelCard}
@@ -1394,19 +1404,22 @@ export default function Models() {
           ) : provider === me?.hostCredentialProvider && ownKeyProvider !== provider ? (
             <>
               {ownKeySwitch}
-              <Text style={styles.secondary}>
-                {t("Uses this server's own {source} credentials to access {provider}.", {
-                  source: me?.hostCredentialSource ?? "",
-                  provider: selected.providerName ?? selected.provider,
-                })}
-              </Text>
+              {serverCredentialsNote}
             </>
           ) : (
             <>
-              {provider === me?.hostCredentialProvider ? ownKeySwitch : null}
-              <Text style={styles.secondary}>
-                {t("Connect this provider to use it as your personal model.")}
-              </Text>
+              {provider === me?.hostCredentialProvider ? (
+                <>
+                  {ownKeySwitch}
+                  <Text style={styles.secondary}>
+                    {t("Server credentials stay in use until you connect a key.")}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.secondary}>
+                  {t("Connect this provider to use it as your personal model.")}
+                </Text>
+              )}
               {catalogConnectionControls}
               <Text style={styles.sectionTitle}>{t("Model")}</Text>
               {catalogModelCard}

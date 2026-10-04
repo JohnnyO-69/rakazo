@@ -446,6 +446,9 @@ test("a deployment default on server credentials says so and keeps an own key op
 
   await useServerCredentials.click();
   await expect(page.getByRole("button", { name: "Connect API key" })).toBeVisible();
+  await expect(
+    page.getByText("Server credentials stay in use until you connect a key."),
+  ).toBeVisible();
   await expect(serverNote).toBeHidden();
 
   await useServerCredentials.click();

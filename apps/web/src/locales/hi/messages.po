@@ -18,6 +18,10 @@ msgid " (unread)"
 msgstr " (अपठित)"
 
 #: src/pages/ModelSettingsOverlay.tsx
+msgid "Server credentials stay in use until you connect a key."
+msgstr "जब तक आप कुंजी कनेक्ट नहीं करते, सर्वर क्रेडेंशियल उपयोग में रहते हैं।"
+
+#: src/pages/ModelSettingsOverlay.tsx
 msgid "Use server credentials"
 msgstr "सर्वर क्रेडेंशियल का उपयोग करें"
 

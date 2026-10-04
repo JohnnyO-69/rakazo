@@ -269,6 +269,13 @@ export function ModelSettingsOverlay({
   const selectedProviderName = selected?.providerName ?? selected?.provider ?? "";
   const disconnectName = selectedProviderName;
   const hostCredentialSource = me?.hostCredentialSource ?? "";
+  const serverCredentialsNote = (
+    <p className="text-sm leading-[1.5] text-muted-foreground">
+      <Trans>
+        Uses this server's own {hostCredentialSource} credentials to access {selectedProviderName}.
+      </Trans>
+    </p>
+  );
   const isOpenAiCompatible = provider === OPENAI_COMPATIBLE_PROVIDER_ID;
   const credential = credentials.find((entry) => entry.provider === provider);
   const currentEntry = catalog.find(
@@ -1189,6 +1196,11 @@ export function ModelSettingsOverlay({
                 </>
               ) : credential ? (
                 <>
+                  {/* The key may be the default in another space while this one runs on server
+                      credentials; saving here switches this space to the key. */}
+                  {provider === me?.hostCredentialProvider ? (
+                    <div className="mb-5">{serverCredentialsNote}</div>
+                  ) : null}
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-[15px] text-foreground">
@@ -1235,16 +1247,14 @@ export function ModelSettingsOverlay({
                   </div>
                   {ownKeyProvider === provider ? (
                     <>
+                      <p className="mt-5 text-sm leading-[1.5] text-muted-foreground">
+                        <Trans>Server credentials stay in use until you connect a key.</Trans>
+                      </p>
                       <div className="mt-5">{connectionControls}</div>
                       <div className="mt-6">{catalogModelConfig}</div>
                     </>
                   ) : (
-                    <p className="mt-5 text-sm leading-[1.5] text-muted-foreground">
-                      <Trans>
-                        Uses this server's own {hostCredentialSource} credentials to access{" "}
-                        {selectedProviderName}.
-                      </Trans>
-                    </p>
+                    <div className="mt-5">{serverCredentialsNote}</div>
                   )}
                 </>
               ) : (

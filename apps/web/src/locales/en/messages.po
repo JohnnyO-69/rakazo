@@ -18,6 +18,10 @@ msgid " (unread)"
 msgstr " (unread)"
 
 #: src/pages/ModelSettingsOverlay.tsx
+msgid "Server credentials stay in use until you connect a key."
+msgstr "Server credentials stay in use until you connect a key."
+
+#: src/pages/ModelSettingsOverlay.tsx
 msgid "Use server credentials"
 msgstr "Use server credentials"
 

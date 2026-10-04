@@ -169,6 +169,8 @@ export const RU_MESSAGES: Record<string, string> = {
   "Use server credentials": "Использовать учётные данные сервера",
   "Uses this server's own {source} credentials to access {provider}.":
     "Использует собственные учётные данные {source} этого сервера для доступа к {provider}.",
+  "Server credentials stay in use until you connect a key.":
+    "Учётные данные сервера используются, пока вы не подключите ключ.",
   "Connect API key": "Подключить API-ключ",
   "Connect Executor": "Подключить Executor",
   "Connect MCP server {name}": "Подключение MCP-сервера {name}",

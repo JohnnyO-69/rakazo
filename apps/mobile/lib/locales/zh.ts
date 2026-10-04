@@ -155,6 +155,8 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Use server credentials": "使用服务器凭据",
   "Uses this server's own {source} credentials to access {provider}.":
     "使用此服务器自己的 {source} 凭据访问 {provider}。",
+  "Server credentials stay in use until you connect a key.":
+    "在连接密钥之前，将继续使用服务器凭据。",
   "Connect API key": "连接 API 密钥",
   "Connect Executor": "连接 Executor",
   "Connect MCP server {name}": "连接 MCP 服务器 {name}",

@@ -18,6 +18,10 @@ msgid " (unread)"
 msgstr " (읽지 않음)"
 
 #: src/pages/ModelSettingsOverlay.tsx
+msgid "Server credentials stay in use until you connect a key."
+msgstr "키를 연결할 때까지 서버 자격 증명이 계속 사용됩니다."
+
+#: src/pages/ModelSettingsOverlay.tsx
 msgid "Use server credentials"
 msgstr "서버 자격 증명 사용"
 
