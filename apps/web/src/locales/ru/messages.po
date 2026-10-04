@@ -179,7 +179,7 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "A subscription credential is stored securely."
-msgstr ""
+msgstr "Учётные данные подписки надежно сохранены."
 
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
@@ -428,7 +428,7 @@ msgstr "Всегда разрешено"
 
 #: src/lib/model-connection-preflight.ts
 msgid "An API key is stored for this provider, not a subscription sign-in."
-msgstr ""
+msgstr "Для этого поставщика сохранен API-ключ, а не вход по подписке."
 
 #: src/components/AskCard.tsx
 msgid "Answer"
@@ -444,7 +444,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Authentication failed."
-msgstr ""
+msgstr "Аутентификация не удалась."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Basic auth"
@@ -456,23 +456,23 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Check the API key or sign-in, then test again."
-msgstr ""
+msgstr "Проверьте API-ключ или вход и повторите тест."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Check the server URL and network, then test again."
-msgstr ""
+msgstr "Проверьте URL сервера и сеть, затем повторите тест."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
-msgstr ""
+msgstr "Убедитесь, что URL доступен из этого сеанса браузера, и повторите тест."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Connection test failed."
-msgstr ""
+msgstr "Тест соединения не удался."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Could not check stored credentials."
-msgstr ""
+msgstr "Не удалось проверить сохраненные учётные данные."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
@@ -480,7 +480,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Could not reach the model server."
-msgstr ""
+msgstr "Не удалось связаться с сервером модели."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not remove the credential"
@@ -500,7 +500,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Enter a server URL before testing."
-msgstr ""
+msgstr "Укажите URL сервера перед тестом."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Enter a username and password"
@@ -508,11 +508,11 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Enter an API key before testing."
-msgstr ""
+msgstr "Введите API-ключ перед тестом."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
-msgstr ""
+msgstr "Завершите вход по подписке и повторите тест."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Header \"{header}\""
@@ -528,11 +528,11 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Model \"{modelId}\" was not listed."
-msgstr ""
+msgstr "Модель \"{modelId}\" отсутствует в списке."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Models list OK. {modelCount, plural, one {# model} other {# models}} available. Chat was not tested."
-msgstr ""
+msgstr "Список моделей в порядке. {modelCount, plural, one {Доступна # модель} few {Доступны # модели} many {Доступно # моделей} other {Доступно # модели}}. Чат не проверялся."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
@@ -540,23 +540,23 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "No models listed."
-msgstr ""
+msgstr "Модели не перечислены."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Paste the OpenAI-compatible base URL, then test again."
-msgstr ""
+msgstr "Вставьте базовый URL, совместимый с OpenAI, и повторите тест."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Paste your API key, then test again."
-msgstr ""
+msgstr "Вставьте API-ключ и повторите тест."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Pick a model from the catalog."
-msgstr ""
+msgstr "Выберите модель из каталога."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Pick a model from the list or enter a model id served by this endpoint."
-msgstr ""
+msgstr "Выберите модель из списка или введите id модели, который обслуживает этот адрес."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Remove {secretName}? This bot will no longer be able to use it."
@@ -568,7 +568,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
-msgstr ""
+msgstr "Проверьте настройки поставщика и повторите тест."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Save credential"
@@ -580,7 +580,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Sign in with the subscription, or test the API key instead."
-msgstr ""
+msgstr "Войдите по подписке или протестируйте API-ключ."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Site"
@@ -588,23 +588,23 @@ msgstr ""
 
 #: src/components/ModelConnectionPreflightNotice.tsx
 msgid "Test API key"
-msgstr ""
+msgstr "Проверить API-ключ"
 
 #: src/components/ModelConnectionPreflightNotice.tsx
 msgid "Test sign-in"
-msgstr ""
+msgstr "Проверить вход"
 
 #: src/components/ModelConnectionPreflightNotice.tsx
 msgid "Testing…"
-msgstr ""
+msgstr "Проверка…"
 
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
-msgstr ""
+msgstr "Время ожидания соединения истекло."
 
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
-msgstr ""
+msgstr "Поставщик ограничивает частоту запросов."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "These saved settings can't be read. Remove it and add it again."
@@ -612,15 +612,15 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "This provider cannot be tested without saving."
-msgstr ""
+msgstr "Этого поставщика нельзя проверить без сохранения."
 
 #: src/lib/model-connection-preflight.ts
 msgid "This provider is not connected yet."
-msgstr ""
+msgstr "Этот поставщик еще не подключен."
 
 #: src/lib/model-connection-preflight.ts
 msgid "Try the test again."
-msgstr ""
+msgstr "Повторите тест."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Type"
@@ -632,7 +632,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Use Connect to verify the key."
-msgstr ""
+msgstr "Используйте «Подключить», чтобы проверить ключ."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Value"
@@ -640,7 +640,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Wait a moment and test again."
-msgstr ""
+msgstr "Подождите немного и повторите тест."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"

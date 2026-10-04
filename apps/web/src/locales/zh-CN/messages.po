@@ -179,7 +179,7 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "A subscription credential is stored securely."
-msgstr ""
+msgstr "订阅凭据已安全存储。"
 
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
@@ -428,7 +428,7 @@ msgstr "始终允许"
 
 #: src/lib/model-connection-preflight.ts
 msgid "An API key is stored for this provider, not a subscription sign-in."
-msgstr ""
+msgstr "此提供方存储的是 API 密钥，不是订阅登录。"
 
 #: src/components/AskCard.tsx
 msgid "Answer"
@@ -444,7 +444,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Authentication failed."
-msgstr ""
+msgstr "身份验证失败。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Basic auth"
@@ -456,23 +456,23 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Check the API key or sign-in, then test again."
-msgstr ""
+msgstr "请检查 API 密钥或登录，然后重新测试。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Check the server URL and network, then test again."
-msgstr ""
+msgstr "请检查服务器 URL 和网络，然后重新测试。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
-msgstr ""
+msgstr "请确认此浏览器会话可以访问该 URL，然后重新测试。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Connection test failed."
-msgstr ""
+msgstr "连接测试失败。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Could not check stored credentials."
-msgstr ""
+msgstr "无法检查已存储的凭据。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
@@ -480,7 +480,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Could not reach the model server."
-msgstr ""
+msgstr "无法连接到模型服务器。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not remove the credential"
@@ -500,7 +500,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Enter a server URL before testing."
-msgstr ""
+msgstr "测试前请输入服务器 URL。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Enter a username and password"
@@ -508,11 +508,11 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Enter an API key before testing."
-msgstr ""
+msgstr "测试前请输入 API 密钥。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
-msgstr ""
+msgstr "请完成订阅登录，然后重新测试。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Header \"{header}\""
@@ -528,11 +528,11 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Model \"{modelId}\" was not listed."
-msgstr ""
+msgstr "模型“{modelId}”未列出。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Models list OK. {modelCount, plural, one {# model} other {# models}} available. Chat was not tested."
-msgstr ""
+msgstr "模型列表正常。{modelCount, plural, one {# 个模型} other {# 个模型}}可用。未测试聊天。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
@@ -540,23 +540,23 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "No models listed."
-msgstr ""
+msgstr "未列出模型。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Paste the OpenAI-compatible base URL, then test again."
-msgstr ""
+msgstr "请粘贴与 OpenAI 兼容的 Base URL，然后重新测试。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Paste your API key, then test again."
-msgstr ""
+msgstr "请粘贴你的 API 密钥，然后重新测试。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Pick a model from the catalog."
-msgstr ""
+msgstr "请从目录中选择模型。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Pick a model from the list or enter a model id served by this endpoint."
-msgstr ""
+msgstr "请从列表中选择模型，或输入此端点提供的模型 ID。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Remove {secretName}? This bot will no longer be able to use it."
@@ -568,7 +568,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
-msgstr ""
+msgstr "请检查提供方设置并重新测试。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Save credential"
@@ -580,7 +580,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Sign in with the subscription, or test the API key instead."
-msgstr ""
+msgstr "请使用订阅登录，或改为测试 API 密钥。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Site"
@@ -588,23 +588,23 @@ msgstr ""
 
 #: src/components/ModelConnectionPreflightNotice.tsx
 msgid "Test API key"
-msgstr ""
+msgstr "测试 API 密钥"
 
 #: src/components/ModelConnectionPreflightNotice.tsx
 msgid "Test sign-in"
-msgstr ""
+msgstr "测试登录"
 
 #: src/components/ModelConnectionPreflightNotice.tsx
 msgid "Testing…"
-msgstr ""
+msgstr "正在测试…"
 
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
-msgstr ""
+msgstr "连接超时。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
-msgstr ""
+msgstr "提供方正在限制请求频率。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "These saved settings can't be read. Remove it and add it again."
@@ -612,15 +612,15 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "This provider cannot be tested without saving."
-msgstr ""
+msgstr "此提供方必须先保存才能测试。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "This provider is not connected yet."
-msgstr ""
+msgstr "此提供方尚未连接。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Try the test again."
-msgstr ""
+msgstr "请重试测试。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Type"
@@ -632,7 +632,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Use Connect to verify the key."
-msgstr ""
+msgstr "请使用“连接”验证密钥。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Value"
@@ -640,7 +640,7 @@ msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Wait a moment and test again."
-msgstr ""
+msgstr "请稍候并重新测试。"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"
