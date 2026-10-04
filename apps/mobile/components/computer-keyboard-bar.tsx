@@ -54,8 +54,18 @@ export function ComputerKeyboardBar({
     );
   }
 
+  function placeCaretAtEnd() {
+    const end = draft.length;
+    inputRef.current?.setNativeProps({ selection: { start: end, end } });
+  }
+
   function onChangeText(next: string) {
     const edit = normalizeComputerKeyboardEdit(draft, next);
+    if (!edit.aligned) {
+      const end = draft.length;
+      inputRef.current?.setNativeProps({ text: draft, selection: { start: end, end } });
+      return;
+    }
     const latched = control;
     const commands = commandsForKeyboardChange(edit.changes, latched);
     if (commands.some((command) => command.type === "key" && command.name === "Return")) {
@@ -100,6 +110,11 @@ export function ComputerKeyboardBar({
         ref={inputRef}
         value={draft}
         onChangeText={onChangeText}
+        onSelectionChange={(event) => {
+          const { start, end } = event.nativeEvent.selection;
+          if (start >= draft.length && end >= draft.length) return;
+          placeCaretAtEnd();
+        }}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onSubmitEditing={onSubmitEditing}

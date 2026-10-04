@@ -4,10 +4,12 @@ import {
   COMPUTER_KEYBOARD_SEED,
   commandsForKeyboardChange,
   computerKeyboardChanges,
+  computerKeyboardPadding,
   computerKeyboardReadyProbe,
   computerKeyboardScript,
   createComputerKeyboardBridge,
   isComputerKeyboardReadyMessage,
+  isRemoteAlignedKeyboardEdit,
   nextComputerKeyboardDraft,
   normalizeComputerKeyboardEdit,
 } from "./computer-keyboard";
@@ -86,6 +88,25 @@ describe("computer keyboard edits", () => {
     expect(wiped.changes).toEqual({ backspaces: 3, text: "" });
   });
 
+  it("drops an edit inside the seed padding and keeps a correction in the typed suffix", () => {
+    const draft = `${COMPUTER_KEYBOARD_SEED}ab`;
+    expect(computerKeyboardPadding(draft)).toBe(COMPUTER_KEYBOARD_SEED.length);
+    const insideSeed = `${COMPUTER_KEYBOARD_SEED.slice(0, -1)}X${COMPUTER_KEYBOARD_SEED.slice(-1)}ab`;
+    expect(isRemoteAlignedKeyboardEdit(draft, insideSeed)).toBe(false);
+    const edit = normalizeComputerKeyboardEdit(draft, insideSeed);
+    expect(edit.aligned).toBe(false);
+    expect(edit.draft).toBe(draft);
+    expect(edit.changes).toEqual({ backspaces: 0, text: "" });
+    expect(commandsForKeyboardChange(edit.changes, true)).toEqual([]);
+
+    const corrected = normalizeComputerKeyboardEdit(
+      `${COMPUTER_KEYBOARD_SEED}recieve`,
+      `${COMPUTER_KEYBOARD_SEED}receive`,
+    );
+    expect(corrected.aligned).toBe(true);
+    expect(corrected.changes).toEqual({ backspaces: 4, text: "eive" });
+  });
+
   it("sends Ctrl as a chord on only the next key", () => {
     expect(commandsForKeyboardChange({ backspaces: 0, text: "c" }, true)).toEqual([
       { type: "char", text: "c", control: true },
@@ -127,9 +148,11 @@ describe("computer keyboard edits", () => {
     expect(bridge.push(text)).toEqual([]);
     expect(bridge.push(enter)).toEqual([]);
     expect(bridge.ready()).toEqual([text, enter]);
+    expect(bridge.isReady()).toBe(true);
     expect(bridge.push(text)).toEqual([text]);
     expect(bridge.ready()).toEqual([]);
     bridge.reset();
+    expect(bridge.isReady()).toBe(false);
     expect(bridge.push(enter)).toEqual([]);
     expect(bridge.ready()).toEqual([enter]);
   });

@@ -55,14 +55,42 @@ function withReturnBoundaries(value: string): string {
   return value.replace(/\r\n|\r/g, "\n");
 }
 
+/** Leading seed characters that were never sent. An edit there is not the remote caret. */
+export function computerKeyboardPadding(draft: string): number {
+  const seed = COMPUTER_KEYBOARD_SEED;
+  if (draft.startsWith(seed)) return seed.length;
+  if (seed.startsWith(draft)) return draft.length;
+  let index = 0;
+  const limit = Math.min(draft.length, seed.length);
+  while (index < limit && draft.charAt(index) === seed.charAt(index)) index += 1;
+  return index;
+}
+
+/**
+ * Appends and end deletions match a remote caret at the end of the draft.
+ * A change inside the seed padding would backspace or retype characters the remote never got.
+ * A correction in the typed suffix is replayed from the first changed character through the end.
+ */
+export function isRemoteAlignedKeyboardEdit(oldValue: string, newValue: string): boolean {
+  if (newValue.startsWith(oldValue) || oldValue.startsWith(newValue)) return true;
+  let index = 0;
+  const limit = Math.min(oldValue.length, newValue.length);
+  while (index < limit && oldValue.charAt(index) === newValue.charAt(index)) index += 1;
+  return index >= computerKeyboardPadding(oldValue);
+}
+
 export function normalizeComputerKeyboardEdit(
   oldValue: string,
   nextValue: string,
-): { changes: { backspaces: number; text: string }; draft: string } {
+): { changes: { backspaces: number; text: string }; draft: string; aligned: boolean } {
   const next = withReturnBoundaries(nextValue);
+  if (!isRemoteAlignedKeyboardEdit(oldValue, next)) {
+    return { changes: { backspaces: 0, text: "" }, draft: oldValue, aligned: false };
+  }
   return {
     changes: computerKeyboardChanges(oldValue, next),
     draft: nextComputerKeyboardDraft(next),
+    aligned: true,
   };
 }
 
@@ -145,6 +173,7 @@ export function isComputerKeyboardReadyMessage(data: string, session: string): b
 export function createComputerKeyboardBridge(): {
   push(command: ComputerKeyboardCommand): ComputerKeyboardCommand[];
   ready(): ComputerKeyboardCommand[];
+  isReady(): boolean;
   reset(): void;
 } {
   let accepting = false;
@@ -163,6 +192,9 @@ export function createComputerKeyboardBridge(): {
       const flushed = pending.slice();
       pending.length = 0;
       return flushed;
+    },
+    isReady() {
+      return accepting;
     },
     reset() {
       accepting = false;

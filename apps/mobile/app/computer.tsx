@@ -23,6 +23,7 @@ import {
   computerLabel,
   controlLabel,
   embeddableScreenUrl,
+  nextLoadedScreenUrl,
   previewPlaceholder,
   readScreenUrl,
   retainScreenSource,
@@ -63,12 +64,23 @@ export default function Computer() {
     session: 0,
     bridge: createComputerKeyboardBridge(),
   });
+  const heldScreenUrl = useRef<string | null>(null);
 
   const embeddedScreenUrl = embeddableScreenUrl(screenUrl, currentApiBase());
   useEffect(() => setScreenError(null), [embeddedScreenUrl]);
 
   const hasControl = computer?.controlHolder === "user" && computer.controlBotId === botId;
-  const keyboardSurfaceKey = `${computerOpen}:${hasControl}:${embeddedScreenUrl ?? ""}`;
+  const screenVisible =
+    computerOpen && computer?.state === "running" && Boolean(embeddedScreenUrl) && !screenError;
+  const loadedScreenUrl = nextLoadedScreenUrl(
+    heldScreenUrl.current,
+    embeddedScreenUrl,
+    screenVisible,
+  );
+  heldScreenUrl.current = loadedScreenUrl;
+  // The gate follows the page the WebView actually loaded. A capability refresh that
+  // does not reload that page must not open a session the bridge will never acknowledge.
+  const keyboardSurfaceKey = `${computerOpen}:${hasControl}:${loadedScreenUrl ?? ""}`;
   if (keyboardGate.current.key !== keyboardSurfaceKey) {
     keyboardGate.current = {
       key: keyboardSurfaceKey,
@@ -77,6 +89,15 @@ export default function Computer() {
     };
   }
   const keyboardSession = String(keyboardGate.current.session);
+
+  useEffect(() => {
+    if (!computerOpen || !hasControl || !loadedScreenUrl) return;
+    const gate = keyboardGate.current;
+    if (gate.bridge.isReady()) return;
+    const webView = screenWebViewRef.current;
+    if (!webView) return;
+    webView.injectJavaScript(computerKeyboardReadyProbe(String(gate.session)));
+  }, [computerOpen, hasControl, loadedScreenUrl, embeddedScreenUrl, keyboardSession]);
 
   function injectKeyboardCommands(commands: ComputerKeyboardCommand[]) {
     const webView = screenWebViewRef.current;
@@ -492,9 +513,9 @@ export default function Computer() {
                 </View>
               </SafeAreaView>
               <View style={{ flex: 1, backgroundColor: tokens.card }}>
-                {computer?.state === "running" && embeddedScreenUrl && !screenError ? (
+                {loadedScreenUrl ? (
                   <ScreenWebView
-                    url={embeddedScreenUrl}
+                    url={loadedScreenUrl}
                     interactive={hasControl}
                     nativeKeyboard={hasControl}
                     keyboardSession={keyboardSession}
