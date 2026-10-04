@@ -14,6 +14,17 @@ const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const EXPO_PUSH_TIMEOUT_MS = 15_000;
 export const MAX_EXPO_PUSH_RESPONSE_BYTES = 64 * 1024;
 
+/** Data a notification tap uses to open the bot or group thread in its space. */
+export function expoPushData(message: NotificationMessage, spaceId: string) {
+  return {
+    kind: message.kind,
+    botId: message.botId,
+    threadId: message.threadId,
+    ...(spaceId ? { spaceId } : {}),
+    ...(message.groupId ? { groupId: message.groupId } : {}),
+  };
+}
+
 export function pushTokenPath(dataDir: string, userId: string) {
   return path.join(dataDir, "push-tokens", `${userId}.txt`);
 }
@@ -127,7 +138,7 @@ export class ExpoPushProvider implements NotificationProvider {
           body: message.body,
           collapseId: message.threadId,
           tag: message.threadId,
-          data: { kind: message.kind, botId: message.botId, threadId: message.threadId },
+          data: expoPushData(message, context.spaceId),
         }),
         signal,
       });

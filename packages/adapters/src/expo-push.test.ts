@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deletePushToken,
   ExpoPushProvider,
+  expoPushData,
   expoPushErrorMessage,
   loadPushToken,
   MAX_EXPO_PUSH_RESPONSE_BYTES,
@@ -146,7 +147,40 @@ describe("expo push", () => {
     expect(body.title).toBe("Need you");
     expect(body.collapseId).toBe("th-1");
     expect(body.tag).toBe("th-1");
-    expect(body.data.kind).toBe("takeover");
+    expect(body.data).toEqual({
+      kind: "takeover",
+      botId: "bot-1",
+      threadId: "th-1",
+      spaceId: "w",
+    });
+  });
+
+  it("puts the space and group on the payload a tap opens", () => {
+    expect(
+      expoPushData(
+        {
+          kind: "completion",
+          title: "done",
+          body: "ok",
+          botId: "bot-1",
+          threadId: "thread-1",
+          groupId: "group-1",
+        },
+        "space-1",
+      ),
+    ).toEqual({
+      kind: "completion",
+      botId: "bot-1",
+      threadId: "thread-1",
+      spaceId: "space-1",
+      groupId: "group-1",
+    });
+    expect(
+      expoPushData(
+        { kind: "completion", title: "done", body: "ok", botId: "bot-1", threadId: "thread-1" },
+        "",
+      ),
+    ).toEqual({ kind: "completion", botId: "bot-1", threadId: "thread-1" });
   });
 
   it("throws when Expo rejects the request", async () => {
