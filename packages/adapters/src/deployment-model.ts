@@ -12,9 +12,11 @@ const HOST_CREDENTIALS = "<authenticated>";
  * The deployment-wide model default: which provider a run falls back to when no user
  * credential applies, and the key for that provider.
  *
- * `configured` is whether that default can run: the provider has a deployment key, or it
- * authenticates from the host and `PI_DEFAULT_MODEL` names the model, since no default model
- * id is assumed for such a provider. Host credentials are never returned as `key`; Pi
+ * `configured` is whether that default can run: the provider has a deployment key, or the
+ * operator opted in with `PI_DEFAULT_CREDENTIALS=host`, the provider authenticates from the host,
+ * and `PI_DEFAULT_MODEL` names the model, since no default model id is assumed for such a
+ * provider. The opt-in keeps a host that merely has cloud credentials from paying for every
+ * user's runs without anyone choosing it. Host credentials are never returned as `key`; Pi
  * resolves them itself when a run passes no key. They are read from the process, where the
  * runtime authenticates from, never from `env`: credentials only `env` carries could not be
  * used by a run.
@@ -37,7 +39,10 @@ export function resolveDeploymentModel(env: NodeJS.ProcessEnv = process.env) {
   const explicitModel = env.PI_DEFAULT_MODEL?.trim();
   const key = keys[provider];
   const hostCredentials =
-    !key && Boolean(explicitModel) && getEnvApiKey(provider) === HOST_CREDENTIALS;
+    !key &&
+    Boolean(explicitModel) &&
+    env.PI_DEFAULT_CREDENTIALS?.trim() === "host" &&
+    getEnvApiKey(provider) === HOST_CREDENTIALS;
   return {
     provider,
     model: explicitModel || models[provider] || models.openrouter!,

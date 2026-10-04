@@ -52,6 +52,7 @@ describe("resolveDeploymentModel", () => {
     const taskRole = {
       PI_DEFAULT_PROVIDER: "amazon-bedrock",
       PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5",
+      PI_DEFAULT_CREDENTIALS: "host",
     };
     expect(resolveDeploymentModel(taskRole)).toEqual({
       provider: "amazon-bedrock",
@@ -61,8 +62,20 @@ describe("resolveDeploymentModel", () => {
     });
   });
 
+  it("leaves a deployment that did not opt in unchanged, even with host credentials", () => {
+    vi.stubEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/credentials/example");
+    const withoutOptIn = {
+      PI_DEFAULT_PROVIDER: "amazon-bedrock",
+      PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5",
+    };
+    expect(resolveDeploymentModel(withoutOptIn).configured).toBe(false);
+    expect(
+      resolveDeploymentModel({ ...withoutOptIn, PI_DEFAULT_CREDENTIALS: "true" }).configured,
+    ).toBe(false);
+  });
+
   it("needs both host credentials and an explicit model for a keyless provider", () => {
-    const provider = { PI_DEFAULT_PROVIDER: "amazon-bedrock" };
+    const provider = { PI_DEFAULT_PROVIDER: "amazon-bedrock", PI_DEFAULT_CREDENTIALS: "host" };
     const model = { ...provider, PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5" };
     expect(resolveDeploymentModel(model).configured).toBe(false);
     vi.stubEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/credentials/example");
@@ -74,6 +87,7 @@ describe("resolveDeploymentModel", () => {
       resolveDeploymentModel({
         PI_DEFAULT_PROVIDER: "amazon-bedrock",
         PI_DEFAULT_MODEL: "eu.anthropic.claude-sonnet-5",
+        PI_DEFAULT_CREDENTIALS: "host",
         AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/example",
       }).configured,
     ).toBe(false);
