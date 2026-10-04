@@ -135,8 +135,8 @@ function destinationMetadata(record: Record<string, unknown>): Record<string, un
   for (const key of destinationFields) {
     if (!Object.hasOwn(record, key)) continue;
     if (key === "auth") {
-      const auth = BotSecretAuth.safeParse(record.auth);
-      if (auth.success) metadata.auth = auth.data;
+      const auth = authMetadata(record.auth);
+      if (auth !== undefined) metadata.auth = auth;
       continue;
     }
     if (key === "origin") {
@@ -154,9 +154,33 @@ function destinationMetadata(record: Record<string, unknown>): Record<string, un
 }
 
 /**
- * Keep a bare origin. Userinfo, query, fragment, and path can carry a credential, and the
- * effect row is written before destination validation. A cleaned origin is returned when
- * dropping those parts leaves one; otherwise a placeholder keeps the origin error.
+ * Parsed auth, or a stand-in that fails the same way. The stand-in does not copy the
+ * original fields: an invalid method or header can still carry a secret, and the effect
+ * row is written before destination validation.
+ */
+function authMetadata(value: unknown): unknown {
+  const parsed = BotSecretAuth.safeParse(value);
+  if (parsed.success) return parsed.data;
+  if (!isPlainObject(value)) return undefined;
+  if (value.type === "header") {
+    if (typeof value.name !== "string") return { type: "header" };
+    const header = BotSecretAuth.safeParse({ type: "header", name: value.name });
+    const unsupported =
+      !header.success &&
+      header.error.issues.some((issue) => issue.message === "Unsupported credential header");
+    return { type: "header", name: unsupported ? "Cookie" : "bad header" };
+  }
+  if (value.type === "basic") {
+    if (typeof value.username !== "string") return { type: "basic" };
+    return { type: "basic", username: ":" };
+  }
+  return { type: "invalid" };
+}
+
+/**
+ * Keep a bare origin. Never return the raw string: `new URL` resolves `..`, so the raw
+ * path can still hold a secret while the parsed path is `/`. Userinfo, query, fragment,
+ * and a real path are removed. A placeholder keeps the origin error when no bare origin remains.
  */
 function originMetadata(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -167,7 +191,7 @@ function originMetadata(value: unknown): string | undefined {
     return "invalid-origin";
   }
   const bare = !url.username && !url.password && !url.search && !url.hash && url.pathname === "/";
-  if (bare) return value;
+  if (bare) return url.origin;
   url.username = "";
   url.password = "";
   url.search = "";

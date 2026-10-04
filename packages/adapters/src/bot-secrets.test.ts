@@ -504,7 +504,37 @@ describe("credentialArgument", () => {
           auth: { token: plantedSecret },
         },
       }),
-    ).toEqual({ name: destination.name, origin: destination.origin });
+    ).toEqual({
+      name: destination.name,
+      origin: destination.origin,
+      auth: { type: "invalid" },
+    });
+    const invalidMethod = credentialArgument({
+      credential: { ...destination, auth: { type: "cookie", token: plantedSecret } },
+    });
+    expect(invalidMethod).toEqual({ ...destination, auth: { type: "invalid" } });
+    expect(JSON.stringify(invalidMethod)).not.toContain(plantedSecret);
+    expect(
+      resolveRequestSecretDestination({
+        credential: { ...destination, auth: { type: "cookie", token: plantedSecret } },
+      }).error,
+    ).toMatch(/auth\.type:/);
+    expect(
+      credentialArgument({
+        credential: {
+          ...destination,
+          auth: { type: "header", name: "Cookie", value: plantedSecret },
+        },
+      }),
+    ).toEqual({ ...destination, auth: { type: "header", name: "Cookie" } });
+    expect(
+      resolveRequestSecretDestination({
+        credential: {
+          ...destination,
+          auth: { type: "header", name: "Cookie", value: plantedSecret },
+        },
+      }).error,
+    ).toMatch(/Unsupported credential header/);
 
     expect(
       credentialArgument({
@@ -573,6 +603,15 @@ describe("credentialArgument", () => {
         },
       }),
     ).toEqual({ destination });
+
+    for (const origin of [
+      `https://api.example.test/${plantedSecret}/..`,
+      `https://api.example.test/${plantedSecret}/%2e%2e`,
+    ]) {
+      const collapsed = credentialArgument({ credential: { ...destination, origin } });
+      expect(collapsed).toEqual(destination);
+      expect(JSON.stringify(collapsed)).not.toContain(plantedSecret);
+    }
   });
 });
 
