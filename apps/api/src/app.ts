@@ -500,6 +500,7 @@ export async function createApp(
       teamChatJudgeProvider: env.teamChatJudgeProvider,
       teamChatJudgeModel: env.teamChatJudgeModel,
       deploymentModelConfigured: env.deploymentModelConfigured,
+      deploymentModelHostCredentials: env.deploymentModelHostCredentials,
       webOrigin: env.webOrigin,
       privacyPolicyUrl: env.privacyPolicyUrl,
       screenProxySecret: env.screenProxySecret,

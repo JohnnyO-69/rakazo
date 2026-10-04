@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveDeploymentModel } from "./deployment-model.js";
+import { hostCredentialSource, resolveDeploymentModel } from "./deployment-model.js";
 
 // Host credentials come from the process, so blank the ones a developer machine or CI
 // host may carry; each case states its own.
@@ -28,6 +28,7 @@ describe("resolveDeploymentModel", () => {
       model: "openai/gpt-6-luna",
       key: "or-key",
       configured: true,
+      hostCredentials: false,
     });
     // The whole point: switching the provider switches the key with it.
     expect(resolveDeploymentModel({ ...both, PI_DEFAULT_PROVIDER: "anthropic" })).toEqual({
@@ -35,6 +36,7 @@ describe("resolveDeploymentModel", () => {
       model: "claude-sonnet-5",
       key: "sk-ant-key",
       configured: true,
+      hostCredentials: false,
     });
     // A provider with no key configured yields no key — never another vendor's.
     expect(
@@ -44,6 +46,7 @@ describe("resolveDeploymentModel", () => {
       model: "claude-sonnet-5",
       key: undefined,
       configured: false,
+      hostCredentials: false,
     });
   });
 
@@ -59,6 +62,7 @@ describe("resolveDeploymentModel", () => {
       model: "eu.anthropic.claude-sonnet-5",
       key: undefined,
       configured: true,
+      hostCredentials: true,
     });
   });
 
@@ -91,5 +95,12 @@ describe("resolveDeploymentModel", () => {
         AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/example",
       }).configured,
     ).toBe(false);
+  });
+});
+
+describe("hostCredentialSource", () => {
+  it("names the cloud identity a provider authenticates with from the host", () => {
+    expect(hostCredentialSource("amazon-bedrock")).toBe("AWS IAM");
+    expect(hostCredentialSource("google-vertex")).toBe("Google Cloud");
   });
 });

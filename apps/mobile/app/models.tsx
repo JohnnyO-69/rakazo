@@ -91,6 +91,8 @@ export default function Models() {
   const [credentials, setCredentials] = useState<MobileModelCredential[]>([]);
   const [me, setMe] = useState<MobileMe | null>(null);
   const [provider, setProvider] = useState("");
+  // The provider whose own-key form is open instead of its server credentials.
+  const [ownKeyProvider, setOwnKeyProvider] = useState<string | null>(null);
   const [showAllProviders, setShowAllProviders] = useState(false);
   const [modelId, setModelId] = useState("");
   const [modelSearch, setModelSearch] = useState({ provider: "", query: "" });
@@ -865,6 +867,17 @@ export default function Models() {
     </>
   ) : null;
 
+  const ownKeySwitch = (
+    <View style={styles.switchRow}>
+      <Text style={styles.switchLabel}>{t("Use server credentials")}</Text>
+      <Switch
+        accessibilityLabel={t("Use server credentials")}
+        value={ownKeyProvider !== provider}
+        onValueChange={(on) => setOwnKeyProvider(on ? null : provider)}
+      />
+    </View>
+  );
+
   const compatKeySection =
     isOpenAiCompatible && acceptsKey ? (
       <View style={styles.keySection}>
@@ -1378,8 +1391,19 @@ export default function Models() {
               {saveRow}
               <View style={styles.maintenanceSection}>{catalogConnectionControls}</View>
             </>
+          ) : provider === me?.hostCredentialProvider && ownKeyProvider !== provider ? (
+            <>
+              {ownKeySwitch}
+              <Text style={styles.secondary}>
+                {t("Uses this server's own {source} credentials to access {provider}.", {
+                  source: me?.hostCredentialSource ?? "",
+                  provider: selected.providerName ?? selected.provider,
+                })}
+              </Text>
+            </>
           ) : (
             <>
+              {provider === me?.hostCredentialProvider ? ownKeySwitch : null}
               <Text style={styles.secondary}>
                 {t("Connect this provider to use it as your personal model.")}
               </Text>
@@ -1433,6 +1457,18 @@ function createModelsStyles() {
       fontSize: 14,
       lineHeight: 20,
       marginTop: 4,
+    },
+    switchRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 12,
+      justifyContent: "space-between",
+      marginBottom: 8,
+    },
+    switchLabel: {
+      color: native.label,
+      flex: 1,
+      fontSize: 15,
     },
     sectionTitle: {
       color: native.secondaryLabel,

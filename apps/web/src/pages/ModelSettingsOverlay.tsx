@@ -38,9 +38,11 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  Label,
   ModelThinkingOptions,
   NativeSelect,
   NativeSelectOption,
+  Switch,
 } from "@rakazo/ui-web";
 import { Check, ChevronDown, Copy, X } from "lucide-react";
 import {
@@ -81,6 +83,9 @@ export function ModelSettingsOverlay({
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [me, setMe] = useState<Me | null>(null);
   const [provider, setProvider] = useState("");
+  // The provider whose own-key form is open instead of its server credentials.
+  const [ownKeyProvider, setOwnKeyProvider] = useState<string | null>(null);
+  const ownKeyId = useId();
   const [providerQuery, setProviderQuery] = useState("");
   const [modelId, setModelId] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -261,7 +266,9 @@ export function ModelSettingsOverlay({
   const modelsForProvider = catalog.filter((entry) => entry.provider === provider);
   const selected = modelsForProvider.find((entry) => entry.id === modelId) ?? modelsForProvider[0];
   selectedLabelRef.current = selected?.label;
-  const disconnectName = selected?.providerName ?? selected?.provider ?? "";
+  const selectedProviderName = selected?.providerName ?? selected?.provider ?? "";
+  const disconnectName = selectedProviderName;
+  const hostCredentialSource = me?.hostCredentialSource ?? "";
   const isOpenAiCompatible = provider === OPENAI_COMPATIBLE_PROVIDER_ID;
   const credential = credentials.find((entry) => entry.provider === provider);
   const currentEntry = catalog.find(
@@ -1209,6 +1216,36 @@ export function ModelSettingsOverlay({
                   <div className="mt-5">{catalogModelConfig}</div>
                   {saveButton}
                   <div className="mt-6 border-t border-border pt-5">{connectionControls}</div>
+                </>
+              ) : provider === me?.hostCredentialProvider ? (
+                <>
+                  <div className="flex items-start gap-3">
+                    <Switch
+                      id={ownKeyId}
+                      className="mt-0.5"
+                      checked={ownKeyProvider !== provider}
+                      onCheckedChange={(checked) => setOwnKeyProvider(checked ? null : provider)}
+                    />
+                    <Label
+                      htmlFor={ownKeyId}
+                      className="text-[14px] font-normal text-foreground/75"
+                    >
+                      <Trans>Use server credentials</Trans>
+                    </Label>
+                  </div>
+                  {ownKeyProvider === provider ? (
+                    <>
+                      <div className="mt-5">{connectionControls}</div>
+                      <div className="mt-6">{catalogModelConfig}</div>
+                    </>
+                  ) : (
+                    <p className="mt-5 text-sm leading-[1.5] text-muted-foreground">
+                      <Trans>
+                        Uses this server's own {hostCredentialSource} credentials to access{" "}
+                        {selectedProviderName}.
+                      </Trans>
+                    </p>
+                  )}
                 </>
               ) : (
                 <>
