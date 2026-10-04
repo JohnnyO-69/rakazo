@@ -95,13 +95,19 @@ export function resolveRequestSecretDestination(
   return { error: "Provide either a reusable credential destination or a connectionId." };
 }
 
-/** Credential object from `credential`, a JSON string of that object, or top-level fields. */
+const destinationFields = ["name", "origin", "auth"] as const;
+
+/**
+ * Credential object from `credential`, a JSON string of that object, or top-level fields.
+ * Only destination metadata is returned. A partial `name` / `origin` / `auth` set is still
+ * a credential attempt so it cannot fall through to `connectionId`.
+ */
 export function credentialArgument(args: Record<string, unknown>): unknown {
   if (Object.hasOwn(args, "credential") && args.credential != null && args.credential !== "") {
     return parsedCredentialObject(args.credential);
   }
-  if (Object.hasOwn(args, "name") && Object.hasOwn(args, "origin") && Object.hasOwn(args, "auth")) {
-    return { name: args.name, origin: args.origin, auth: args.auth };
+  if (destinationFields.some((key) => Object.hasOwn(args, key))) {
+    return destinationMetadata(args);
   }
   return undefined;
 }
@@ -113,13 +119,28 @@ export function connectionIdArgument(value: unknown): string | undefined {
   return trimmed;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** `{ name, origin, auth }` only. `value`, `secret`, and any other extras must not survive. */
+function destinationMetadata(record: Record<string, unknown>): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  for (const key of destinationFields) {
+    if (Object.hasOwn(record, key)) metadata[key] = record[key];
+  }
+  return metadata;
+}
+
 function parsedCredentialObject(value: unknown): unknown {
-  if (typeof value !== "string") return value;
+  if (typeof value !== "string") {
+    return isPlainObject(value) ? destinationMetadata(value) : value;
+  }
   const trimmed = value.trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return value;
   try {
     const parsed = JSON.parse(trimmed) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    if (isPlainObject(parsed)) return destinationMetadata(parsed);
   } catch {
     return value;
   }

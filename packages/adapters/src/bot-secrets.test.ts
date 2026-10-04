@@ -3,6 +3,7 @@ import { encodeLoginSecret } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  credentialArgument,
   normalizeSecretDestination,
   requestWithBotSecret,
   resolveLoginFill,
@@ -352,6 +353,93 @@ describe("resolveRequestSecretDestination", () => {
     expect(resolved.error).toMatch(/Invalid credential destination — name:/);
     expect(resolved.error).not.toMatch(/reusable credential destination/);
     expect(resolved.error).not.toBe("Specify a credential name, HTTPS origin, and auth method.");
+  });
+
+  it("rejects a partial top-level credential instead of using connectionId", () => {
+    const withConnection = resolveRequestSecretDestination({
+      label: "API key",
+      purpose: "api_key",
+      name: destination.name,
+      origin: destination.origin,
+      connectionId: "conn_1",
+    });
+    const withoutConnection = resolveRequestSecretDestination({
+      label: "API key",
+      purpose: "api_key",
+      name: destination.name,
+      origin: destination.origin,
+    });
+    expect(withConnection.connectionId).toBeUndefined();
+    expect(withConnection.destination).toBeUndefined();
+    expect(withConnection.error).toMatch(/Invalid credential destination — auth:/);
+    expect(withoutConnection).toEqual({ error: withConnection.error });
+  });
+
+  it("keeps a complete top-level credential ahead of connectionId", () => {
+    expect(
+      resolveRequestSecretDestination({
+        name: destination.name,
+        origin: destination.origin,
+        auth: destination.auth,
+        connectionId: "conn_1",
+        secret: plantedSecret,
+      }),
+    ).toEqual({ destination });
+  });
+
+  it("prefers a nested credential over connectionId and a partial top-level destination", () => {
+    expect(
+      resolveRequestSecretDestination({
+        credential: destination,
+        name: destination.name,
+        origin: destination.origin,
+        connectionId: "conn_1",
+      }),
+    ).toEqual({ destination });
+    expect(
+      resolveRequestSecretDestination({
+        credential: JSON.stringify(destination),
+        name: "only_name",
+        connectionId: "conn_1",
+      }),
+    ).toEqual({ destination });
+  });
+});
+
+describe("credentialArgument", () => {
+  const plantedSecret = "planted-secret-value";
+
+  it("drops planted secret fields from an object credential", () => {
+    const credential = credentialArgument({
+      credential: { ...destination, value: plantedSecret, secret: plantedSecret },
+    });
+    expect(credential).toEqual(destination);
+    expect(JSON.stringify(credential)).not.toContain(plantedSecret);
+  });
+
+  it("drops planted secret fields from a JSON-string credential", () => {
+    const credential = credentialArgument({
+      credential: JSON.stringify({
+        ...destination,
+        value: plantedSecret,
+        secret: plantedSecret,
+        password: plantedSecret,
+        plaintext: plantedSecret,
+      }),
+    });
+    expect(credential).toEqual(destination);
+    expect(JSON.stringify(credential)).not.toContain(plantedSecret);
+  });
+
+  it("returns a partial top-level destination so the missing field can be named", () => {
+    expect(
+      credentialArgument({
+        name: destination.name,
+        origin: destination.origin,
+        connectionId: "conn_1",
+        secret: plantedSecret,
+      }),
+    ).toEqual({ name: destination.name, origin: destination.origin });
   });
 });
 
