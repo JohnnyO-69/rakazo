@@ -6,7 +6,7 @@ import { notificationResponseRoute } from "./notification-open";
 
 const openedResponses = new Set<string>();
 
-async function openNotificationResponse(
+export async function openNotificationResponse(
   response: Notifications.NotificationResponse | null | undefined,
 ): Promise<boolean> {
   if (!response) return false;
@@ -19,6 +19,9 @@ async function openNotificationResponse(
   openedResponses.add(key);
   try {
     if (!(await loadSessionToken())) {
+      // Expo keeps this tap as the last response. Leaving it there would open
+      // the thread on a later cold start, after sign-in, with no new tap.
+      Notifications.clearLastNotificationResponse();
       openedResponses.delete(key);
       return false;
     }

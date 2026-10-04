@@ -6,6 +6,7 @@ import {
   notificationOpenTarget,
   notificationOpenTargetFromLink,
   notificationResponseRoute,
+  threadRouteSpaceOnFocus,
   threadSpaceRequest,
   threadSpaceSwitchResult,
 } from "./notification-open.js";
@@ -122,10 +123,14 @@ describe("notification tap routing", () => {
   it("wires the tap listener for a running app and the last response for a cold start", () => {
     const layout = readFileSync(resolve(mobileRoot, "app/_layout.tsx"), "utf8");
     const opener = readFileSync(resolve(mobileRoot, "lib/open-notification.ts"), "utf8");
+    const thread = readFileSync(resolve(mobileRoot, "app/thread.tsx"), "utf8");
     expect(layout).toContain("useNotificationResponses(ready)");
     expect(opener).toContain("addNotificationResponseReceivedListener");
     expect(opener).toContain("useLastNotificationResponse");
     expect(opener).toContain("router.push(target)");
+    expect(opener).toContain("Notifications.clearLastNotificationResponse()");
+    expect(thread).toContain("threadRouteSpaceOnFocus");
+    expect(thread).toContain("useIsFocused()");
   });
 });
 
@@ -155,5 +160,58 @@ describe("notification space switch", () => {
     expect(threadSpaceSwitchResult("space-2", true, "space-2")).toBe("ready");
     expect(threadSpaceSwitchResult("space-2", true, "space-1")).toBe("failed");
     expect(threadSpaceSwitchResult("space-2", false, "space-2")).toBe("failed");
+  });
+
+  it("adopts the live space when a covered thread route is shown again", () => {
+    const next = threadRouteSpaceOnFocus({
+      focused: true,
+      appliedFocus: false,
+      activeSpaceId: "space-1",
+      liveSpaceId: "space-2",
+      switchFailed: true,
+    });
+    expect(next).toEqual({
+      focused: true,
+      appliedFocus: true,
+      activeSpaceId: "space-2",
+      liveSpaceId: "space-2",
+      switchFailed: false,
+    });
+    expect(threadSpaceRequest("space-1", next.activeSpaceId)).toEqual({
+      action: "switch",
+      spaceId: "space-1",
+    });
+  });
+
+  it("keeps showing a route that never named a space", () => {
+    const next = threadRouteSpaceOnFocus({
+      focused: true,
+      appliedFocus: false,
+      activeSpaceId: "space-1",
+      liveSpaceId: "space-2",
+      switchFailed: false,
+    });
+    expect(threadSpaceRequest(undefined, next.activeSpaceId)).toEqual({ action: "show" });
+  });
+
+  it("does not follow a space change while the route stays covered or stays visible", () => {
+    const covered = threadRouteSpaceOnFocus({
+      focused: false,
+      appliedFocus: true,
+      activeSpaceId: "space-1",
+      liveSpaceId: "space-2",
+      switchFailed: false,
+    });
+    expect(covered.activeSpaceId).toBe("space-1");
+    expect(covered.appliedFocus).toBe(false);
+    expect(
+      threadRouteSpaceOnFocus({
+        focused: true,
+        appliedFocus: true,
+        activeSpaceId: "space-1",
+        liveSpaceId: "space-2",
+        switchFailed: false,
+      }).activeSpaceId,
+    ).toBe("space-1");
   });
 });

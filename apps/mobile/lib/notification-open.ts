@@ -101,3 +101,24 @@ export function threadSpaceSwitchResult(
 ): "ready" | "failed" {
   return switched && selectedSpaceId === requestedSpaceId ? "ready" : "failed";
 }
+
+export type ThreadRouteFocus = {
+  focused: boolean;
+  appliedFocus: boolean;
+  activeSpaceId: string | null;
+  liveSpaceId: string | null;
+  switchFailed: boolean;
+};
+
+/** When a covered thread route is shown again, follow the space selected now. */
+export function threadRouteSpaceOnFocus(input: ThreadRouteFocus): ThreadRouteFocus {
+  if (input.focused === input.appliedFocus) return input;
+  if (!input.focused) return { ...input, appliedFocus: false };
+  return {
+    focused: true,
+    appliedFocus: true,
+    activeSpaceId: input.liveSpaceId,
+    liveSpaceId: input.liveSpaceId,
+    switchFailed: false,
+  };
+}

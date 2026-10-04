@@ -36,7 +36,13 @@ import {
   withLiveStreamingProgress,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
-import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import {
+  useFocusEffect,
+  useIsFocused,
+  useLocalSearchParams,
+  useNavigation,
+  useRouter,
+} from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import {
   memo,
@@ -126,7 +132,11 @@ import {
   truncateQuoteExcerpt,
 } from "../lib/message-presentation";
 import { native, useMobileTokens, useResolvedAppearance } from "../lib/native";
-import { threadSpaceRequest, threadSpaceSwitchResult } from "../lib/notification-open";
+import {
+  threadRouteSpaceOnFocus,
+  threadSpaceRequest,
+  threadSpaceSwitchResult,
+} from "../lib/notification-open";
 import {
   type PickedAttachment,
   pickDocuments,
@@ -199,12 +209,27 @@ export default function ThreadRoute() {
   const tokens = useMobileTokens();
   const { t } = useI18n();
   const router = useRouter();
+  const focused = useIsFocused();
   const { spaceId } = useLocalSearchParams<{ spaceId?: string | string[] }>();
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(() => selectedSpaceId());
   const [switchFailed, setSwitchFailed] = useState(false);
-  const request = threadSpaceRequest(spaceId, activeSpaceId);
+  const [appliedFocus, setAppliedFocus] = useState(focused);
+  // Before paint, so a stacked route cannot render its thread against a space
+  // a newer notification selected.
+  const focusSync = threadRouteSpaceOnFocus({
+    focused,
+    appliedFocus,
+    activeSpaceId,
+    liveSpaceId: selectedSpaceId(),
+    switchFailed,
+  });
+  if (focusSync.appliedFocus !== appliedFocus) setAppliedFocus(focusSync.appliedFocus);
+  if (focusSync.activeSpaceId !== activeSpaceId) setActiveSpaceId(focusSync.activeSpaceId);
+  if (focusSync.switchFailed !== switchFailed) setSwitchFailed(focusSync.switchFailed);
+  const request = threadSpaceRequest(spaceId, focusSync.activeSpaceId);
 
   useEffect(() => {
+    if (!focused) return;
     const next = threadSpaceRequest(spaceId, activeSpaceId);
     if (next.action === "show") {
       setSwitchFailed(false);
@@ -229,9 +254,9 @@ export default function ThreadRoute() {
     return () => {
       cancelled = true;
     };
-  }, [activeSpaceId, spaceId]);
+  }, [activeSpaceId, focused, spaceId]);
 
-  if (request.action === "show" && !switchFailed) return <Thread />;
+  if (request.action === "show" && !focusSync.switchFailed) return <Thread />;
   return (
     <View
       style={{
@@ -241,7 +266,7 @@ export default function ThreadRoute() {
         backgroundColor: tokens.background,
       }}
     >
-      {request.action === "switch" && !switchFailed ? (
+      {request.action === "switch" && !focusSync.switchFailed ? (
         <ActivityIndicator color={tokens.foreground} />
       ) : (
         <View style={{ alignItems: "center", gap: 12 }}>
