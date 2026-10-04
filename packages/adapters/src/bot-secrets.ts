@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import type { BotSecretDestination } from "@rakazo/contracts";
 import {
+  BotSecretAuth,
+  BotSecretName,
   botSecretDestinationSchema,
   decodeLoginSecret,
   isPrivateNetworkHost,
@@ -123,28 +125,70 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** `{ name, origin, auth }` only. `value`, `secret`, and any other extras must not survive. */
+/**
+ * `{ name, origin, auth }` only. Secret fields must not survive, including ones nested in
+ * `auth` or carried in an origin string. The effect request is this object, and destination
+ * parsing strips extras only from its own copy.
+ */
 function destinationMetadata(record: Record<string, unknown>): Record<string, unknown> {
   const metadata: Record<string, unknown> = {};
   for (const key of destinationFields) {
-    if (Object.hasOwn(record, key)) metadata[key] = record[key];
+    if (!Object.hasOwn(record, key)) continue;
+    if (key === "auth") {
+      const auth = BotSecretAuth.safeParse(record.auth);
+      if (auth.success) metadata.auth = auth.data;
+      continue;
+    }
+    if (key === "origin") {
+      const origin = originMetadata(record.origin);
+      if (origin !== undefined) metadata.origin = origin;
+      continue;
+    }
+    if (typeof record.name === "string") {
+      // Keep a real name. Anything else is replaced so a secret in that string is not recorded,
+      // while destination validation still reports the name pattern.
+      metadata.name = BotSecretName.safeParse(record.name).success ? record.name : "Invalid Name";
+    }
   }
   return metadata;
 }
 
+/**
+ * Keep a bare origin. Userinfo, query, fragment, and path can carry a credential, and the
+ * effect row is written before destination validation. A cleaned origin is returned when
+ * dropping those parts leaves one; otherwise a placeholder keeps the origin error.
+ */
+function originMetadata(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "invalid-origin";
+  }
+  const bare = !url.username && !url.password && !url.search && !url.hash && url.pathname === "/";
+  if (bare) return value;
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  return url.pathname === "/" ? url.origin : `${url.origin}/path`;
+}
+
 function parsedCredentialObject(value: unknown): unknown {
   if (typeof value !== "string") {
-    return isPlainObject(value) ? destinationMetadata(value) : value;
+    // Not metadata. Keep the attempt, but do not forward the raw value into the effect.
+    return isPlainObject(value) ? destinationMetadata(value) : {};
   }
   const trimmed = value.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return value;
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return {};
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (isPlainObject(parsed)) return destinationMetadata(parsed);
   } catch {
-    return value;
+    return {};
   }
-  return value;
+  return {};
 }
 
 export function sameSecretDestination(
