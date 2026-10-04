@@ -125,6 +125,79 @@ export function executeSessionKey(
   return accountKey ? `${toolkitKey}|${accountKey}` : toolkitKey;
 }
 
+const COMPOSIO_MULTI_EXECUTE_TOOL = "COMPOSIO_MULTI_EXECUTE_TOOL";
+/** Folder listings treat a missing path as the account root. */
+const DROPBOX_FOLDER_LIST_TOOLS = new Set(["DROPBOX_LIST_FILES_IN_FOLDER", "DROPBOX_LIST_FOLDERS"]);
+
+export type ComposioExecutionCall = {
+  tool: string;
+  args: Record<string, unknown>;
+  account?: string;
+};
+
+/**
+ * `COMPOSIO_MULTI_EXECUTE_TOOL` nests each tool under `tools[]`. Dropbox folder
+ * listing reads `arguments.path` and otherwise returns the account root, so a
+ * path passed beside `arguments` or as a JSON string never selects the folder.
+ * Those listing tools run directly with the folder path on the listing call.
+ */
+export function expandComposioMultiExecute(
+  tool: string,
+  args: Record<string, unknown>,
+): ComposioExecutionCall[] {
+  if (tool !== COMPOSIO_MULTI_EXECUTE_TOOL || !Array.isArray(args.tools)) {
+    return [{ tool, args }];
+  }
+  const calls: ComposioExecutionCall[] = [];
+  const rest: unknown[] = [];
+  for (const item of args.tools) {
+    const listing = dropboxFolderListCall(item);
+    if (listing) calls.push(listing);
+    else rest.push(item);
+  }
+  if (calls.length === 0) return [{ tool, args }];
+  if (rest.length > 0) calls.push({ tool, args: { ...args, tools: rest } });
+  return calls;
+}
+
+function dropboxFolderListCall(item: unknown): ComposioExecutionCall | undefined {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
+  const record = item as Record<string, unknown>;
+  const slug = typeof record.tool_slug === "string" ? record.tool_slug.trim() : "";
+  if (!slug || !DROPBOX_FOLDER_LIST_TOOLS.has(slug.toUpperCase())) return undefined;
+  const toolArgs = objectArguments(record.arguments);
+  const path = nonEmptyPath(record.path);
+  if (path && !nonEmptyPath(toolArgs.path)) toolArgs.path = path;
+  const account = typeof record.account === "string" ? record.account.trim() : "";
+  return account ? { tool: slug, args: toolArgs, account } : { tool: slug, args: toolArgs };
+}
+
+function objectArguments(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return {};
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { ...(parsed as Record<string, unknown>) };
+      }
+    } catch {
+      return {};
+    }
+    return {};
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>) };
+  }
+  return {};
+}
+
+function nonEmptyPath(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export type PluginConnectionRow = {
   id: string;
   provider: string;
@@ -381,11 +454,24 @@ export class ComposioConnector implements ComposioProvider {
         context.userId,
         connectedComposioConnections(context),
       );
-      const result = await session.execute(call.tool, call.args ?? {});
-      if (result.error) {
-        yield { type: "error", message: sanitizeComposioError(result.error) };
-        return;
+      const planned = expandComposioMultiExecute(call.tool, call.args ?? {});
+      const executed = [];
+      for (const item of planned) {
+        const result = await session.execute(
+          item.tool,
+          item.args,
+          item.account ? { account: item.account } : undefined,
+        );
+        if (result.error) {
+          yield { type: "error", message: sanitizeComposioError(result.error) };
+          return;
+        }
+        executed.push(result);
       }
+      const result =
+        executed.length === 1
+          ? executed[0]!
+          : { data: executed.map((item) => item.data), error: null };
       const logId = collectLogIds(result)[0] ?? "";
       yield {
         type: "result",

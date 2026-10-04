@@ -557,6 +557,77 @@ describe("composio tool mapping", () => {
     await expect(connector.connectedAccountId("user-1", "github")).resolves.toBe("ca-github");
   });
 
+  it.each([
+    {
+      label: "nested arguments",
+      item: {
+        tool_slug: "DROPBOX_LIST_FILES_IN_FOLDER",
+        arguments: { path: "/Invoices", recursive: false },
+      },
+      expected: { path: "/Invoices", recursive: false },
+    },
+    {
+      label: "path beside an empty arguments object",
+      item: {
+        tool_slug: "DROPBOX_LIST_FILES_IN_FOLDER",
+        path: "/Invoices",
+        arguments: {},
+      },
+      expected: { path: "/Invoices" },
+    },
+    {
+      label: "arguments encoded as a JSON string",
+      item: {
+        tool_slug: "DROPBOX_LIST_FILES_IN_FOLDER",
+        arguments: JSON.stringify({ path: "/Invoices" }),
+      },
+      expected: { path: "/Invoices" },
+    },
+  ])(
+    "forwards a non-root Dropbox folder path through multi-execute ($label)",
+    async ({ item, expected }) => {
+      composioSdkState.created.length = 0;
+      composioSdkState.executions.length = 0;
+      composioSdkState.sessions.clear();
+      composioToolkitDirectory.invalidate();
+
+      const connector = new ComposioConnector();
+      const context: AdapterContext = {
+        operationId: "composio-dropbox-list",
+        traceId: "composio-dropbox-list",
+        spaceId: "workspace",
+        userId: "user-1",
+        signal: new AbortController().signal,
+        connectedConnections: [
+          {
+            id: "connection-dropbox",
+            connectorId: "composio",
+            externalId: "dropbox",
+            displayName: "Dropbox",
+          },
+        ],
+      };
+      const events: ConnectorEvent[] = [];
+      for await (const event of connector.execute(
+        {
+          tool: "COMPOSIO_MULTI_EXECUTE_TOOL",
+          args: {
+            tools: [item],
+          },
+          executionId: "composio-dropbox-list",
+        },
+        context,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toContainEqual(expect.objectContaining({ type: "result" }));
+      expect(composioSdkState.executions).toEqual([
+        { tool: "DROPBOX_LIST_FILES_IN_FOLDER", args: expected },
+      ]);
+    },
+  );
+
   it("resolves connection-request ids to connected-account ids and skips sibling refs", async () => {
     composioSdkState.created.length = 0;
     composioSdkState.sessions.clear();
