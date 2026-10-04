@@ -294,6 +294,8 @@ export function ModelSettingsOverlay({
   const isActive =
     me?.defaultProvider === selected?.provider &&
     me?.defaultModel === (isOpenAiCompatible ? modelId.trim() : selected?.id);
+  // Space still bills the host while this provider matches; model id alone is not credentials.
+  const usingServerCredentials = provider === me?.hostCredentialProvider;
   const acceptsKey = selected?.auth !== "oauth";
   const subscriptionSignIn = selected?.signIn !== undefined;
   // Effort levels for the staged catalog model — "off" stays out, matching the
@@ -920,7 +922,7 @@ export function ModelSettingsOverlay({
   ) : null;
 
   const saveButton =
-    credential && (!isActive || thinkingDirty) ? (
+    credential && (!isActive || thinkingDirty || usingServerCredentials) ? (
       <div className="mt-6">
         <Button
           type="button"
@@ -932,7 +934,7 @@ export function ModelSettingsOverlay({
         >
           {pending === "default" ? (
             <Trans>Switching…</Trans>
-          ) : isActive ? (
+          ) : isActive && !usingServerCredentials ? (
             <Trans>Save</Trans>
           ) : (
             <Trans>Use this model</Trans>

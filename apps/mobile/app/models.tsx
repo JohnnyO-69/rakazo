@@ -304,6 +304,8 @@ export default function Models() {
   const isActive =
     me?.defaultProvider === selected?.provider &&
     me?.defaultModel === (isOpenAiCompatible ? modelId.trim() : selected?.id);
+  // Space still bills the host while this provider matches; model id alone is not credentials.
+  const usingServerCredentials = provider === me?.hostCredentialProvider;
   const acceptsKey = selected?.auth !== "oauth";
   const subscriptionSignIn = selected?.signIn !== undefined;
   // Effort levels for the staged catalog model — "off" stays out, matching the
@@ -1227,7 +1229,7 @@ export default function Models() {
     ) : null;
 
   const saveRow =
-    credential && (!isActive || thinkingDirty) ? (
+    credential && (!isActive || thinkingDirty || usingServerCredentials) ? (
       <Pressable
         accessibilityRole="button"
         disabled={busy || (isOpenAiCompatible && !modelId.trim())}
@@ -1239,7 +1241,11 @@ export default function Models() {
         ]}
       >
         <Text style={styles.primaryLabel}>
-          {pending === "default" ? t("Switching…") : isActive ? t("Save") : t("Use this model")}
+          {pending === "default"
+            ? t("Switching…")
+            : isActive && !usingServerCredentials
+              ? t("Save")
+              : t("Use this model")}
         </Text>
       </Pressable>
     ) : null;
