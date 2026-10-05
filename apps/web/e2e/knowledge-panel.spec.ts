@@ -133,8 +133,12 @@ test("memory and skills are readable and editable in the app", async ({ page }, 
   await expect(skillRow).toBeVisible();
   await expect(knowledge.getByText("Say hello before anything else.")).toBeVisible();
   await expect(builtinSkill.getByText("Built-in", { exact: true })).toBeVisible();
-  await builtinSkill.scrollIntoViewIfNeeded();
-  await captureScreenshot(page, testInfo, "82-knowledge-skill-listed");
+  const listedShot = testInfo.outputPath("82-knowledge-skill-listed.png");
+  await knowledge.screenshot({ animations: "disabled", caret: "hide", path: listedShot });
+  await testInfo.attach("82-knowledge-skill-listed", {
+    contentType: "image/png",
+    path: listedShot,
+  });
   const composer = page.getByRole("combobox", { name: /^Message/ });
   await composer.fill("/");
   await expect(
