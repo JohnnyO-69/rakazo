@@ -5,6 +5,7 @@ import { AvatarStyleProvider } from "./avatar-style.js";
 import {
   BotAvatar,
   DEFAULT_GROK_BOT_COLOR,
+  defaultBotAvatarValue,
   GROK_BOT_COLORS,
   GrokShapePreview,
   parseBotAvatar,
@@ -22,8 +23,8 @@ describe("BotAvatar", () => {
     );
 
     const gradMatches = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
-    expect(gradMatches).toHaveLength(4);
-    expect(new Set(gradMatches).size).toBe(4);
+    expect(gradMatches).toHaveLength(2);
+    expect(new Set(gradMatches).size).toBe(2);
     for (const id of gradMatches) {
       expect(id).toBeTruthy();
       expect(html).toContain(`url(#${id})`);
@@ -41,13 +42,14 @@ describe("BotAvatar", () => {
     expect(html).toContain('data-working="false"');
   });
 
-  it("renders a geometric mascot for plain color values", () => {
+  it("renders the animated robot face for plain color values", () => {
     const html = renderToString(
       <BotAvatar color={DEFAULT_GROK_BOT_COLOR} identity="maya" size={28} status="running" />,
     );
-    expect(html).toContain("<svg");
-    expect(html).toContain("<path");
-    expect(html).toContain("<ellipse");
+    expect(html).toContain("rakazo-bot-avatar-visor");
+    expect(html).toContain("rakazo-bot-avatar-eyes");
+    expect(html).toContain("rakazo-eyes-idle-");
+    expect(html).not.toContain("<ellipse");
     expect(html).toContain('data-working="true"');
   });
 
@@ -109,10 +111,36 @@ describe("BotAvatar", () => {
 
   it("honors reduced-motion for the working mascot pulse class", () => {
     const html = renderToString(
-      <BotAvatar color="#8B5CF6" identity="maya" size={32} status="running" />,
+      <BotAvatar color="#8B5CF6::shape_0" identity="maya" size={32} status="running" />,
     );
     expect(html).toContain("animate-pulse");
     expect(html).toContain("motion-reduce:animate-none");
+  });
+
+  it("restores a plain color that renders the animated robot instead of a pinned shape", () => {
+    expect(defaultBotAvatarValue(`${DEFAULT_GROK_BOT_COLOR}::shape_3`)).toBe(
+      DEFAULT_GROK_BOT_COLOR,
+    );
+    expect(defaultBotAvatarValue("#EAB308::shape_1")).toBe("#EAB308");
+    expect(defaultBotAvatarValue("#abc::shape_2")).toBe("#abc");
+    expect(defaultBotAvatarValue("#fff")).toBe("#fff");
+    expect(defaultBotAvatarValue("data:image/png;base64,abc")).toBe(DEFAULT_GROK_BOT_COLOR);
+    expect(defaultBotAvatarValue("#zzzzzz::shape_1")).toBe(DEFAULT_GROK_BOT_COLOR);
+    expect(defaultBotAvatarValue("")).toBe(DEFAULT_GROK_BOT_COLOR);
+
+    const restored = renderToString(
+      <BotAvatar
+        color={defaultBotAvatarValue(`${DEFAULT_GROK_BOT_COLOR}::shape_4`)}
+        identity="maya"
+      />,
+    );
+    const shaped = renderToString(
+      <BotAvatar color={`${DEFAULT_GROK_BOT_COLOR}::shape_4`} identity="maya" />,
+    );
+    expect(restored).toContain("rakazo-bot-avatar-visor");
+    expect(restored).not.toContain("grok-character-eyes");
+    expect(shaped).toContain("grok-character-eyes");
+    expect(shaped).not.toContain("rakazo-bot-avatar-visor");
   });
 
   it("exposes shape picker name and pressed state", () => {
@@ -136,9 +164,10 @@ describe("BotAvatar", () => {
       />,
     );
     expect(robot).not.toEqual(organic);
-    expect(robot).toContain("grok-character-eyes");
+    expect(robot).toContain("rakazo-bot-avatar-eyes");
+    expect(robot).not.toContain("grok-character-eyes");
     expect(organic).toContain("rakazo-organic-avatar");
-    expect(organic).not.toContain("grok-character-eyes");
+    expect(organic).not.toContain("rakazo-bot-avatar-eyes");
   });
 
   it("uses the preferred avatar style when variant is omitted", () => {
