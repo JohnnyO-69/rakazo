@@ -268,6 +268,25 @@ export const BotAvatar = memo(function BotAvatar({
   );
 });
 
+const VISOR_BORDER_PX = 1;
+
+function robotFaceLayout(size: number) {
+  const visorW = Math.round(size * 0.68);
+  const visorH = Math.round(size * 0.44);
+  const visorInnerW = Math.max(0, visorW - VISOR_BORDER_PX * 2);
+  const visorInnerH = Math.max(0, visorH - VISOR_BORDER_PX * 2);
+  const preferredEyeW = Math.max(4, Math.round(size * 0.14));
+  const preferredEyeH = Math.max(7, Math.round(size * 0.22));
+  const preferredEyeGap = Math.max(3, Math.round(size * 0.1));
+  const preferredSpan = preferredEyeW * 2 + preferredEyeGap;
+  const scale = Math.min(1, visorInnerW / preferredSpan, visorInnerH / preferredEyeH);
+  const eyeW = Math.floor(preferredEyeW * scale);
+  const eyeH = Math.floor(preferredEyeH * scale);
+  const eyeGap = Math.floor(preferredEyeGap * scale);
+  const eyeRadius = Math.max(2, Math.round(eyeW * 0.5));
+  return { visorW, visorH, eyeW, eyeH, eyeGap, eyeRadius };
+}
+
 function RobotAvatar({
   colorDef,
   size,
@@ -287,12 +306,7 @@ function RobotAvatar({
   const eyeVariant = seed % 4;
   const idleDuration = (4.2 + ((seed * 7) % 28) / 10).toFixed(2);
   const idleDelay = (-(((seed * 13) % 45) / 10)).toFixed(2);
-  const visorW = Math.round(size * 0.68);
-  const visorH = Math.round(size * 0.44);
-  const eyeW = Math.max(4, Math.round(size * 0.14));
-  const eyeH = Math.max(7, Math.round(size * 0.22));
-  const eyeRadius = Math.max(2, Math.round(eyeW * 0.5));
-  const eyeGap = Math.max(3, Math.round(size * 0.1));
+  const { visorW, visorH, eyeW, eyeH, eyeGap, eyeRadius } = robotFaceLayout(size);
   const eyeGlow = `0 0 4px #fff, 0 0 8px #fff, 0 0 14px ${colorDef.light}`;
   const idleEyeAnimation = {
     "--rakazo-eye-animation-name": `rakazo-eyes-idle-${eyeVariant}`,
@@ -358,6 +372,7 @@ function RobotAvatar({
         style={{
           width: visorW,
           height: visorH,
+          boxSizing: "border-box",
           borderRadius: Math.round(visorH * 0.52),
           background: "linear-gradient(180deg, #101014 0%, #030305 100%)",
           boxShadow: "inset 0 1.5px 3px rgba(0,0,0,0.95), 0 1px 1px rgba(255,255,255,0.18)",

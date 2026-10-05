@@ -42,6 +42,30 @@ describe("BotAvatar", () => {
     expect(html).toContain('data-working="false"');
   });
 
+  it("fits the robot eyes inside the visor at every rendered size", () => {
+    for (const size of [14, 15, 16, 18, 20, 21, 22, 25, 26, 28, 32, 38, 72, 76, 78, 120]) {
+      const html = renderToString(
+        <BotAvatar color={DEFAULT_GROK_BOT_COLOR} identity="maya" size={size} />,
+      );
+      const face = robotFaceFromHtml(html);
+      expect(face.eyeW * 2 + face.eyeGap).toBeLessThanOrEqual(face.innerW);
+      expect(face.eyeH).toBeLessThanOrEqual(face.innerH);
+      expect(face.eyeW).toBeGreaterThan(0);
+      expect(face.eyeH).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps the robot face proportions from 28px up", () => {
+    const face = robotFaceFromHtml(
+      renderToString(<BotAvatar color={DEFAULT_GROK_BOT_COLOR} identity="maya" size={28} />),
+    );
+    expect(face.visorW).toBe(19);
+    expect(face.visorH).toBe(12);
+    expect(face.eyeW).toBe(4);
+    expect(face.eyeH).toBe(7);
+    expect(face.eyeGap).toBe(3);
+  });
+
   it("renders the animated robot face for plain color values", () => {
     const html = renderToString(
       <BotAvatar color={DEFAULT_GROK_BOT_COLOR} identity="maya" size={28} status="running" />,
@@ -204,3 +228,49 @@ describe("BotAvatar", () => {
     expect(html).not.toContain("#zzzzzz");
   });
 });
+
+function styleValue(style: string, property: string): string {
+  const match = style.match(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`));
+  const value = match?.[1]?.trim();
+  if (!value) throw new Error(`missing ${property} in ${style}`);
+  return value;
+}
+
+function px(style: string, property: string): number {
+  const value = styleValue(style, property);
+  const match = value.match(/^(\d+)px$/);
+  if (!match?.[1]) throw new Error(`${property} is not px: ${value}`);
+  return Number(match[1]);
+}
+
+function robotFaceFromHtml(html: string) {
+  const visor = html.match(/class="[^"]*rakazo-bot-avatar-visor[^"]*" style="([^"]*)"/);
+  const visorStyle = visor?.[1];
+  if (!visorStyle) throw new Error("missing visor");
+  const border = styleValue(visorStyle, "border").match(/^(\d+)px/);
+  const borderPx = Number(border?.[1] ?? "0");
+  const eyeRows = [...html.matchAll(/class="[^"]*rakazo-bot-avatar-eyes[^"]*" style="([^"]*)"/g)];
+  const eyeSpans = [...html.matchAll(/<span class="block" style="([^"]*background-color:[^"]*)"/g)];
+  if (eyeRows.length === 0 || eyeSpans.length === 0) throw new Error("missing eyes");
+  const gaps = eyeRows.map((row) => px(row[1] ?? "", "gap"));
+  const widths = eyeSpans.map((span) => px(span[1] ?? "", "width"));
+  const heights = eyeSpans.map((span) => px(span[1] ?? "", "height"));
+  const eyeGap = gaps[0];
+  const eyeW = widths[0];
+  const eyeH = heights[0];
+  if (eyeGap === undefined || eyeW === undefined || eyeH === undefined) {
+    throw new Error("missing eye metrics");
+  }
+  expect(new Set(gaps)).toEqual(new Set([eyeGap]));
+  expect(new Set(widths)).toEqual(new Set([eyeW]));
+  expect(new Set(heights)).toEqual(new Set([eyeH]));
+  return {
+    visorW: px(visorStyle, "width"),
+    visorH: px(visorStyle, "height"),
+    innerW: px(visorStyle, "width") - borderPx * 2,
+    innerH: px(visorStyle, "height") - borderPx * 2,
+    eyeW,
+    eyeH,
+    eyeGap,
+  };
+}
