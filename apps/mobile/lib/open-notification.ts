@@ -6,11 +6,32 @@ import { notificationResponseRoute } from "./notification-open";
 
 const openedResponses = new Set<string>();
 
+/** Expo's request identifier is the scheduled request. These pushes use the
+ * thread id for that value, so a later delivery of the same thread shares it.
+ * The payload delivery id is the occurrence. */
+function occurrenceKey(response: Notifications.NotificationResponse): string | null {
+  const identifier = response.notification.request.identifier;
+  if (!identifier) return null;
+  const data = response.notification.request.content.data;
+  const deliveryId =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? (data as Record<string, unknown>).deliveryId
+      : undefined;
+  const occurrence = typeof deliveryId === "string" ? deliveryId.trim() : "";
+  return occurrence ? `${identifier}\0${occurrence}` : identifier;
+}
+
+function clearNotificationResponseIfCurrent(response: Notifications.NotificationResponse): void {
+  const last = Notifications.getLastNotificationResponse();
+  const key = occurrenceKey(response);
+  if (last && key && key === occurrenceKey(last)) Notifications.clearLastNotificationResponse();
+}
+
 export async function openNotificationResponse(
   response: Notifications.NotificationResponse | null | undefined,
 ): Promise<boolean> {
   if (!response) return false;
-  const key = response.notification.request.identifier;
+  const key = occurrenceKey(response);
   if (!key || openedResponses.has(key)) return false;
   const target = notificationResponseRoute(response, Notifications.DEFAULT_ACTION_IDENTIFIER);
   if (!target) return false;
@@ -21,15 +42,13 @@ export async function openNotificationResponse(
     if (!(await loadSessionToken())) {
       // Expo keeps this tap as the last response. Leaving it there would open
       // the thread on a later cold start, after sign-in, with no new tap.
-      // A newer tap can become last while this session read is in flight;
-      // clearing then would drop it before a cold start can open it.
-      if (Notifications.getLastNotificationResponse()?.notification.request.identifier === key) {
-        Notifications.clearLastNotificationResponse();
-      }
+      // A newer delivery can become last while this session read is in flight.
+      clearNotificationResponseIfCurrent(response);
       openedResponses.delete(key);
       return false;
     }
     router.push(target);
+    clearNotificationResponseIfCurrent(response);
     return true;
   } catch {
     openedResponses.delete(key);
@@ -44,17 +63,13 @@ export function useNotificationResponses(enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      void openNotificationResponse(response).then((opened) => {
-        if (opened) Notifications.clearLastNotificationResponse();
-      });
+      void openNotificationResponse(response);
     });
     return () => subscription.remove();
   }, [enabled]);
 
   useEffect(() => {
     if (!enabled || !lastResponse) return;
-    void openNotificationResponse(lastResponse).then((opened) => {
-      if (opened) Notifications.clearLastNotificationResponse();
-    });
+    void openNotificationResponse(lastResponse);
   }, [enabled, lastResponse]);
 }

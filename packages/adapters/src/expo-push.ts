@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open, unlink } from "node:fs/promises";
 import path from "node:path";
@@ -14,12 +15,15 @@ const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const EXPO_PUSH_TIMEOUT_MS = 15_000;
 export const MAX_EXPO_PUSH_RESPONSE_BYTES = 64 * 1024;
 
-/** Data a notification tap uses to open the bot or group thread in its space. */
-export function expoPushData(message: NotificationMessage, spaceId: string) {
+/** Data a notification tap uses to open the bot or group thread in its space.
+ * `deliveryId` distinguishes this send from another push for the same thread:
+ * the Expo request identifier stays the thread id. */
+export function expoPushData(message: NotificationMessage, spaceId: string, deliveryId: string) {
   return {
     kind: message.kind,
     botId: message.botId,
     threadId: message.threadId,
+    deliveryId,
     ...(spaceId ? { spaceId } : {}),
     ...(message.groupId ? { groupId: message.groupId } : {}),
   };
@@ -138,7 +142,7 @@ export class ExpoPushProvider implements NotificationProvider {
           body: message.body,
           collapseId: message.threadId,
           tag: message.threadId,
-          data: expoPushData(message, context.spaceId),
+          data: expoPushData(message, context.spaceId, randomUUID()),
         }),
         signal,
       });

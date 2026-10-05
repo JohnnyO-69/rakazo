@@ -116,4 +116,61 @@ describe("opening a notification tap", () => {
       params: { botId: "bot-2", threadId: "thread-2" },
     });
   });
+
+  it("treats two deliveries that share a request identifier as different taps", async () => {
+    const releases: Array<(token: string) => void> = [];
+    vi.mocked(loadSessionToken).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const shared = { botId: "bot-1", threadId: "thread-1" };
+    const older = tap("thread-shared-out", { ...shared, deliveryId: "delivery-out-1" });
+    const newer = tap("thread-shared-out", { ...shared, deliveryId: "delivery-out-2" });
+    vi.mocked(Notifications.getLastNotificationResponse).mockReturnValue(older);
+    const pendingOlder = openNotificationResponse(older);
+    vi.mocked(Notifications.getLastNotificationResponse).mockReturnValue(newer);
+    const pendingNewer = openNotificationResponse(newer);
+
+    releases[0]?.("");
+    await expect(pendingOlder).resolves.toBe(false);
+    expect(Notifications.clearLastNotificationResponse).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+
+    releases[1]?.("token");
+    await expect(pendingNewer).resolves.toBe(true);
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(Notifications.clearLastNotificationResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens both signed-in deliveries that share a request identifier", async () => {
+    const releases: Array<(token: string) => void> = [];
+    vi.mocked(loadSessionToken).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const shared = { botId: "bot-1", threadId: "thread-1" };
+    const first = tap("thread-shared-in", { ...shared, deliveryId: "delivery-in-1" });
+    const second = tap("thread-shared-in", { ...shared, deliveryId: "delivery-in-2" });
+    vi.mocked(Notifications.getLastNotificationResponse).mockReturnValue(second);
+    const pendingFirst = openNotificationResponse(first);
+    const pendingSecond = openNotificationResponse(second);
+    releases[0]?.("token");
+    releases[1]?.("token");
+    await expect(pendingFirst).resolves.toBe(true);
+    await expect(pendingSecond).resolves.toBe(true);
+    expect(router.push).toHaveBeenCalledTimes(2);
+    expect(Notifications.clearLastNotificationResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens one shared-identifier delivery only once", async () => {
+    vi.mocked(loadSessionToken).mockResolvedValue("token");
+    const data = { botId: "bot-1", threadId: "thread-1", deliveryId: "delivery-once" };
+    await expect(openNotificationResponse(tap("thread-shared-once", data))).resolves.toBe(true);
+    await expect(openNotificationResponse(tap("thread-shared-once", data))).resolves.toBe(false);
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
 });
