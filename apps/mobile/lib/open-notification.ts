@@ -21,7 +21,11 @@ export async function openNotificationResponse(
     if (!(await loadSessionToken())) {
       // Expo keeps this tap as the last response. Leaving it there would open
       // the thread on a later cold start, after sign-in, with no new tap.
-      Notifications.clearLastNotificationResponse();
+      // A newer tap can become last while this session read is in flight;
+      // clearing then would drop it before a cold start can open it.
+      if (Notifications.getLastNotificationResponse()?.notification.request.identifier === key) {
+        Notifications.clearLastNotificationResponse();
+      }
       openedResponses.delete(key);
       return false;
     }

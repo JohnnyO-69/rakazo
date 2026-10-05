@@ -4,6 +4,7 @@ vi.mock("expo-notifications", () => ({
   DEFAULT_ACTION_IDENTIFIER: "expo.modules.notifications.actions.DEFAULT",
   addNotificationResponseReceivedListener: vi.fn(),
   clearLastNotificationResponse: vi.fn(),
+  getLastNotificationResponse: vi.fn(),
   useLastNotificationResponse: vi.fn(),
 }));
 vi.mock("expo-router", () => ({
@@ -61,6 +62,7 @@ describe("opening a notification tap", () => {
       threadId: "thread-1",
       spaceId: "space-2",
     });
+    vi.mocked(Notifications.getLastNotificationResponse).mockReturnValue(response);
     await expect(openNotificationResponse(response)).resolves.toBe(false);
     expect(router.push).not.toHaveBeenCalled();
     expect(Notifications.clearLastNotificationResponse).toHaveBeenCalledTimes(1);
@@ -86,5 +88,32 @@ describe("opening a notification tap", () => {
     vi.mocked(loadSessionToken).mockResolvedValue("token");
     await expect(openNotificationResponse(tap("tap-locked"))).resolves.toBe(true);
     expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a newer last response in place when an older signed-out tap is rejected", async () => {
+    let release: (token: string) => void = () => undefined;
+    vi.mocked(loadSessionToken).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const older = tap("tap-older");
+    const newer = tap("tap-newer", { botId: "bot-2", threadId: "thread-2" });
+    vi.mocked(Notifications.getLastNotificationResponse).mockReturnValue(older);
+    const pending = openNotificationResponse(older);
+    vi.mocked(Notifications.getLastNotificationResponse).mockReturnValue(newer);
+    release("");
+    await expect(pending).resolves.toBe(false);
+    expect(Notifications.clearLastNotificationResponse).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+
+    vi.mocked(loadSessionToken).mockResolvedValue("token");
+    await expect(openNotificationResponse(newer)).resolves.toBe(true);
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/thread",
+      params: { botId: "bot-2", threadId: "thread-2" },
+    });
   });
 });
