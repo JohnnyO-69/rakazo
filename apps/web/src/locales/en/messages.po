@@ -1435,6 +1435,10 @@ msgstr "Could not rename connection"
 msgid "Could not rename section"
 msgstr "Could not rename section"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Could not rename space"
+msgstr "Could not rename space"
+
 #: src/pages/shell/message-cards.tsx
 msgid "Could not render chart"
 msgstr "Could not render chart"
@@ -3234,6 +3238,11 @@ msgstr "Removing…"
 #: src/pages/shell/dialogs.tsx
 msgid "Rename section"
 msgstr "Rename section"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename space"
+msgstr "Rename space"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Reopen"

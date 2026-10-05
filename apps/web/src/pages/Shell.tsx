@@ -263,6 +263,7 @@ import {
   NewSpaceDialog,
   PickerInfoDialog,
   RenameBotSectionDialog,
+  RenameSpaceDialog,
 } from "./shell/dialogs";
 import {
   AppConnectCard,
@@ -272,6 +273,13 @@ import {
   McpApprovalCard,
 } from "./shell/message-cards";
 import { WindowChrome } from "./WindowChrome";
+
+function spaceHeaderMenu(space: Pick<Space, "canRename" | "canDelete">, visible: boolean) {
+  return {
+    canRenameSpace: visible && space.canRename === true,
+    canDeleteSpace: visible && space.canDelete === true,
+  };
+}
 
 const BotContextMenu = lazy(() =>
   import("./BotContextMenu").then((module) => ({ default: module.BotContextMenu })),
@@ -595,6 +603,7 @@ export function ShellPage() {
   const [deleteTarget, setDeleteTarget] = useState<Bot | null>(null);
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<Group | null>(null);
   const [deleteSpaceTarget, setDeleteSpaceTarget] = useState<Space | null>(null);
+  const [renameSpaceTarget, setRenameSpaceTarget] = useState<Space | null>(null);
   const [spaceMenu, setSpaceMenu] = useState<{
     id: string;
     position: ContextMenuPosition;
@@ -606,6 +615,9 @@ export function ShellPage() {
     spaceMenuAnchor.current = null;
   }, [spaceMenu]);
   const closeSpaceMenu = useCallback(() => setSpaceMenu(null), []);
+  const spaceMenuTarget = spaceMenu
+    ? (spaces.find((space) => space.id === spaceMenu.id) ?? null)
+    : null;
   const [clearTarget, setClearTarget] = useState<
     { kind: "bot"; chat: Bot } | { kind: "group"; chat: Group } | null
   >(null);
@@ -1483,6 +1495,7 @@ export function ShellPage() {
                 name: "Personal",
                 isDefault: true,
                 hasContent: true,
+                canRename: false,
                 canDelete: false,
                 bots,
                 groups,
@@ -1523,7 +1536,7 @@ export function ShellPage() {
         emptySpaceId: undefined as string | undefined,
         spaceId: space.id,
         spaceName: space.name,
-        canDeleteSpace: index === 0 && space.canDelete === true,
+        ...spaceHeaderMenu(space, showSpaceNames && index === 0),
       }));
       if (sections.length > 0) return sections;
       // Keep empty spaces selectable; chat clicks are the only switch control.
@@ -1539,7 +1552,7 @@ export function ShellPage() {
           emptySpaceId: space.id,
           spaceId: space.id,
           spaceName: space.name,
-          canDeleteSpace: space.canDelete === true,
+          ...spaceHeaderMenu(space, true),
         },
       ];
     });
@@ -2950,6 +2963,7 @@ export function ShellPage() {
                   nestedRows.flatMap((row) =>
                     row.item.kind === "bot" && row.parentId === parentId ? [row.item.chat.id] : [],
                   );
+                const spaceActionsOpen = group.canRenameSpace || group.canDeleteSpace;
                 return (
                   <div key={group.key} data-sidebar-group={group.key}>
                     {group.title ? (
@@ -2968,7 +2982,7 @@ export function ShellPage() {
                             group.sectionId
                               ? (event) => {
                                   event.preventDefault();
-                                  // Prefer section rename over delete-space when both apply;
+                                  // Prefer section rename over the space menu when both apply;
                                   // the dedicated space-actions button still opens the space menu.
                                   const sections =
                                     group.spaceId === bootstrapMe?.spaceId
@@ -2986,7 +3000,7 @@ export function ShellPage() {
                                     position: { x: event.clientX, y: event.clientY },
                                   });
                                 }
-                              : group.canDeleteSpace
+                              : spaceActionsOpen
                                 ? (event) => {
                                     event.preventDefault();
                                     spaceMenuAnchor.current = event.currentTarget;
@@ -3025,7 +3039,7 @@ export function ShellPage() {
                             />
                           )}
                         </button>
-                        {group.canDeleteSpace ? (
+                        {spaceActionsOpen ? (
                           <Button
                             variant="ghost"
                             size="icon-sm"
@@ -4170,17 +4184,29 @@ export function ShellPage() {
               sideOffset={0}
               className="w-[220px]"
             >
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => {
-                  const target = spaces.find((space) => space.id === spaceMenu.id);
-                  if (target) setDeleteSpaceTarget(target);
-                  setSpaceMenu(null);
-                }}
-              >
-                <Trash2 />
-                {t`Delete space`}
-              </DropdownMenuItem>
+              {spaceMenuTarget?.canRename ? (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setRenameSpaceTarget(spaceMenuTarget);
+                    setSpaceMenu(null);
+                  }}
+                >
+                  <Pencil />
+                  {t`Rename space`}
+                </DropdownMenuItem>
+              ) : null}
+              {spaceMenuTarget?.canDelete ? (
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => {
+                    setDeleteSpaceTarget(spaceMenuTarget);
+                    setSpaceMenu(null);
+                  }}
+                >
+                  <Trash2 />
+                  {t`Delete space`}
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -4208,6 +4234,18 @@ export function ShellPage() {
               setDeleteGroupTarget(null);
               setPanel(null);
               await refreshBots(true);
+            }}
+          />
+        ) : null}
+
+        {renameSpaceTarget ? (
+          <RenameSpaceDialog
+            space={renameSpaceTarget}
+            onCancel={() => setRenameSpaceTarget(null)}
+            onConfirm={async (name) => {
+              await rpc.spaces.rename({ spaceId: renameSpaceTarget.id, name });
+              setRenameSpaceTarget(null);
+              await refreshBots();
             }}
           />
         ) : null}

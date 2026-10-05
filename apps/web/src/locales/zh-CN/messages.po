@@ -1435,6 +1435,10 @@ msgstr ""
 msgid "Could not rename section"
 msgstr "无法重命名分组"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Could not rename space"
+msgstr "无法重命名工作区"
+
 #: src/pages/shell/message-cards.tsx
 msgid "Could not render chart"
 msgstr "无法渲染图表"
@@ -3234,6 +3238,11 @@ msgstr "正在移除…"
 #: src/pages/shell/dialogs.tsx
 msgid "Rename section"
 msgstr "重命名分组"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename space"
+msgstr "重命名工作区"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Reopen"

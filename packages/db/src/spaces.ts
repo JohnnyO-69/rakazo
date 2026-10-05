@@ -55,6 +55,13 @@ export class CannotDeleteSpaceAsNonOwnerError extends Error {
   }
 }
 
+export class CannotRenameSpaceAsNonOwnerError extends Error {
+  constructor() {
+    super("Only the space owner can rename it");
+    this.name = "CannotRenameSpaceAsNonOwnerError";
+  }
+}
+
 export class SpaceDeletionInProgressError extends Error {
   constructor() {
     super("Space deletion is already in progress");
@@ -171,6 +178,12 @@ async function copyProviderPreferences(
   ]);
 }
 
+function normalizeSpaceName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > 60) throw new InvalidSpaceNameError();
+  return trimmed;
+}
+
 /** Create a sibling privacy boundary for a member of the active organization. */
 export async function createSpaceForMember(
   prisma: PrismaClient,
@@ -180,8 +193,7 @@ export async function createSpaceForMember(
     name: string;
   },
 ): Promise<{ id: string; name: string }> {
-  const name = input.name.trim();
-  if (!name || name.length > 60) throw new InvalidSpaceNameError();
+  const name = normalizeSpaceName(input.name);
   const spaceId = randomUUID();
   const spaceMembershipId = randomUUID();
   const createdAt = new Date();
@@ -269,18 +281,7 @@ type ClaimedSpaceDeleteInput = EmptySpaceDeleteInput & { claimId: string };
 
 type SpaceDeleteDb = Pick<PrismaClient, "spaceMember" | "bot" | "chatGroup" | "computer">;
 
-async function assertEmptySpaceDeletable(
-  db: SpaceDeleteDb,
-  input: EmptySpaceDeleteInput,
-): Promise<{
-  organizationId: string;
-  memberships: Array<{
-    spaceId: string;
-    createdAt: Date;
-    space: { isDefault: boolean };
-  }>;
-  computers: Array<{ homeKey: string; kind: string; providerRef: string }>;
-}> {
+async function loadActorSpace(db: Pick<PrismaClient, "spaceMember">, input: EmptySpaceDeleteInput) {
   const currentMembership = await db.spaceMember.findUnique({
     where: {
       spaceId_userId: {
@@ -301,18 +302,44 @@ async function assertEmptySpaceDeletable(
     select: {
       organizationId: true,
       role: true,
-      space: { select: { isDefault: true } },
+      space: { select: { isDefault: true, deletingAt: true } },
     },
   });
   if (!targetMembership || targetMembership.organizationId !== currentMembership.organizationId) {
     throw new SpaceNotFoundError();
   }
-  if (targetMembership.role !== "owner") throw new CannotDeleteSpaceAsNonOwnerError();
-  if (targetMembership.space.isDefault) throw new CannotDeleteDefaultSpaceError();
+  return {
+    organizationId: currentMembership.organizationId,
+    role: targetMembership.role,
+    isDefault: targetMembership.space.isDefault,
+    deletingAt: targetMembership.space.deletingAt,
+  };
+}
+
+function spaceDeletionClaimIsActive(deletingAt: Date | null): boolean {
+  if (!deletingAt) return false;
+  return deletingAt.getTime() >= Date.now() - SPACE_DELETION_CLAIM_TIMEOUT_MS;
+}
+
+async function assertEmptySpaceDeletable(
+  db: SpaceDeleteDb,
+  input: EmptySpaceDeleteInput,
+): Promise<{
+  organizationId: string;
+  memberships: Array<{
+    spaceId: string;
+    createdAt: Date;
+    space: { isDefault: boolean };
+  }>;
+  computers: Array<{ homeKey: string; kind: string; providerRef: string }>;
+}> {
+  const owned = await loadActorSpace(db, input);
+  if (owned.role !== "owner") throw new CannotDeleteSpaceAsNonOwnerError();
+  if (owned.isDefault) throw new CannotDeleteDefaultSpaceError();
   const memberships = await db.spaceMember.findMany({
     where: {
       userId: input.userId,
-      organizationId: currentMembership.organizationId,
+      organizationId: owned.organizationId,
     },
     select: {
       spaceId: true,
@@ -332,7 +359,7 @@ async function assertEmptySpaceDeletable(
   ]);
   if (botCount > 0 || groupCount > 0) throw new SpaceNotEmptyError();
   return {
-    organizationId: currentMembership.organizationId,
+    organizationId: owned.organizationId,
     memberships,
     computers: computers.flatMap((computer) =>
       computer.providerRef
@@ -458,6 +485,30 @@ export async function deleteEmptySpaceForMember(
         const fallback = remaining.find((membership) => membership.space.isDefault) ?? remaining[0];
         if (!fallback) throw new CannotDeleteLastSpaceError();
         return { id: fallback.spaceId };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    ),
+  );
+}
+
+/** Rename a space the caller owns in the active organization. */
+export async function renameSpaceForMember(
+  prisma: PrismaClient,
+  input: EmptySpaceDeleteInput & { name: string },
+): Promise<{ id: string; name: string }> {
+  const name = normalizeSpaceName(input.name);
+  return withTransactionRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await lockSpaceDeletion(tx, input.spaceId);
+        const owned = await loadActorSpace(tx, input);
+        if (owned.role !== "owner") throw new CannotRenameSpaceAsNonOwnerError();
+        if (spaceDeletionClaimIsActive(owned.deletingAt)) throw new SpaceDeletionInProgressError();
+        await tx.space.update({
+          where: { id: input.spaceId },
+          data: { name },
+        });
+        return { id: input.spaceId, name };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     ),

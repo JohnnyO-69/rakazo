@@ -1435,6 +1435,10 @@ msgstr ""
 msgid "Could not rename section"
 msgstr "Não foi possível renomear a seção"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Could not rename space"
+msgstr "Não foi possível renomear o espaço"
+
 #: src/pages/shell/message-cards.tsx
 msgid "Could not render chart"
 msgstr "Não foi possível renderizar o gráfico"
@@ -3234,6 +3238,11 @@ msgstr "Removendo…"
 #: src/pages/shell/dialogs.tsx
 msgid "Rename section"
 msgstr "Renomear seção"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename space"
+msgstr "Renomear espaço"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Reopen"
