@@ -90,6 +90,7 @@ import {
   type MarkdownArtifactPreviewTarget,
 } from "../components/markdown-artifact-preview";
 import { NativeSymbol } from "../components/native-symbol";
+import { SelectTextSheet } from "../components/select-text-sheet";
 import { VoiceChatCard } from "../components/VoiceChatCard";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import {
@@ -108,6 +109,7 @@ import {
   mobileThreadRefreshResult,
   prependMobileMessagePage,
   rpc,
+  selectableMobileMessageText,
   selectedSpaceId,
   selectSpace,
   subscribeThread,
@@ -153,6 +155,7 @@ import {
   getCachedResponseStreamingEnabled,
   subscribeResponseStreaming,
 } from "../lib/response-streaming";
+import { selectableTextFromMarkdown } from "../lib/selectable-text";
 import {
   type ThreadScrollAction,
   ThreadScrollBehavior,
@@ -412,6 +415,7 @@ function Thread() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [selectableText, setSelectableText] = useState<string | null>(null);
   const [markdownPreview, setMarkdownPreview] = useState<MarkdownArtifactPreviewTarget | null>(
     null,
   );
@@ -1541,6 +1545,7 @@ function Thread() {
   }
 
   function messageActionProps(message: MobileMessage): MessageActionProps {
+    const messageText = selectableMobileMessageText(message);
     const actions = [
       {
         name: "reply",
@@ -1576,6 +1581,18 @@ function Thread() {
       // The call already reads replies aloud; a second voice would talk over it.
       ...(message.role === "bot" && !onCall && blockText(message)
         ? [{ name: "speak", text: t("Speak message"), onPress: () => void speak(message) }]
+        : []),
+      ...(messageText.trim()
+        ? [
+            {
+              name: "select",
+              text: t("Select text"),
+              onPress: () =>
+                setSelectableText(
+                  message.role === "user" ? messageText : selectableTextFromMarkdown(messageText),
+                ),
+            },
+          ]
         : []),
       {
         name: "copy",
@@ -2389,6 +2406,7 @@ function Thread() {
           </View>
         </View>
       </Modal>
+      <SelectTextSheet text={selectableText} onClose={() => setSelectableText(null)} />
       {markdownPreview && artifactTarget ? (
         <MarkdownArtifactPreview
           threadTarget={artifactTarget}
