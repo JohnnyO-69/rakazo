@@ -2948,12 +2948,16 @@ export function ShellPage() {
                   <div key={group.key} data-sidebar-group={group.key}>
                     {group.title || spaceActionsOpen ? (
                       <div
-                        className={`flex items-center pt-3 pb-0.5${group.title ? "" : " justify-end"}`}
+                        className={
+                          group.title && spaceActionsOpen
+                            ? "grid pt-3 pb-0.5"
+                            : `flex items-center pt-3 pb-0.5${group.title ? "" : " justify-end"}`
+                        }
                       >
                         {group.title ? (
                           <button
                             type="button"
-                            className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+                            className={`flex min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring ${group.title && spaceActionsOpen ? "col-start-1 row-start-1 w-full pe-8" : "flex-1"}`}
                             onClick={() => {
                               if (group.emptySpaceId) {
                                 openSpaceChat(group.emptySpaceId, "/onboarding");
@@ -3027,6 +3031,11 @@ export function ShellPage() {
                           <Button
                             variant="ghost"
                             size="icon-sm"
+                            className={
+                              group.title
+                                ? "col-start-1 row-start-1 justify-self-end self-center"
+                                : undefined
+                            }
                             aria-label={t`Actions for ${group.spaceName}`}
                             onClick={(event) => {
                               const rect = event.currentTarget.getBoundingClientRect();
