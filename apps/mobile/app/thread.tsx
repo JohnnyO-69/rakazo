@@ -168,7 +168,7 @@ import {
   ThreadScrollBehavior,
   type ThreadScrollState,
 } from "../lib/thread-scroll";
-import { getVoicePlaybackState, speakQueue, speakText, subscribeVoicePlayback } from "../lib/voice";
+import { speakQueue, speakText } from "../lib/voice";
 import { probeProviderTranscribe, resolveVoiceCallPlan } from "../lib/voice-call-entry";
 
 type PendingAttachment = PickedAttachment & { threadKey: string };
@@ -1897,7 +1897,6 @@ function Thread() {
               onAnswer={answerMessage}
               onOpenBot={openBot}
               onPreviewMarkdown={setMarkdownPreview}
-              onPlay={onCall ? undefined : () => speak(message)}
               onPreviewImage={(target) =>
                 router.push({
                   pathname: "/image",
@@ -2955,7 +2954,6 @@ const MessageBubble = memo(function MessageBubble({
   onAnswer,
   onOpenBot,
   onPreviewMarkdown,
-  onPlay,
   onPreviewImage,
   actionProps,
 }: {
@@ -2970,7 +2968,6 @@ const MessageBubble = memo(function MessageBubble({
   onAnswer: (message: MobileMessage, answer: string, username?: string) => Promise<void>;
   onOpenBot: (botId: string, name: string) => void;
   onPreviewMarkdown: (target: MarkdownArtifactPreviewTarget) => void;
-  onPlay?: () => void;
   onPreviewImage: (target: ImageArtifactPreviewTarget) => void;
   actionProps: MessageActionProps;
 }) {
@@ -3554,9 +3551,6 @@ const MessageBubble = memo(function MessageBubble({
             </Pressable>
           ),
         )}
-        {message.role === "bot" && onPlay && speakableMessageText(message) ? (
-          <MessageSpeakButton messageId={message.id} onPlay={onPlay} />
-        ) : null}
         {appConnectBlocks.map((block, index) => (
           <AppConnectCard
             key={`${block.provider}-${index}`}
@@ -3585,7 +3579,6 @@ const MessageBubble = memo(function MessageBubble({
   const speakerColor =
     message.role === "bot" ? speakerColorFor(bots, members, message.botId) : undefined;
   const firstContent = segments.findIndex((segment) => segment.kind === "content");
-  const lastContent = segments.map((segment) => segment.kind).lastIndexOf("content");
   return (
     <View style={{ gap: 8, width: "100%" }}>
       {segments.map((segment, index) => (
@@ -3595,7 +3588,6 @@ const MessageBubble = memo(function MessageBubble({
           speaker={index === firstContent ? speaker : undefined}
           speakerColor={index === firstContent ? speakerColor : undefined}
           replyPreview={index === firstContent ? replyPreview : undefined}
-          onPlay={message.role === "bot" && index === lastContent ? onPlay : undefined}
           actionProps={actionProps}
         />
       ))}
@@ -3612,31 +3604,17 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
-const messagePlayStyles = StyleSheet.create({
-  button: {
-    alignSelf: "flex-end",
-    marginTop: 6,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
-
 function MessageTextCard({
   message,
   speaker,
   speakerColor,
   replyPreview,
-  onPlay,
   actionProps,
 }: {
   message: MobileMessage;
   speaker?: string;
   speakerColor?: string;
   replyPreview?: MobileMessage;
-  onPlay?: () => void;
   actionProps: MessageActionProps;
 }) {
   const colorScheme = useResolvedAppearance();
@@ -3701,32 +3679,6 @@ function MessageTextCard({
           </ChatMarkdown>
         )
       }
-      {onPlay ? <MessageSpeakButton messageId={message.id} onPlay={onPlay} /> : null}
-    </Pressable>
-  );
-}
-
-function MessageSpeakButton({ messageId, onPlay }: { messageId: string; onPlay: () => void }) {
-  const tokens = mobileTokens();
-  const { t } = useI18n();
-  const playback = useSyncExternalStore(subscribeVoicePlayback, getVoicePlaybackState);
-  const isSpeakingThis = playback.messageId === messageId && playback.status !== "idle";
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={t("Play")}
-      accessibilityState={{ disabled: isSpeakingThis }}
-      disabled={isSpeakingThis}
-      onPress={onPlay}
-      hitSlop={6}
-      style={[messagePlayStyles.button, { opacity: isSpeakingThis ? 0.4 : 1 }]}
-    >
-      <NativeSymbol
-        ios={isSpeakingThis ? "waveform" : "play.fill"}
-        android={isSpeakingThis ? "pulse-outline" : "play"}
-        size={13}
-        color={tokens.mutedForeground}
-      />
     </Pressable>
   );
 }
