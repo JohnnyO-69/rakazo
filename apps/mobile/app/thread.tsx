@@ -3336,6 +3336,18 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
+const messagePlayStyles = StyleSheet.create({
+  button: {
+    alignSelf: "flex-end",
+    marginTop: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});
+
 function MessageTextCard({
   message,
   speaker,
@@ -3424,16 +3436,7 @@ function MessageTextCard({
           disabled={isSpeakingThis}
           onPress={onPlay}
           hitSlop={6}
-          style={{
-            alignSelf: "flex-end",
-            marginTop: 6,
-            width: 26,
-            height: 26,
-            borderRadius: 13,
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: isSpeakingThis ? 0.4 : 1,
-          }}
+          style={[messagePlayStyles.button, { opacity: isSpeakingThis ? 0.4 : 1 }]}
         >
           <NativeSymbol
             ios={isSpeakingThis ? "waveform" : "play.fill"}
