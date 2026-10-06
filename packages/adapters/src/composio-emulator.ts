@@ -397,7 +397,16 @@ export class ComposioEmulator implements ComposioProvider {
   }
 
   async *execute(call: ConnectorCall, context: AdapterContext): AsyncIterable<ConnectorEvent> {
-    const planned = expandComposioMultiExecute(call.tool, call.args ?? {});
+    let planned: ReturnType<typeof expandComposioMultiExecute>;
+    try {
+      planned = expandComposioMultiExecute(call.tool, call.args ?? {});
+    } catch (error) {
+      yield {
+        type: "error",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      return;
+    }
     const results: Record<string, unknown>[] = [];
     for (const item of planned) {
       const args = item.args;
