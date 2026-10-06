@@ -5656,9 +5656,7 @@ async function spaceNavigationDto(
         name: membership.space.name,
         isDefault: membership.space.isDefault,
         hasContent: spacesWithContent.has(membership.spaceId),
-        canRename:
-          membership.role === "owner" &&
-          (membership.space.deletingAt === null || membership.space.deletingAt < staleClaimBefore),
+        canRename: membership.role === "owner" && membership.space.deletingAt === null,
         canDelete:
           membership.role === "owner" &&
           !membership.space.isDefault &&

@@ -162,4 +162,20 @@ describe("spaces.rename", () => {
     expect(response.status).toBe(409);
     expect(update).not.toHaveBeenCalled();
   });
+
+  it("rejects rename after the deletion claim goes stale", async () => {
+    const { update, handler } = renameHarness({
+      organizationId: "org-1",
+      role: "owner",
+      deletingAt: new Date(Date.now() - 6 * 60_000),
+    });
+
+    const { response } = await handler.handle(renameRequest("Still here"), {
+      prefix: "/rpc",
+      context: { actor },
+    });
+
+    expect(response.status).toBe(409);
+    expect(update).not.toHaveBeenCalled();
+  });
 });

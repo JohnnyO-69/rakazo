@@ -124,7 +124,11 @@ export function RenameSpaceDialog({
             setSaving(true);
             setError(null);
             void onConfirm(trimmed).catch((err: unknown) => {
-              setError(err instanceof Error ? err.message : t`Could not rename space`);
+              setError(
+                err instanceof Error && err.message.trim()
+                  ? err.message
+                  : t`Could not rename space`,
+              );
               setSaving(false);
             });
           }}

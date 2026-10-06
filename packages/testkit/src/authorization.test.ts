@@ -1067,7 +1067,10 @@ describeWithDatabase("API authorization and resource isolation", () => {
       renewSpaceDeletionClaim(handles.prisma, { ...deleteInput, claimId: firstClaim.claimId }),
     ).resolves.toBe(true);
     const claimedNavigation = await rpc<SpaceNavigation>(app, cookie, "spaces/list", {}, space.id);
-    expect(claimedNavigation.spaces.find((item) => item.id === space.id)?.canDelete).toBe(false);
+    expect(claimedNavigation.spaces.find((item) => item.id === space.id)).toMatchObject({
+      canDelete: false,
+      canRename: false,
+    });
     const blockedCreate = await raw(app, cookie, "bots/create", botInput("Racing bot"), space.id);
     expect(blockedCreate.ok).toBe(false);
     expect(blockedCreate.status).toBe(409);
@@ -1082,6 +1085,11 @@ describeWithDatabase("API authorization and resource isolation", () => {
     await handles.prisma.space.update({
       where: { id: space.id },
       data: { deletingAt: new Date(Date.now() - 6 * 60_000) },
+    });
+    const staleNavigation = await rpc<SpaceNavigation>(app, cookie, "spaces/list", {}, space.id);
+    expect(staleNavigation.spaces.find((item) => item.id === space.id)).toMatchObject({
+      canDelete: true,
+      canRename: false,
     });
     const replacementClaim = await claimEmptySpaceDeletionForMember(handles.prisma, deleteInput);
     expect(replacementClaim.recovered).toBe(true);

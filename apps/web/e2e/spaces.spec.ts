@@ -11,6 +11,14 @@ test("spaces stay invisible by default and chat creation requires approval", asy
   const sidebar = page.locator("aside").first();
   await expect(sidebar.getByText("Personal", { exact: true })).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: /^Chief/ })).toHaveCount(1);
+  await sidebar.getByRole("button", { name: "Actions for Personal" }).click();
+  await expect(page.getByRole("menuitem", { name: "Rename space" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Rename space" }).click();
+  const singleSpaceRename = page.getByRole("dialog", { name: "Rename space" });
+  await expect(singleSpaceRename.getByLabel("Name")).toHaveValue("Personal");
+  await captureScreenshot(page, testInfo, "rename-only-space");
+  await singleSpaceRename.getByRole("button", { name: "Cancel" }).click();
+  await expect(singleSpaceRename).toHaveCount(0);
   await captureScreenshot(page, testInfo, "single-space-sidebar");
 
   await openNewSpace(page);

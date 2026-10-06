@@ -39,7 +39,6 @@ import {
   clampMentionHighlightIndex,
   cronFromPreset,
   formatMessageTime,
-  groupBotsForSidebar,
   groupVoiceChats,
   inferAttachmentMimeType,
   isActive,
@@ -273,14 +272,8 @@ import {
   ChoiceCard,
   McpApprovalCard,
 } from "./shell/message-cards";
+import { commitSpaceRename, sidebarGroupsForSpaces } from "./shell/space-sidebar";
 import { WindowChrome } from "./WindowChrome";
-
-function spaceHeaderMenu(space: Pick<Space, "canRename" | "canDelete">, visible: boolean) {
-  return {
-    canRenameSpace: visible && space.canRename === true,
-    canDeleteSpace: visible && space.canDelete === true,
-  };
-}
 
 const BotContextMenu = lazy(() =>
   import("./BotContextMenu").then((module) => ({ default: module.BotContextMenu })),
@@ -1510,7 +1503,6 @@ export function ShellPage() {
   }, [activeGroup?.id, groupId, notifyBrowserForEvent]);
 
   const sidebarGroups = useMemo(() => {
-    const needle = query.toLowerCase();
     const sidebarSpaces =
       spaces.length > 0
         ? spaces.map((space) =>
@@ -1531,59 +1523,7 @@ export function ShellPage() {
               },
             ]
           : [];
-    const showSpaceNames = sidebarSpaces.length > 1;
-    return sidebarSpaces.flatMap((space) => {
-      const visibleBots = space.bots.filter((bot) =>
-        `${bot.name} ${bot.title ?? ""} ${bot.preview ?? ""}`.toLowerCase().includes(needle),
-      );
-      const visibleGroups = space.groups.filter((group) =>
-        `${group.name} ${group.preview}`.toLowerCase().includes(needle),
-      );
-      const sections = groupBotsForSidebar(
-        [
-          ...visibleBots.map((chat) => ({ kind: "bot" as const, chat })),
-          ...visibleGroups.map((chat) => ({ kind: "group" as const, chat })),
-        ].map((item) => ({
-          ...item,
-          id: item.chat.id,
-          parentBotId: item.kind === "bot" ? item.chat.parentBotId : null,
-          pinned: item.chat.pinned,
-          sectionId: item.chat.sectionId,
-        })),
-        space.botSections,
-      ).map((group, index) => ({
-        ...group,
-        sectionId: group.key.startsWith("section:") ? group.key.slice("section:".length) : null,
-        key: showSpaceNames ? `space:${space.id}:${group.key}` : group.key,
-        title: showSpaceNames
-          ? group.title
-            ? `${space.name} · ${group.title}`
-            : space.name
-          : group.title,
-        showLock: showSpaceNames,
-        emptySpaceId: undefined as string | undefined,
-        spaceId: space.id,
-        spaceName: space.name,
-        ...spaceHeaderMenu(space, showSpaceNames && index === 0),
-      }));
-      if (sections.length > 0) return sections;
-      // Keep empty spaces selectable; chat clicks are the only switch control.
-      if (!showSpaceNames) return [];
-      if (needle && (space.bots.length > 0 || space.groups.length > 0)) return [];
-      return [
-        {
-          key: `space:${space.id}:empty`,
-          title: space.name,
-          bots: [],
-          sectionId: null,
-          showLock: true,
-          emptySpaceId: space.id,
-          spaceId: space.id,
-          spaceName: space.name,
-          ...spaceHeaderMenu(space, true),
-        },
-      ];
-    });
+    return sidebarGroupsForSpaces(sidebarSpaces, query);
   }, [bootstrapMe, botSections, bots, groups, spaces, query]);
 
   const openSpaceChat = useCallback(
@@ -3006,79 +2946,83 @@ export function ShellPage() {
                 const spaceActionsOpen = group.canRenameSpace || group.canDeleteSpace;
                 return (
                   <div key={group.key} data-sidebar-group={group.key}>
-                    {group.title ? (
-                      <div className="flex items-center pt-3 pb-0.5">
-                        <button
-                          type="button"
-                          className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
-                          onClick={() => {
-                            if (group.emptySpaceId) {
-                              openSpaceChat(group.emptySpaceId, "/onboarding");
-                              return;
-                            }
-                            toggleSidebarSection(group.key);
-                          }}
-                          onContextMenu={
-                            group.sectionId
-                              ? (event) => {
-                                  event.preventDefault();
-                                  // Prefer section rename over the space menu when both apply;
-                                  // the dedicated space-actions button still opens the space menu.
-                                  const sections =
-                                    group.spaceId === bootstrapMe?.spaceId
-                                      ? botSections
-                                      : (spaces.find((space) => space.id === group.spaceId)
-                                          ?.botSections ?? []);
-                                  const section = sections.find(
-                                    (item) => item.id === group.sectionId,
-                                  );
-                                  if (!section) return;
-                                  sectionMenuAnchor.current = event.currentTarget;
-                                  setSectionMenu({
-                                    section,
-                                    spaceId: group.spaceId,
-                                    position: { x: event.clientX, y: event.clientY },
-                                  });
-                                }
-                              : spaceActionsOpen
+                    {group.title || spaceActionsOpen ? (
+                      <div
+                        className={`flex items-center pt-3 pb-0.5${group.title ? "" : " justify-end"}`}
+                      >
+                        {group.title ? (
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+                            onClick={() => {
+                              if (group.emptySpaceId) {
+                                openSpaceChat(group.emptySpaceId, "/onboarding");
+                                return;
+                              }
+                              toggleSidebarSection(group.key);
+                            }}
+                            onContextMenu={
+                              group.sectionId
                                 ? (event) => {
                                     event.preventDefault();
-                                    spaceMenuAnchor.current = event.currentTarget;
-                                    setSpaceMenu({
-                                      id: group.spaceId,
+                                    // Prefer section rename over the space menu when both apply;
+                                    // the dedicated space-actions button still opens the space menu.
+                                    const sections =
+                                      group.spaceId === bootstrapMe?.spaceId
+                                        ? botSections
+                                        : (spaces.find((space) => space.id === group.spaceId)
+                                            ?.botSections ?? []);
+                                    const section = sections.find(
+                                      (item) => item.id === group.sectionId,
+                                    );
+                                    if (!section) return;
+                                    sectionMenuAnchor.current = event.currentTarget;
+                                    setSectionMenu({
+                                      section,
+                                      spaceId: group.spaceId,
                                       position: { x: event.clientX, y: event.clientY },
                                     });
                                   }
-                                : undefined
-                          }
-                          aria-expanded={group.emptySpaceId ? undefined : !collapsed}
-                          aria-label={
-                            group.emptySpaceId
-                              ? t`Open ${group.title}`
-                              : collapsed
-                                ? t`Expand ${group.title}`
-                                : t`Collapse ${group.title}`
-                          }
-                        >
-                          <span className="flex min-w-0 items-center gap-1.5 truncate">
-                            {group.showLock ? (
-                              <Lock size={11} strokeWidth={2} aria-hidden="true" />
-                            ) : null}
-                            <span className="truncate">{group.title}</span>
-                          </span>
-                          {group.emptySpaceId ? null : (
-                            <ChevronDown
-                              size={14}
-                              strokeWidth={1.8}
-                              className={
-                                collapsed
-                                  ? "-rotate-90 transition-transform"
-                                  : "transition-transform"
-                              }
-                              aria-hidden="true"
-                            />
-                          )}
-                        </button>
+                                : spaceActionsOpen
+                                  ? (event) => {
+                                      event.preventDefault();
+                                      spaceMenuAnchor.current = event.currentTarget;
+                                      setSpaceMenu({
+                                        id: group.spaceId,
+                                        position: { x: event.clientX, y: event.clientY },
+                                      });
+                                    }
+                                  : undefined
+                            }
+                            aria-expanded={group.emptySpaceId ? undefined : !collapsed}
+                            aria-label={
+                              group.emptySpaceId
+                                ? t`Open ${group.title}`
+                                : collapsed
+                                  ? t`Expand ${group.title}`
+                                  : t`Collapse ${group.title}`
+                            }
+                          >
+                            <span className="flex min-w-0 items-center gap-1.5 truncate">
+                              {group.showLock ? (
+                                <Lock size={11} strokeWidth={2} aria-hidden="true" />
+                              ) : null}
+                              <span className="truncate">{group.title}</span>
+                            </span>
+                            {group.emptySpaceId ? null : (
+                              <ChevronDown
+                                size={14}
+                                strokeWidth={1.8}
+                                className={
+                                  collapsed
+                                    ? "-rotate-90 transition-transform"
+                                    : "transition-transform"
+                                }
+                                aria-hidden="true"
+                              />
+                            )}
+                          </button>
+                        ) : null}
                         {spaceActionsOpen ? (
                           <Button
                             variant="ghost"
@@ -4299,9 +4243,19 @@ export function ShellPage() {
             space={renameSpaceTarget}
             onCancel={() => setRenameSpaceTarget(null)}
             onConfirm={async (name) => {
-              await rpc.spaces.rename({ spaceId: renameSpaceTarget.id, name });
+              const spaceId = renameSpaceTarget.id;
+              await commitSpaceRename({
+                rename: async () => {
+                  await rpc.spaces.rename({ spaceId, name });
+                },
+                apply: () => {
+                  setSpaces((current) =>
+                    current.map((space) => (space.id === spaceId ? { ...space, name } : space)),
+                  );
+                },
+                refresh: () => refreshBots(),
+              });
               setRenameSpaceTarget(null);
-              await refreshBots();
             }}
           />
         ) : null}

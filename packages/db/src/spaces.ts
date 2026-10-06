@@ -316,11 +316,6 @@ async function loadActorSpace(db: Pick<PrismaClient, "spaceMember">, input: Empt
   };
 }
 
-function spaceDeletionClaimIsActive(deletingAt: Date | null): boolean {
-  if (!deletingAt) return false;
-  return deletingAt.getTime() >= Date.now() - SPACE_DELETION_CLAIM_TIMEOUT_MS;
-}
-
 async function assertEmptySpaceDeletable(
   db: SpaceDeleteDb,
   input: EmptySpaceDeleteInput,
@@ -503,7 +498,7 @@ export async function renameSpaceForMember(
         await lockSpaceDeletion(tx, input.spaceId);
         const owned = await loadActorSpace(tx, input);
         if (owned.role !== "owner") throw new CannotRenameSpaceAsNonOwnerError();
-        if (spaceDeletionClaimIsActive(owned.deletingAt)) throw new SpaceDeletionInProgressError();
+        if (owned.deletingAt) throw new SpaceDeletionInProgressError();
         await tx.space.update({
           where: { id: input.spaceId },
           data: { name },
