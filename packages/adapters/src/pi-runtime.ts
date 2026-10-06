@@ -426,17 +426,14 @@ export class PiAgentRuntime implements AgentRuntime {
             const text = assistantText(event.message);
             const streamedThisMessage = currentMessageStreamed;
             currentMessageStreamed = "";
-            const textToEmit =
-              streamedThisMessage && text.startsWith(streamedThisMessage)
-                ? text.slice(streamedThisMessage.length)
-                : text;
+            const continued =
+              streamedThisMessage.length > 0 && text.startsWith(streamedThisMessage);
+            const textToEmit = continued ? text.slice(streamedThisMessage.length) : text;
             const sincePendingFinal = streamed.slice(streamedBeforePendingFinal);
-            if (
-              textToEmit &&
-              !messageHasToolCall(event.message) &&
-              !streamedThisMessage.includes(text) &&
-              !sincePendingFinal.endsWith(textToEmit)
-            ) {
+            const alreadyEmitted =
+              !continued &&
+              (streamedThisMessage.includes(text) || sincePendingFinal.endsWith(text));
+            if (textToEmit && !messageHasToolCall(event.message) && !alreadyEmitted) {
               streamed += textToEmit;
               queue.push({ type: "text", text: textToEmit });
             } else if (text && !streamed) {
@@ -494,13 +491,17 @@ export class PiAgentRuntime implements AgentRuntime {
         }
         if (!budgetExceeded && terminalMessage && !messageHasToolCall(terminalMessage)) {
           const terminalText = assistantText(terminalMessage);
-          if (
-            terminalText.trim() &&
-            !streamed.slice(streamedBeforePendingFinal).includes(terminalText)
-          ) {
-            queue.push({ type: "text", text: terminalText });
-            streamed += terminalText;
-            toolWorkPendingFinal = false;
+          const sincePendingFinal = streamed.slice(streamedBeforePendingFinal);
+          if (terminalText.trim() && !sincePendingFinal.includes(terminalText)) {
+            const missing =
+              sincePendingFinal && terminalText.startsWith(sincePendingFinal)
+                ? terminalText.slice(sincePendingFinal.length)
+                : terminalText;
+            if (missing) {
+              queue.push({ type: "text", text: missing });
+              streamed += missing;
+              toolWorkPendingFinal = false;
+            }
           }
         }
         if (budgetExceeded) {

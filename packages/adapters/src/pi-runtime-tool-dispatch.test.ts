@@ -1173,6 +1173,41 @@ describe("Pi connector tool dispatch", () => {
     });
   });
 
+  it("keeps a repeated suffix that matches the streamed prefix", async () => {
+    fakeAgentState.mode = "tools-then-final-text";
+    fakeAgentState.finalDelta = "abc";
+    fakeAgentState.terminalMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "abcabc" }],
+      stopReason: "stop",
+    };
+    const events: unknown[] = [];
+
+    for await (const event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "repeated-suffix",
+        prompt: "check the inbox and report back",
+        instructions: "Use the destination tool, then tell the user what happened.",
+        history: [],
+        tools: [destinationTool],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      { signal: new AbortController().signal },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => (event as { text?: string }).text === "abc")).toHaveLength(2);
+    expect(events).not.toContainEqual({ type: "text", text: "abcabc" });
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      text: "I will check the destination first.abcabc",
+    });
+  });
+
   it("allows a silent empty completion after tools when allowSilentEmpty is set", async () => {
     fakeAgentState.mode = "silent-continuation";
     fakeAgentState.emitFinalAfterFollowUp = false;
