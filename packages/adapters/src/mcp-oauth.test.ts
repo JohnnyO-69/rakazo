@@ -399,6 +399,104 @@ describe("MCP OAuth", () => {
       );
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe("Could not start MCP OAuth");
+    expect((error as Error).message).not.toContain("UPSTREAM_BODY_MARKER");
+  });
+
+  it("reports the HTTP status and OAuth error when registration is rejected", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        const url = logicalHref(input, init);
+        if (url === "https://mcp.example.test/mcp" && request.method === "POST") {
+          return new Response("missing bearer token", {
+            status: 401,
+            headers: {
+              "content-type": "text/plain",
+              "WWW-Authenticate":
+                'Bearer resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource/mcp"',
+            },
+          });
+        }
+        if (url === "https://mcp.example.test/.well-known/oauth-protected-resource/mcp") {
+          return Response.json({
+            resource: "https://mcp.example.test/mcp",
+            authorization_servers: ["https://auth.example.test"],
+          });
+        }
+        if (url === "https://auth.example.test/.well-known/oauth-authorization-server") {
+          return Response.json({
+            issuer: "https://auth.example.test",
+            authorization_endpoint: "https://auth.example.test/authorize",
+            token_endpoint: "https://auth.example.test/token",
+            registration_endpoint: "https://auth.example.test/register",
+            response_types_supported: ["code"],
+            grant_types_supported: ["authorization_code", "refresh_token"],
+            code_challenge_methods_supported: ["S256"],
+          });
+        }
+        if (url === "https://auth.example.test/register" && request.method === "POST") {
+          return Response.json(
+            {
+              error: "registration_not_supported",
+              error_description:
+                "Dynamic client registration is not supported. Only pre-registered partners are allowed.",
+            },
+            { status: 403 },
+          );
+        }
+        throw new Error(`Unexpected request: ${request.method} ${url}`);
+      }),
+    );
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      mcpServer: {
+        findFirst: vi.fn().mockResolvedValue({
+          endpoint: "https://mcp.example.test/mcp",
+          secretId: null,
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      secret: {
+        findFirst: vi.fn(),
+        create: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = {
+      mcpServer: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "server-1",
+          endpoint: "https://mcp.example.test/mcp",
+          secretId: null,
+        }),
+      },
+      secret: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+      mcpOAuthSession: oauthSessionStore(),
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const broker = new McpOAuthBroker(
+      prisma as never,
+      { put: vi.fn(async () => ({ id: "secret-1", ciphertext: "encrypted" })) } as never,
+      TEST_NETWORK,
+    );
+
+    const error = await broker
+      .begin({
+        serverId: "server-1",
+        spaceId: "workspace-1",
+        userId: "user-1",
+        redirectUri: "http://127.0.0.1:5173/mcp/oauth/callback",
+      })
+      .then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Could not start MCP OAuth: HTTP 403 registration_not_supported: Dynamic client registration is not supported. Only pre-registered partners are allowed.",
+    );
+    expect((error as Error).message).not.toContain("[object Response]");
   });
 
   it("completes a persisted OAuth session after the API process restarts", async () => {

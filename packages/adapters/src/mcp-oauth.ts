@@ -366,10 +366,18 @@ function oauthFetch(
   // Errors raised by this network layer (URL policy, redirects, unreachable
   // hosts) carry only our own text. Anything else was built by the SDK from an
   // upstream response and may quote its body, so the caller gets `message`.
+  // A structured OAuth error is the protocol's own failure: keep its status,
+  // error code, and description instead of hiding them behind `message`.
   const networkErrors = new WeakSet<Error>();
+  let rejection: OAuthRejection | undefined;
   const recordingFetch: typeof fetch = async (input, init) => {
     try {
-      return await fallbackFetch(input, init);
+      const response = await fallbackFetch(input, init);
+      if (!response.ok) {
+        const next = await readOAuthRejection(response);
+        if (next) rejection = next;
+      }
+      return response;
     } catch (error) {
       if (error instanceof Error) networkErrors.add(error);
       throw error;
@@ -381,12 +389,55 @@ function oauthFetch(
     close: () => safeFetch.close(),
     publicError: (error, message) => {
       if (error instanceof Error && networkErrors.has(error)) return error;
-      getLogger().warn(
-        `${message}: ${sanitizeConnectorError(error, oauthMaterialSecrets(material))}`,
-      );
-      return new Error(message);
+      const secrets = oauthMaterialSecrets(material);
+      const sdk = sanitizeConnectorError(error, secrets);
+      const surfaced = rejection ? formatOAuthRejection(rejection, sdk, secrets) : undefined;
+      getLogger().warn(`${message}: ${surfaced ?? sdk}`);
+      return new Error(surfaced ? `${message}: ${surfaced}` : message);
     },
   };
+}
+
+type OAuthRejection = { status: number; code: string; description: string };
+
+/** Read an RFC 6749 error object without consuming the body the SDK still needs. */
+async function readOAuthRejection(response: Response): Promise<OAuthRejection | undefined> {
+  let text: string;
+  try {
+    text = await response.clone().text();
+  } catch {
+    return undefined;
+  }
+  if (text.length > 8_000) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const record = parsed as Record<string, unknown>;
+  const code = record.error;
+  if (typeof code !== "string" || !/^[\w.-]{1,64}$/.test(code)) return undefined;
+  const description = typeof record.error_description === "string" ? record.error_description : "";
+  return { status: response.status, code, description };
+}
+
+/** Surface a rejection only when it is the error the SDK just threw.
+ *
+ * Earlier challenges (a 401 while discovery continues) must not replace a
+ * later, different failure. Unstructured bodies stay out of the caller-facing
+ * message; the log still receives the SDK text. */
+function formatOAuthRejection(
+  rejection: OAuthRejection,
+  sdk: string,
+  secrets: string[],
+): string | undefined {
+  if (sdk.includes("Raw body:")) return undefined;
+  if (sdk.trim() !== rejection.description.trim()) return undefined;
+  const description = rejection.description.replace(/\s+/g, " ").trim().slice(0, 300);
+  const detail = description ? `${rejection.code}: ${description}` : rejection.code;
+  return sanitizeConnectorError(`HTTP ${rejection.status} ${detail}`, secrets);
 }
 
 export class McpOAuthBroker {
