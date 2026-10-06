@@ -426,16 +426,19 @@ export class PiAgentRuntime implements AgentRuntime {
             const text = assistantText(event.message);
             const streamedThisMessage = currentMessageStreamed;
             currentMessageStreamed = "";
+            const textToEmit =
+              streamedThisMessage && text.startsWith(streamedThisMessage)
+                ? text.slice(streamedThisMessage.length)
+                : text;
+            const sincePendingFinal = streamed.slice(streamedBeforePendingFinal);
             if (
-              text &&
+              textToEmit &&
               !messageHasToolCall(event.message) &&
               !streamedThisMessage.includes(text) &&
-              !streamed.endsWith(text)
+              !sincePendingFinal.endsWith(textToEmit)
             ) {
-              // Final text that never arrived as deltas (common after a tool turn
-              // whose earlier narration already filled `streamed`).
-              streamed += text;
-              queue.push({ type: "text", text });
+              streamed += textToEmit;
+              queue.push({ type: "text", text: textToEmit });
             } else if (text && !streamed) {
               streamed = text;
               queue.push({ type: "text", text });
@@ -491,7 +494,10 @@ export class PiAgentRuntime implements AgentRuntime {
         }
         if (!budgetExceeded && terminalMessage && !messageHasToolCall(terminalMessage)) {
           const terminalText = assistantText(terminalMessage);
-          if (terminalText.trim() && !streamed.includes(terminalText)) {
+          if (
+            terminalText.trim() &&
+            !streamed.slice(streamedBeforePendingFinal).includes(terminalText)
+          ) {
             queue.push({ type: "text", text: terminalText });
             streamed += terminalText;
             toolWorkPendingFinal = false;
@@ -1782,7 +1788,7 @@ function messageHasToolCall(message: unknown): boolean {
   );
 }
 
-/** Provider failure with no written answer. Aborts stay on the existing cancel path. */
+/** Provider failure. Aborts stay on the existing cancel path. */
 export function providerFailureText(message: unknown): string | undefined {
   if (!message || typeof message !== "object") return undefined;
   if (!("role" in message) || message.role !== "assistant") return undefined;
@@ -1799,7 +1805,9 @@ export function providerFailureText(message: unknown): string | undefined {
       : undefined;
   const text = assistantText(message).trim();
   if (stopReason === "error") {
-    return errorMessage || "The model failed before writing a response.";
+    if (errorMessage) return errorMessage;
+    if (text) return "The model failed after writing a response.";
+    return "The model failed before writing a response.";
   }
   if (stopReason === "length" && !text) {
     return errorMessage || "The model hit its output limit before writing a response.";

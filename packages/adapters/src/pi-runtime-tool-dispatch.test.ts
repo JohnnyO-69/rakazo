@@ -27,6 +27,8 @@ const fakeAgentState = vi.hoisted(() => ({
   emitFinalOnCompletedMessage: false,
   /** Stream the post-tool answer, but leave the completed turn's message text empty. */
   emitFinalDeltaOnly: false,
+  narration: "I will check the destination first.",
+  finalDelta: undefined as string | undefined,
   abortCount: 0,
   tools: [] as Array<{
     name: string;
@@ -160,11 +162,12 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
         if (!target) throw new Error("expected tool was not exposed");
         const rawArgs = fakeAgentState.invoke.args;
         const args = target.prepareArguments?.(rawArgs) ?? rawArgs;
+        const narration = fakeAgentState.narration;
         this.emit({
           type: "message_update",
           assistantMessageEvent: {
             type: "text_delta",
-            delta: "I will check the destination first.",
+            delta: narration,
           },
         });
         this.emit({ type: "tool_execution_start", toolName: target.name, args });
@@ -174,7 +177,7 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
           message: {
             role: "assistant",
             content: [
-              { type: "text", text: "I will check the destination first." },
+              { type: "text", text: narration },
               { type: "toolCall", id: "call-1", name: target.name, arguments: args },
             ],
           },
@@ -187,6 +190,12 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
         };
         this.state.messages.push(terminal);
         this.emit({ type: "message_start", message: terminal });
+        if (fakeAgentState.finalDelta) {
+          this.emit({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: fakeAgentState.finalDelta },
+          });
+        }
         this.emit({ type: "message_end", message: terminal });
         this.emit({
           type: "turn_end",
@@ -325,6 +334,7 @@ import {
   MISSING_TOOL_FINAL_RESPONSE_ERROR,
   maxToolCallsPerTurn,
   PiAgentRuntime,
+  providerFailureText,
 } from "./pi-runtime.js";
 import { TOOL_RESULT_TEXT_LIMIT } from "./pi-runtime-limits.js";
 
@@ -374,6 +384,8 @@ describe("Pi connector tool dispatch", () => {
     fakeAgentState.terminalMessage = undefined;
     fakeAgentState.emitFinalOnCompletedMessage = false;
     fakeAgentState.emitFinalDeltaOnly = false;
+    fakeAgentState.narration = "I will check the destination first.";
+    fakeAgentState.finalDelta = undefined;
     fakeAgentState.initialMessages = [];
     fakeAgentState.promptInputs = [];
     fakeAgentState.promptImages = [];
@@ -970,6 +982,31 @@ describe("Pi connector tool dispatch", () => {
     });
   });
 
+  it("names a written response when an error stop has no provider message", () => {
+    expect(
+      providerFailureText({
+        role: "assistant",
+        content: [{ type: "text", text: "Partial answer." }],
+        stopReason: "error",
+      }),
+    ).toBe("The model failed after writing a response.");
+    expect(
+      providerFailureText({
+        role: "assistant",
+        content: [{ type: "text", text: "   " }],
+        stopReason: "error",
+      }),
+    ).toBe("The model failed before writing a response.");
+    expect(
+      providerFailureText({
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "upstream unavailable",
+      }),
+    ).toBe("upstream unavailable");
+  });
+
   it("fails when tools succeeded and the final assistant content is an empty provider error", async () => {
     fakeAgentState.mode = "tools-then-empty-failure";
     fakeAgentState.terminalMessage = {
@@ -1063,6 +1100,76 @@ describe("Pi connector tool dispatch", () => {
     expect(events).not.toContainEqual({
       type: "text",
       text: "The delegated bot completed its turn without a written summary.",
+    });
+  });
+
+  it("keeps a final answer that repeats the tool narration", async () => {
+    fakeAgentState.mode = "tools-then-final-text";
+    fakeAgentState.narration = "Done.";
+    fakeAgentState.terminalMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "Done." }],
+      stopReason: "stop",
+    };
+    const events: unknown[] = [];
+
+    for await (const event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "repeated-final",
+        prompt: "finish and report back",
+        instructions: "Use the destination tool, then tell the user what happened.",
+        history: [],
+        tools: [destinationTool],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      { signal: new AbortController().signal },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => (event as { text?: string }).text === "Done.")).toHaveLength(2);
+    expect(events.at(-1)).toEqual({ type: "done", text: "Done.Done." });
+  });
+
+  it("emits only the final suffix that extends a streamed prefix", async () => {
+    fakeAgentState.mode = "tools-then-final-text";
+    fakeAgentState.finalDelta = "The inbox";
+    fakeAgentState.terminalMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "The inbox has 3 unread notes." }],
+      stopReason: "stop",
+    };
+    const events: unknown[] = [];
+
+    for await (const event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "final-suffix",
+        prompt: "check the inbox and report back",
+        instructions: "Use the destination tool, then tell the user what happened.",
+        history: [],
+        tools: [destinationTool],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      { signal: new AbortController().signal },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({ type: "text", text: "The inbox" });
+    expect(events).toContainEqual({ type: "text", text: " has 3 unread notes." });
+    expect(events).not.toContainEqual({
+      type: "text",
+      text: "The inbox has 3 unread notes.",
+    });
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      text: "I will check the destination first.The inbox has 3 unread notes.",
     });
   });
 
