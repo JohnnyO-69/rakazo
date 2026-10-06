@@ -27,6 +27,7 @@ const composioSdkState = vi.hoisted(() => ({
   directoryFails: false,
   executions: [] as Array<{ tool: string; args: Record<string, unknown> }>,
   executeResult: null as null | { data: Record<string, unknown>; error: string | null },
+  failTools: null as null | string[],
   logIds: null as null | string[],
   connectedAccounts: {
     list: async (_query?: Record<string, unknown>) => ({ items: [] as Array<{ id: string }> }),
@@ -122,8 +123,11 @@ vi.mock("@composio/core", () => ({
             : [],
         execute: async (tool: string, args: Record<string, unknown>) => {
           composioSdkState.executions.push({ tool, args });
+          const failed = composioSdkState.failTools?.includes(tool) ?? false;
           return {
-            ...(composioSdkState.executeResult ?? { data: { ok: true }, error: null }),
+            ...(failed
+              ? { data: { ok: false }, error: "listing failed" }
+              : (composioSdkState.executeResult ?? { data: { ok: true }, error: null })),
             logId: composioSdkState.logIds?.shift() ?? "log-github",
           };
         },
@@ -794,6 +798,57 @@ describe("composio tool mapping", () => {
       "COMPOSIO_MULTI_EXECUTE_TOOL",
       "DROPBOX_LIST_FILES_IN_FOLDER",
     ]);
+  });
+
+  it("keeps earlier log ids when a later split call fails", async () => {
+    composioSdkState.created.length = 0;
+    composioSdkState.executions.length = 0;
+    composioSdkState.sessions.clear();
+    composioSdkState.logIds = ["log-create", "log-list"];
+    composioSdkState.failTools = ["DROPBOX_LIST_FILES_IN_FOLDER"];
+    composioToolkitDirectory.invalidate();
+    composioSdkState.executeResult = { data: { ok: true }, error: null };
+
+    const connector = new ComposioConnector();
+    const context: AdapterContext = {
+      operationId: "composio-dropbox-partial",
+      traceId: "composio-dropbox-partial",
+      spaceId: "workspace",
+      userId: "user-1",
+      signal: new AbortController().signal,
+      connectedConnections: [
+        {
+          id: "connection-dropbox",
+          connectorId: "composio",
+          externalId: "dropbox",
+          displayName: "Dropbox",
+        },
+      ],
+    };
+    const events: ConnectorEvent[] = [];
+    try {
+      for await (const event of connector.execute(
+        {
+          tool: "COMPOSIO_MULTI_EXECUTE_TOOL",
+          args: {
+            tools: [
+              { tool_slug: "DROPBOX_CREATE_FOLDER", arguments: { path: "/Invoices" } },
+              { tool_slug: "DROPBOX_LIST_FILES_IN_FOLDER", arguments: { path: "/Invoices" } },
+            ],
+          },
+          executionId: "composio-dropbox-partial",
+        },
+        context,
+      )) {
+        events.push(event);
+      }
+    } finally {
+      composioSdkState.executeResult = null;
+      composioSdkState.logIds = null;
+      composioSdkState.failTools = null;
+    }
+
+    expect(events).toEqual([{ type: "error", message: "listing failed", logIds: ["log-create"] }]);
   });
 
   it("emits each failed tool's error from a failed batch", async () => {

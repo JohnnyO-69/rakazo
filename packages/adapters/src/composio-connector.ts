@@ -463,13 +463,13 @@ export class ComposioConnector implements ComposioProvider {
   }
 
   async *execute(call: ConnectorCall, context: AdapterContext): AsyncIterable<ConnectorEvent> {
+    const executed = [];
     try {
       const session = await this.sessionForExecute(
         context.userId,
         connectedComposioConnections(context),
       );
       const planned = expandComposioMultiExecute(call.tool, call.args ?? {});
-      const executed = [];
       for (const item of planned) {
         const result = await session.execute(
           item.tool,
@@ -477,9 +477,11 @@ export class ComposioConnector implements ComposioProvider {
           item.account ? { account: item.account } : undefined,
         );
         if (result.error) {
+          const logIds = collectLogIds(executed);
           yield {
             type: "error",
             message: sanitizeComposioError(composioResultError(result.error, result.data)),
+            ...(logIds.length > 0 ? { logIds } : {}),
           };
           return;
         }
@@ -500,7 +502,12 @@ export class ComposioConnector implements ComposioProvider {
         },
       };
     } catch (error) {
-      yield { type: "error", message: sanitizeComposioError(error) };
+      const logIds = collectLogIds(executed);
+      yield {
+        type: "error",
+        message: sanitizeComposioError(error),
+        ...(logIds.length > 0 ? { logIds } : {}),
+      };
     }
   }
 
