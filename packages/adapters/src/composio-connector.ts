@@ -149,14 +149,25 @@ export function expandComposioMultiExecute(
     return [{ tool, args }];
   }
   const calls: ComposioExecutionCall[] = [];
-  const rest: unknown[] = [];
+  let pending: unknown[] = [];
+  const flushPending = () => {
+    if (pending.length === 0) return;
+    calls.push({ tool, args: { ...args, tools: pending } });
+    pending = [];
+  };
   for (const item of args.tools) {
     const listing = dropboxFolderListCall(item);
-    if (listing) calls.push(listing);
-    else rest.push(item);
+    if (listing) {
+      flushPending();
+      calls.push(listing);
+    } else {
+      pending.push(item);
+    }
   }
-  if (calls.length === 0) return [{ tool, args }];
-  if (rest.length > 0) calls.push({ tool, args: { ...args, tools: rest } });
+  flushPending();
+  if (calls.length === 0 || (calls.length === 1 && calls[0]?.tool === tool)) {
+    return [{ tool, args }];
+  }
   return calls;
 }
 
@@ -166,13 +177,16 @@ function dropboxFolderListCall(item: unknown): ComposioExecutionCall | undefined
   const slug = typeof record.tool_slug === "string" ? record.tool_slug.trim() : "";
   if (!slug || !DROPBOX_FOLDER_LIST_TOOLS.has(slug.toUpperCase())) return undefined;
   const toolArgs = objectArguments(record.arguments);
+  if (!toolArgs) {
+    throw new Error("Dropbox folder listing arguments must be a JSON object.");
+  }
   const path = nonEmptyPath(record.path);
   if (path && !nonEmptyPath(toolArgs.path)) toolArgs.path = path;
   const account = typeof record.account === "string" ? record.account.trim() : "";
   return account ? { tool: slug, args: toolArgs, account } : { tool: slug, args: toolArgs };
 }
 
-function objectArguments(value: unknown): Record<string, unknown> {
+function objectArguments(value: unknown): Record<string, unknown> | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return {};
@@ -182,9 +196,9 @@ function objectArguments(value: unknown): Record<string, unknown> {
         return { ...(parsed as Record<string, unknown>) };
       }
     } catch {
-      return {};
+      return undefined;
     }
-    return {};
+    return undefined;
   }
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return { ...(value as Record<string, unknown>) };
@@ -475,12 +489,14 @@ export class ComposioConnector implements ComposioProvider {
         executed.length === 1
           ? executed[0]!
           : { data: executed.map((item) => item.data), error: null };
-      const logId = collectLogIds(result)[0] ?? "";
+      const logIds = collectLogIds(executed.length === 1 ? result : executed);
+      const logId = logIds[0] ?? "";
       yield {
         type: "result",
         data: {
           data: sanitizePayload(result.data),
           logId,
+          ...(logIds.length > 1 ? { logIds: logIds.slice(1).map((id) => ({ logId: id })) } : {}),
         },
       };
     } catch (error) {
