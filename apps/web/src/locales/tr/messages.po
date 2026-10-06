@@ -1676,6 +1676,7 @@ msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
 msgid "Default"
 msgstr "Varsayılan"
 
@@ -3090,8 +3091,12 @@ msgid "Read replies aloud"
 msgstr "Yanıtları sesli oku"
 
 #: src/pages/KnowledgeSection.tsx
-msgid "read-only"
-msgstr "salt okunur"
+msgid "Built-in"
+msgstr "Yerleşik"
+
+#: src/pages/KnowledgeSection.tsx
+msgid "Plugin"
+msgstr "Eklenti"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3647,8 +3652,8 @@ msgid "Skill {0}"
 msgstr "Beceri: {0}"
 
 #: src/pages/KnowledgeSection.tsx
-msgid "Skills"
-msgstr "Beceriler"
+msgid "Shared skills"
+msgstr "Paylaşılan beceriler"
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/Shell.tsx

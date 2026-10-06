@@ -898,7 +898,7 @@ export default function Models() {
             editable={!busy}
             importantForAutofill="no"
             onChangeText={updateApiKey}
-            placeholder={t("Optional")}
+            placeholder={credential?.hasKey ? t("Paste a replacement key") : t("Optional")}
             placeholderTextColor={native.tertiaryLabel}
             secureTextEntry
             style={styles.keyInput}
@@ -1202,7 +1202,7 @@ export default function Models() {
                   editable={!busy}
                   importantForAutofill="no"
                   onChangeText={updateApiKey}
-                  placeholder={t("sk-…")}
+                  placeholder={credential?.hasKey ? t("Paste a replacement key") : t("sk-…")}
                   placeholderTextColor={native.tertiaryLabel}
                   secureTextEntry
                   style={styles.keyInput}

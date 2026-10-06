@@ -166,6 +166,19 @@ function cloudflareRoutingForConnect(
   return routing;
 }
 
+/**
+ * Whether the stored secret contains an API key. OAuth sign-in and a keyless
+ * OpenAI-compatible server are connections without one. An unreadable secret
+ * is not reported as a key — the client must not invent a stored-key state.
+ */
+function storedModelSecretHasApiKey(plaintext: string | undefined): boolean {
+  if (!plaintext) return false;
+  const parsed = parseModelSecret(plaintext);
+  if (parsed.kind === "api_key") return parsed.key.trim().length > 0;
+  if (parsed.kind === "openai_compatible") return Boolean(parsed.apiKey?.trim());
+  return false;
+}
+
 /** `null` clears a saved limit. Omitting it keeps the previous connection's limit. */
 function connectMaxTokens(
   input: number | null | undefined,
@@ -192,7 +205,7 @@ export function modelCredentialDto(
     id: row.id,
     provider: row.provider,
     label: row.label,
-    hasKey: true,
+    hasKey: storedModelSecretHasApiKey(plaintext),
     isDefault: row.isDefault,
     ...(row.defaultModel ? { modelId: row.defaultModel } : {}),
     // Space-scoped effort stored beside the preference's modelId; the
