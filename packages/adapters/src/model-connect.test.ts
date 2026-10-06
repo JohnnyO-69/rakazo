@@ -209,6 +209,38 @@ describe("openai-codex API key guard", () => {
         apiKey: "cf-test-key-value",
       }),
     ).toThrow(CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE);
+    expect(
+      parseModelSecret(
+        buildModelConnectPlaintext(
+          { provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID, accountId: "acct9999" },
+          plaintext,
+        ),
+      ),
+    ).toEqual({
+      kind: "api_key",
+      key: "cf-test-key-value",
+      accountId: "acct9999",
+      gatewayId: "gateway-1",
+    });
+    expect(
+      parseModelSecret(
+        buildModelConnectPlaintext(
+          { provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID, gatewayId: "gateway-2" },
+          plaintext,
+        ),
+      ),
+    ).toEqual({
+      kind: "api_key",
+      key: "cf-test-key-value",
+      accountId: "acct1234",
+      gatewayId: "gateway-2",
+    });
+    expect(() =>
+      buildModelConnectPlaintext(
+        { provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID, accountId: "acct/secret" },
+        plaintext,
+      ),
+    ).toThrow(CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE);
   });
 });
 

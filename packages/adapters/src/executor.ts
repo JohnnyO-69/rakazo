@@ -40,6 +40,7 @@ import {
   BOT_TITLE_MAX_LENGTH,
   BotSecretName,
   botSecretSubmissionSchema,
+  CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
   COMPUTER_COMMAND_OUTPUT_MAX_CHARS,
   isAttachmentImageMimeType,
   OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -2895,6 +2896,14 @@ export function buildApprovalContinuation(
   ].join("\n");
 }
 
+export function isTerminalModelSetupError(error: unknown): boolean {
+  return (
+    error instanceof UnavailableModelForAuthError ||
+    isRetiredModelCredentialError(error) ||
+    (error instanceof Error && error.message === CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE)
+  );
+}
+
 export function createRunExecutor(deps: ExecutorDeps) {
   const web = deps.web ?? createWebProvider();
   const browser = deps.browser ?? createBrowserProvider(undefined, { sandbox: deps.sandbox });
@@ -3575,12 +3584,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         } catch (error) {
           // A dead or account-switched credential is already deleted. Retrying
           // setup would requeue the run and might fall back to another model.
-          if (
-            !(error instanceof UnavailableModelForAuthError) &&
-            !isRetiredModelCredentialError(error)
-          ) {
-            throw error;
-          }
+          if (!isTerminalModelSetupError(error)) throw error;
           await failRunBeforeModel(
             error instanceof Error ? error.message : "Connect the provider again.",
           );

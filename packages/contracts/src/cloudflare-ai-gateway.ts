@@ -15,17 +15,17 @@ export function isCloudflareAiGatewayProvider(provider: string): boolean {
   return provider === CLOUDFLARE_AI_GATEWAY_PROVIDER_ID;
 }
 
+export function cloudflareGatewayRoutingId(value: string | null | undefined): string | undefined {
+  const id = value?.trim() ?? "";
+  return CLOUDFLARE_GATEWAY_ROUTING_ID.test(id) ? id : undefined;
+}
+
 export function cloudflareGatewayRouting(input: {
   accountId?: string | null;
   gatewayId?: string | null;
 }): { accountId: string; gatewayId: string } | undefined {
-  const accountId = input.accountId?.trim() ?? "";
-  const gatewayId = input.gatewayId?.trim() ?? "";
-  if (
-    !CLOUDFLARE_GATEWAY_ROUTING_ID.test(accountId) ||
-    !CLOUDFLARE_GATEWAY_ROUTING_ID.test(gatewayId)
-  ) {
-    return undefined;
-  }
+  const accountId = cloudflareGatewayRoutingId(input.accountId);
+  const gatewayId = cloudflareGatewayRoutingId(input.gatewayId);
+  if (!accountId || !gatewayId) return undefined;
   return { accountId, gatewayId };
 }

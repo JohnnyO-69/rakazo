@@ -2,7 +2,7 @@ import * as z from "zod";
 import { BotAvatarValueSchema } from "./bot-avatar.js";
 import {
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
-  cloudflareGatewayRouting,
+  cloudflareGatewayRoutingId,
   isCloudflareAiGatewayProvider,
 } from "./cloudflare-ai-gateway.js";
 import { ThreadMessageSchema } from "./events.js";
@@ -995,16 +995,18 @@ export const ModelConnectInputSchema = z
       });
     }
     if (isCloudflareAiGatewayProvider(value.provider)) {
-      const hasKey = (value.apiKey?.trim() ?? "").length > 0;
-      const touchesRouting = value.accountId !== undefined || value.gatewayId !== undefined;
-      if (
-        (hasKey || touchesRouting) &&
-        !cloudflareGatewayRouting({ accountId: value.accountId, gatewayId: value.gatewayId })
-      ) {
+      if (value.accountId !== undefined && !cloudflareGatewayRoutingId(value.accountId)) {
         ctx.addIssue({
           code: "custom",
           message: CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
           path: ["accountId"],
+        });
+      }
+      if (value.gatewayId !== undefined && !cloudflareGatewayRoutingId(value.gatewayId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
+          path: ["gatewayId"],
         });
       }
     }

@@ -31,5 +31,5 @@ export function withCloudflareGatewayAuth(
 ): ModelsSimpleStreamOptions | undefined {
   const env = cloudflareGatewayProviderEnv(model);
   if (!env) return options;
-  return { ...options, env: { ...env, ...options?.env } };
+  return { ...options, env: { ...options?.env, ...env } };
 }

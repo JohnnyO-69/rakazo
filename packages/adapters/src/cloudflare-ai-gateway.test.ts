@@ -90,6 +90,27 @@ describe("Cloudflare AI Gateway auth", () => {
     expect(CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE).not.toContain("Provider is not configured");
   });
 
+  it("keeps saved routing ids ahead of caller env", () => {
+    const model = {
+      provider: CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
+      accountId: ACCOUNT_ID,
+      gatewayId: GATEWAY_ID,
+    };
+    expect(
+      withCloudflareGatewayAuth(model, {
+        env: {
+          CLOUDFLARE_ACCOUNT_ID: "other-account",
+          CLOUDFLARE_GATEWAY_ID: "other-gateway",
+          OTHER: "kept",
+        },
+      })?.env,
+    ).toEqual({
+      OTHER: "kept",
+      CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID,
+      CLOUDFLARE_GATEWAY_ID: GATEWAY_ID,
+    });
+  });
+
   it("leaves other providers unchanged", () => {
     const options = { apiKey: "sk-test-key-123" };
     expect(withCloudflareGatewayAuth({ provider: "openai" }, options)).toBe(options);

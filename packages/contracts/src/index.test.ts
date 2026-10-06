@@ -93,28 +93,52 @@ describe("contracts", () => {
     expect(valid.success).toBe(true);
   });
 
-  it("requires Cloudflare AI Gateway account and gateway ids with a key", () => {
+  it("validates each Cloudflare routing id and allows an update to send only one", () => {
     const provider = CLOUDFLARE_AI_GATEWAY_PROVIDER_ID;
-    const missing = ModelConnectInputSchema.safeParse({
-      provider,
-      apiKey: "cf-test-key-value",
-    });
-    expect(missing.success).toBe(false);
-    if (!missing.success) {
-      expect(
-        missing.error.issues.some(
-          (issue) => issue.message === CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
-        ),
-      ).toBe(true);
-    }
     expect(
       ModelConnectInputSchema.safeParse({
         provider,
         apiKey: "cf-test-key-value",
-        accountId: "../account",
-        gatewayId: "gateway-1",
       }).success,
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      ModelConnectInputSchema.safeParse({
+        provider,
+        maxTokens: 1024,
+        accountId: "acct9999",
+      }).success,
+    ).toBe(true);
+    expect(
+      ModelConnectInputSchema.safeParse({
+        provider,
+        maxTokens: 1024,
+        gatewayId: "gateway-2",
+      }).success,
+    ).toBe(true);
+    const unsafeAccount = ModelConnectInputSchema.safeParse({
+      provider,
+      apiKey: "cf-test-key-value",
+      accountId: "../account",
+      gatewayId: "gateway-1",
+    });
+    expect(unsafeAccount.success).toBe(false);
+    if (!unsafeAccount.success) {
+      expect(unsafeAccount.error.issues.some((issue) => issue.path[0] === "accountId")).toBe(true);
+      expect(
+        unsafeAccount.error.issues.some(
+          (issue) => issue.message === CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
+        ),
+      ).toBe(true);
+    }
+    const unsafeGateway = ModelConnectInputSchema.safeParse({
+      provider,
+      maxTokens: 1024,
+      gatewayId: "gateway/1",
+    });
+    expect(unsafeGateway.success).toBe(false);
+    if (!unsafeGateway.success) {
+      expect(unsafeGateway.error.issues.some((issue) => issue.path[0] === "gatewayId")).toBe(true);
+    }
     expect(
       ModelConnectInputSchema.safeParse({
         provider,
