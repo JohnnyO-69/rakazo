@@ -161,10 +161,7 @@ export default function Layout() {
                     }}
                   />
                 </Stack>
-                <VoicePlayerBar
-                  bots={[]}
-                  style={{ marginTop: 8, marginBottom: insets.bottom + 8 }}
-                />
+                <VoicePlayerBar style={{ marginTop: 8, marginBottom: insets.bottom + 8 }} />
               </View>
               <ComputerUpdateProgress />
               <CallCard />

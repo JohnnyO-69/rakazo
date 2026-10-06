@@ -528,7 +528,13 @@ function Thread() {
     if (decision.action !== "speak") return;
     autoSpokenBotId.current = currentBot.id;
     autoSpoken.current = decision.messageId;
-    void speakText(decision.text, { botId: currentBot.id }).catch(() => undefined);
+    void speakText(decision.text, {
+      botId: currentBot.id,
+      speaker: {
+        name: currentBot.name,
+        color: resolvePersonaColorDef(currentBot.id, currentBot.color).light,
+      },
+    }).catch(() => undefined);
   }, [botId, inGroup, currentBot, navigation, snap?.botId, snap?.messages, snap?.run?.status]);
 
   useEffect(() => {
@@ -1388,11 +1394,16 @@ function Thread() {
         if (candidate.role !== "bot") return [];
         const text = speakableMessageText(candidate);
         if (!text) return [];
+        const speakerBotId = candidate.botId ?? botId ?? snap?.members?.[0]?.botId ?? "";
         return [
           {
             text,
-            botId: candidate.botId ?? botId ?? snap?.members?.[0]?.botId ?? "",
+            botId: speakerBotId,
             messageId: candidate.id,
+            speaker: {
+              name: memberName(snap?.members, speakerBotId) ?? displayName,
+              color: speakerColorFor(mentionBots, snap?.members, speakerBotId),
+            },
           },
         ];
       });
@@ -1406,7 +1417,7 @@ function Thread() {
           Alert.alert(t("Could not speak"), err instanceof Error ? err.message : t("Try again.")),
         );
     },
-    [botId, snap?.members, visibleMessages],
+    [botId, displayName, mentionBots, snap?.members, visibleMessages],
   );
 
   async function startVoiceCall() {
