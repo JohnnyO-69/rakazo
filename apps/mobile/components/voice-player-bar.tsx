@@ -1,9 +1,10 @@
 import { resolvePersonaColorDef } from "@rakazo/core";
 import { useSyncExternalStore } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { MobileBot, MobileSnapshot } from "../lib/api";
+import { mobileTokens } from "../lib/appearance";
 import { useI18n } from "../lib/i18n";
-import { useMobileTokens } from "../lib/native";
+import { useThemedStyles } from "../lib/native";
 import {
   getVoicePlaybackState,
   pauseVoicePlayback,
@@ -29,7 +30,7 @@ export function VoicePlayerBar({
   style?: { marginTop?: number; marginBottom?: number; marginHorizontal?: number };
 }) {
   const { t } = useI18n();
-  const tokens = useMobileTokens();
+  const styles = useThemedStyles(createStyles);
   const playback = useSyncExternalStore(subscribeVoicePlayback, getVoicePlaybackState);
   if (playback.status === "idle") return null;
 
@@ -40,42 +41,18 @@ export function VoicePlayerBar({
   const speakerName = speakerBot?.name || speakerMember?.name || t("Bot");
   const speakerColor = playback.botId
     ? resolvePersonaColorDef(playback.botId, speakerBot?.color ?? speakerMember?.color).light
-    : undefined;
+    : mobileTokens().foreground;
   const paused = playback.status === "paused";
 
   return (
-    <View
-      style={[
-        {
-          marginHorizontal: 14,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
-          borderRadius: 18,
-          padding: 10,
-          borderWidth: 1,
-          borderColor: tokens.border,
-          backgroundColor: tokens.card,
-        },
-        style,
-      ]}
-    >
+    <View style={[styles.bar, style]}>
       <NativeSymbol
         ios="waveform"
         android="pulse-outline"
         size={16}
-        color={speakerColor ?? tokens.foreground}
+        color={speakerColor}
       />
-      <Text
-        numberOfLines={1}
-        style={{
-          flexGrow: 1,
-          flexShrink: 1,
-          fontSize: 13,
-          fontWeight: "600",
-          color: speakerColor ?? tokens.foreground,
-        }}
-      >
+      <Text numberOfLines={1} style={[styles.name, { color: speakerColor }]}>
         {speakerName}
       </Text>
       {paused ? (
@@ -114,24 +91,48 @@ function VoiceControlButton({
   ios: string;
   android: Parameters<typeof NativeSymbol>[0]["android"];
 }) {
-  const tokens = useMobileTokens();
+  const styles = useThemedStyles(createStyles);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
-      style={{
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        borderWidth: 1,
-        borderColor: tokens.border,
-        backgroundColor: tokens.background,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
+      style={styles.button}
     >
-      <NativeSymbol ios={ios} android={android} size={14} color={tokens.foreground} />
+      <NativeSymbol ios={ios} android={android} size={14} color={mobileTokens().foreground} />
     </Pressable>
   );
+}
+
+function createStyles() {
+  const tokens = mobileTokens();
+  return StyleSheet.create({
+    bar: {
+      marginHorizontal: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      borderRadius: 18,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: tokens.border,
+      backgroundColor: tokens.card,
+    },
+    name: {
+      flexGrow: 1,
+      flexShrink: 1,
+      fontSize: 13,
+      fontWeight: "600",
+    },
+    button: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: tokens.border,
+      backgroundColor: tokens.background,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+  });
 }
