@@ -165,6 +165,7 @@ import {
   normalizeSecretDestination,
   requestWithBotSecret,
   resolveLoginFill,
+  resolveRequestSecretDestination,
   sameSecretDestination,
 } from "./bot-secrets.js";
 import { createBrowserProvider } from "./browser-provider-factory.js";
@@ -5468,25 +5469,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
           if (name === "request_secret") {
-            let destination: ReturnType<typeof normalizeSecretDestination> | undefined;
-            if (args.credential) {
-              try {
-                destination = normalizeSecretDestination(args.credential);
-              } catch (error) {
-                return finish({
-                  error:
-                    error instanceof Error &&
-                    error.message.startsWith("Invalid credential destination")
-                      ? error.message
-                      : "Specify a credential name, HTTPS origin, and auth method.",
-                });
-              }
-            }
-            if (Boolean(destination) === Boolean(args.connectionId)) {
-              return finish({
-                error: "Provide either a reusable credential destination or a connectionId.",
-              });
-            }
+            const resolvedSecret = resolveRequestSecretDestination(args);
+            if (resolvedSecret.error) return finish({ error: resolvedSecret.error });
+            const destination = resolvedSecret.destination;
+            const connectionId = resolvedSecret.connectionId;
             if (destination) {
               const existing = await findBotSecret(deps.prisma, run, destination.name);
               if (existing && !sameSecretDestination(existing, destination)) {
@@ -5536,7 +5522,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Keep the tail the old redactor still holds; a fresh instance drops it.
               pendingProgress += progressRedactor.finish();
               progressRedactor = createStreamingRedactor(runSecrets);
-              const connectionId = args.connectionId ? String(args.connectionId) : undefined;
               const purpose = String(args.purpose ?? "otp");
               if (applied && !claimedEffect) {
                 if (applied.effect.status === "intended") {
@@ -5606,7 +5591,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const recordedForAsk = await recordEffect(deps, run, name, effectKey, args);
             const missingSecretAction = resolveMissingRunSecretAction(recordedForAsk.effect);
             if (missingSecretAction.action === "return") return missingSecretAction.result;
-            const connectionId = args.connectionId ? String(args.connectionId) : undefined;
             if (connectionId) {
               const connectionStatus = await reconcileManagedConnection(
                 deps.prisma,
@@ -6953,6 +6937,13 @@ export async function runNotificationsEnabled(
   prisma: PrismaClient,
   run: { spaceId: string; userId: string; botId: string; threadId: string },
 ): Promise<boolean> {
+  return (await runNotice(prisma, run)).enabled;
+}
+
+async function runNotice(
+  prisma: PrismaClient,
+  run: { spaceId: string; userId: string; botId: string; threadId: string },
+): Promise<{ enabled: boolean; groupId: string | null }> {
   const source = await prisma.run.findFirst({
     where: {
       botId: run.botId,
@@ -6965,7 +6956,11 @@ export async function runNotificationsEnabled(
       thread: { select: { groupId: true } },
     },
   });
-  return Boolean(source && (source.thread.groupId || source.bot.notifyOnFinish));
+  if (!source) return { enabled: false, groupId: null };
+  return {
+    enabled: Boolean(source.thread.groupId || source.bot.notifyOnFinish),
+    groupId: source.thread.groupId,
+  };
 }
 
 async function notifyRun(
@@ -6974,13 +6969,13 @@ async function notifyRun(
   message: NotificationMessage,
 ) {
   if (!deps.notifications) return;
-  const enabled = await runNotificationsEnabled(deps.prisma, run).catch((error) => {
+  const notice = await runNotice(deps.prisma, run).catch((error) => {
     getLogger().error("notification preference lookup", error);
-    return false;
+    return null;
   });
-  if (!enabled) return;
+  if (!notice?.enabled) return;
   await deps.notifications
-    .send(message, {
+    .send(notice.groupId ? { ...message, groupId: notice.groupId } : message, {
       operationId: "notify",
       traceId: run.botId,
       spaceId: run.spaceId,
@@ -7069,7 +7064,7 @@ export function filterPageBrowserTools<T extends { name: string }>(
 
 export function dockerComputerToolInstruction(computerKind: string): string | undefined {
   if (computerKind !== "docker") return undefined;
-  return "For Python CLI tools, use `uv tool install <package>`; it installs without sudo and keeps tools under this computer's persistent home. GitHub's `gh` CLI is installed. To authenticate `gh`, run `LOG=$(mktemp /tmp/gh-login.XXXXXX); nohup script -qec 'gh auth login --hostname github.com --web --git-protocol https' \"$LOG\" >/dev/null 2>&1 & echo \"$LOG\"` — keep that printed path, read the one-time code from it, browser_navigate to https://github.com/login/device, and browser_act the code. Completing that page authorizes the CLI OAuth app and stores the credential under the persistent home; it does not by itself create a Chromium github.com session. If the desktop browser is not already signed into GitHub, request_takeover so the user can finish that web login. Never use `--with-token` or inject a token through the environment.";
+  return "For Python CLI tools, use `uv tool install <package>`; it installs without sudo and keeps tools under this computer's persistent home. GitHub's `gh` CLI is installed. `pdftotext`, `pandoc`, and `openpyxl` are available to extract text from PDFs, documents, and spreadsheets. To authenticate `gh`, run `LOG=$(mktemp /tmp/gh-login.XXXXXX); nohup script -qec 'gh auth login --hostname github.com --web --git-protocol https' \"$LOG\" >/dev/null 2>&1 & echo \"$LOG\"` — keep that printed path, read the one-time code from it, browser_navigate to https://github.com/login/device, and browser_act the code. Completing that page authorizes the CLI OAuth app and stores the credential under the persistent home; it does not by itself create a Chromium github.com session. If the desktop browser is not already signed into GitHub, request_takeover so the user can finish that web login. Never use `--with-token` or inject a token through the environment.";
 }
 
 // Ordering matters: stable blocks first, volatile ones last, so the prefix stays cacheable.
