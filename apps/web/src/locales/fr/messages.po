@@ -2880,6 +2880,10 @@ msgstr "Seuls les espaces vides peuvent être supprimés. Supprimez d'abord ses 
 msgid "Open"
 msgstr "Ouvrir"
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Open external link?"
+msgstr "Ouvrir le lien externe ?"
+
 #. placeholder {0}: group.title
 #: src/pages/Shell.tsx
 msgid "Open {0}"

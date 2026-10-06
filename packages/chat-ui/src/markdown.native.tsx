@@ -8,17 +8,24 @@ import Markdown, {
   type RenderRules,
 } from "@ronradtke/react-native-markdown-display";
 import type { ReactNode } from "react";
-import { memo, useMemo, useState } from "react";
-import type { StyleProp, ViewStyle } from "react-native";
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { createContext, memo, useCallback, useContext, useMemo, useState } from "react";
+import type { StyleProp, TextStyle, ViewStyle } from "react-native";
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { ChatMarkdownProps } from "./markdown";
 import {
   inlineMarkdownImageSrc,
   linkifyExplicitUrls,
+  markdownLinkDisplayParts,
+  markdownLinkRequiresConfirmation,
   plainTextLinkParts,
   sanitizeMarkdownImageUrl,
   sanitizeMarkdownUrl,
 } from "./markdown";
+import {
+  resolveMarkdownLinkAppOrigin,
+  useMarkdownLinkAppOrigin,
+  useMarkdownLinkCopy,
+} from "./markdown-link-prompt";
 
 function keepMarkdownLinkToken(_url: string) {
   return true;
@@ -129,6 +136,112 @@ async function openSafeLink(url: string) {
   if (await Linking.canOpenURL(safeUrl)) await Linking.openURL(safeUrl);
 }
 
+const OpenLinkContext = createContext<(url: string) => void>(() => undefined);
+
+function ExternalLinkConfirm({
+  url,
+  palette,
+  onDismiss,
+}: {
+  url: string;
+  palette: ColorTokens;
+  onDismiss: () => void;
+}) {
+  const copy = useMarkdownLinkCopy();
+  const parts = markdownLinkDisplayParts(url);
+  return (
+    <Modal animationType="fade" transparent visible onRequestClose={onDismiss}>
+      <View style={confirm.backdrop}>
+        <View
+          style={[confirm.card, { backgroundColor: palette.popover, borderColor: palette.border }]}
+        >
+          <Text style={[confirm.title, { color: palette.popoverForeground }]}>{copy.title}</Text>
+          <Text style={[confirm.url, { color: palette.popoverForeground }]}>
+            {parts ? (
+              <>
+                {parts.before}
+                <Text style={confirm.host}>{parts.host}</Text>
+                {parts.after}
+              </>
+            ) : (
+              url
+            )}
+          </Text>
+          <View style={confirm.actions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onDismiss}
+              style={[confirm.button, { borderColor: palette.border }]}
+            >
+              <Text style={{ color: palette.popoverForeground }}>{copy.cancel}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                onDismiss();
+                void openSafeLink(url);
+              }}
+              style={[
+                confirm.button,
+                { backgroundColor: palette.primary, borderColor: palette.primary },
+              ]}
+            >
+              <Text style={{ color: palette.primaryForeground, fontWeight: "600" }}>
+                {copy.open}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function useNativeLinkConfirm(palette: ColorTokens) {
+  const appOrigin = useMarkdownLinkAppOrigin();
+  const [url, setUrl] = useState<string | null>(null);
+  const openLink = useCallback(
+    (raw: string) => {
+      const safeUrl = sanitizeMarkdownUrl(raw);
+      if (!safeUrl) return;
+      if (markdownLinkRequiresConfirmation(safeUrl, resolveMarkdownLinkAppOrigin(appOrigin))) {
+        setUrl(safeUrl);
+        return;
+      }
+      void openSafeLink(safeUrl);
+    },
+    [appOrigin],
+  );
+  const dialog = url ? (
+    <ExternalLinkConfirm url={url} palette={palette} onDismiss={() => setUrl(null)} />
+  ) : null;
+  return { openLink, dialog };
+}
+
+function NativeMarkdownLink({
+  href,
+  children,
+  style,
+  accessibilityHint,
+}: {
+  href: string;
+  children?: ReactNode;
+  style?: StyleProp<TextStyle>;
+  accessibilityHint?: string;
+}) {
+  const openLink = useContext(OpenLinkContext);
+  return (
+    <Text
+      accessibilityRole="link"
+      accessibilityHint={accessibilityHint}
+      style={style}
+      onPress={() => openLink(href)}
+    >
+      {children}
+    </Text>
+  );
+}
+
 function enclosingLink(parents: readonly ASTNode[]) {
   return parents.find((parent) => parent.type === "link" || parent.type === "blocklink");
 }
@@ -201,32 +314,18 @@ const renderRules: RenderRules = {
     const href = sanitizeMarkdownUrl(node.attributes.href ?? "");
     if (!href) return <Text key={node.key}>{children}</Text>;
     return (
-      <Text
-        accessibilityRole="link"
-        key={node.key}
-        style={styleMap.link}
-        onPress={() => {
-          void openSafeLink(href);
-        }}
-      >
+      <NativeMarkdownLink key={node.key} href={href} style={styleMap.link}>
         {children}
-      </Text>
+      </NativeMarkdownLink>
     );
   },
   blocklink: (node, children, _parent, styleMap) => {
     const href = sanitizeMarkdownUrl(node.attributes.href ?? "");
     if (!href) return <Text key={node.key}>{children}</Text>;
     return (
-      <Pressable
-        accessibilityRole="link"
-        key={node.key}
-        onPress={() => {
-          void openSafeLink(href);
-        }}
-        style={styleMap.blocklink}
-      >
+      <NativeBlockLink key={node.key} href={href} style={styleMap.blocklink}>
         <View style={styleMap.image}>{children}</View>
-      </Pressable>
+      </NativeBlockLink>
     );
   },
   // Replaces the library rule, which loads any http(s) image and prefixes https:// to the rest.
@@ -263,51 +362,68 @@ const renderRules: RenderRules = {
     }
     if (!href) return <Text key={node.key}>{label}</Text>;
     return (
-      <Text
-        accessibilityRole="link"
-        accessibilityHint={node.attributes.title}
+      <NativeMarkdownLink
         key={node.key}
+        href={href}
+        accessibilityHint={node.attributes.title}
         style={styleMap.link}
-        onPress={() => {
-          void openSafeLink(href);
-        }}
       >
         {label}
-      </Text>
+      </NativeMarkdownLink>
     );
   },
 };
+
+function NativeBlockLink({
+  href,
+  children,
+  style,
+}: {
+  href: string;
+  children?: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const openLink = useContext(OpenLinkContext);
+  return (
+    <Pressable accessibilityRole="link" onPress={() => openLink(href)} style={style}>
+      {children}
+    </Pressable>
+  );
+}
 
 type LinkifiedTextProps = {
   children: string;
   color: string;
   linkColor: string;
+  palette?: ColorTokens;
 };
 
 export const LinkifiedText = memo(function LinkifiedText({
   children,
   color,
   linkColor,
+  palette = darkTokens,
 }: LinkifiedTextProps) {
+  const { openLink, dialog } = useNativeLinkConfirm(palette);
   return (
-    <Text style={{ color, fontSize: 15.5, lineHeight: 23 }}>
-      {plainTextLinkParts(children).map((part, index) =>
-        part.type === "text" ? (
-          part.value
-        ) : (
-          <Text
-            accessibilityRole="link"
-            key={index}
-            style={{ color: linkColor, textDecorationLine: "underline" }}
-            onPress={() => {
-              void openSafeLink(part.href);
-            }}
-          >
-            {part.value}
-          </Text>
-        ),
-      )}
-    </Text>
+    <OpenLinkContext.Provider value={openLink}>
+      <Text style={{ color, fontSize: 15.5, lineHeight: 23 }}>
+        {plainTextLinkParts(children).map((part, index) =>
+          part.type === "text" ? (
+            part.value
+          ) : (
+            <NativeMarkdownLink
+              key={index}
+              href={part.href}
+              style={{ color: linkColor, textDecorationLine: "underline" }}
+            >
+              {part.value}
+            </NativeMarkdownLink>
+          ),
+        )}
+      </Text>
+      {dialog}
+    </OpenLinkContext.Provider>
   );
 });
 
@@ -318,27 +434,31 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   colorScheme = "dark",
 }: ChatMarkdownProps & { palette?: ColorTokens; colorScheme?: ResolvedAppearance }) {
   const styles = useMemo(() => markdownStyles(palette), [palette]);
+  const { openLink, dialog } = useNativeLinkConfirm(palette);
   const sharedProps = {
     colorScheme,
     markdownit: markdownParser,
     style: styles,
     rules: renderRules,
     onLinkPress: (url: string) => {
-      void openSafeLink(url);
+      openLink(url);
       return false;
     },
   };
 
   return (
-    <View style={layout.wrap}>
-      {streaming ? (
-        <MarkdownStream {...sharedProps} cursorColor={palette.mutedForeground} streaming>
-          {children}
-        </MarkdownStream>
-      ) : (
-        <Markdown {...sharedProps}>{children}</Markdown>
-      )}
-    </View>
+    <OpenLinkContext.Provider value={openLink}>
+      <View style={layout.wrap}>
+        {streaming ? (
+          <MarkdownStream {...sharedProps} cursorColor={palette.mutedForeground} streaming>
+            {children}
+          </MarkdownStream>
+        ) : (
+          <Markdown {...sharedProps}>{children}</Markdown>
+        )}
+        {dialog}
+      </View>
+    </OpenLinkContext.Provider>
   );
 });
 
@@ -350,4 +470,48 @@ const layout = StyleSheet.create({
   },
 });
 
+const confirm = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+  },
+  card: {
+    alignSelf: "center",
+    width: "100%",
+    maxWidth: 360,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
+  title: {
+    fontSize: 17,
+    fontWeight: "600",
+  },
+  url: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  host: {
+    fontWeight: "700",
+  },
+  actions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  button: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+  },
+});
+
 export type { ChatMarkdownProps } from "./markdown";
+export type { MarkdownLinkCopy } from "./markdown-link-prompt";
+export { MarkdownLinkPromptProvider } from "./markdown-link-prompt";

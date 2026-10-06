@@ -2880,6 +2880,10 @@ msgstr ""
 msgid "Open"
 msgstr "Aç"
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Open external link?"
+msgstr "Harici bağlantı açılsın mı?"
+
 #. placeholder {0}: group.title
 #: src/pages/Shell.tsx
 msgid "Open {0}"

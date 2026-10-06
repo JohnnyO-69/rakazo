@@ -2880,6 +2880,10 @@ msgstr "Удалить можно только пустые пространст
 msgid "Open"
 msgstr "Открыть"
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Open external link?"
+msgstr "Открыть внешнюю ссылку?"
+
 #. placeholder {0}: group.title
 #: src/pages/Shell.tsx
 msgid "Open {0}"

@@ -3344,7 +3344,11 @@ function MessageTextCard({
         // and email addresses are links, so a sent address is tappable without
         // formatting bold or headings.
         message.role === "user" ? (
-          <LinkifiedText color={tokens.secondaryForeground} linkColor={tokens.link}>
+          <LinkifiedText
+            color={tokens.secondaryForeground}
+            linkColor={tokens.link}
+            palette={tokens}
+          >
             {contentText}
           </LinkifiedText>
         ) : (

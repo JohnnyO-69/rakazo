@@ -2880,6 +2880,10 @@ msgstr "Only empty spaces can be deleted. Delete its bots and groups first."
 msgid "Open"
 msgstr "Open"
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Open external link?"
+msgstr "Open external link?"
+
 #. placeholder {0}: group.title
 #: src/pages/Shell.tsx
 msgid "Open {0}"
