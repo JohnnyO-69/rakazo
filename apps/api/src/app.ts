@@ -69,7 +69,7 @@ import {
   toTeamChatInbound,
 } from "@rakazo/adapters";
 import { createAuth, isBlockedAuthPath, loopbackTwinOrigins } from "@rakazo/auth";
-import type { Actor } from "@rakazo/contracts";
+import type { Actor, AuthCapabilities } from "@rakazo/contracts";
 import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
 import {
@@ -368,6 +368,8 @@ export async function createApp(
     pushSessionExpiresAt(prisma, sessionId),
   );
   const auth = createAuth(prisma, {
+    passwordAuth: env.passwordAuth,
+    oidc: env.oidc,
     secret: env.authSecret,
     baseURL: env.authUrl,
     webOrigin: env.webOrigin,
@@ -559,13 +561,19 @@ export async function createApp(
       credentials: true,
     }),
   );
-  app.get("/api/auth/capabilities", (c) =>
-    c.json({
-      passwordReset: Boolean(email),
-      resetUrl: email ? new URL("/reset-password", env.webOrigin).href : null,
+  app.get("/api/auth/capabilities", (c) => {
+    c.header("cache-control", "no-store");
+    return c.json({
+      sso: env.oidc
+        ? { name: env.oidc.name, availability: auth.ssoAvailability() ?? "checking" }
+        : null,
+      passwordAuth: env.passwordAuth !== false,
+      passwordReset: env.passwordAuth !== false && Boolean(email),
+      resetUrl:
+        env.passwordAuth !== false && email ? new URL("/reset-password", env.webOrigin).href : null,
       billing: Boolean(billing),
-    }),
-  );
+    } satisfies AuthCapabilities);
+  });
   if (localEmailEmulator && env.nodeEnv === "development") {
     app.get(
       "/api/dev/emails",
@@ -932,6 +940,7 @@ export async function createApp(
     stop: async () => {
       // Abort in-flight continueRun boot waits before draining jobs so stop() cannot sit
       // on waitForComputerReady for the full boot-wait window during shared Postgres journeys.
+      auth.disposeOidcDiscovery();
       shutdown.abort();
       oauthLogins.abortAll();
       messagingStopped = true;

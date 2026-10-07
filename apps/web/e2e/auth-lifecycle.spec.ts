@@ -5,7 +5,7 @@ test("restricted signup waits for mailbox verification", async ({ page }, testIn
   await page.route("**/api/auth/get-session**", (route) => route.fulfill({ json: null }));
   await page.route("**/api/auth/capabilities", (route) =>
     route.fulfill({
-      json: { passwordReset: false, resetUrl: null },
+      json: { passwordAuth: true, sso: null, passwordReset: false, resetUrl: null },
     }),
   );
   await page.route("**/api/auth/sign-up/email", (route) =>
@@ -31,7 +31,7 @@ test("signed-out welcome fits a narrow phone and offers sign in", async ({ page 
   await page.route("**/api/auth/get-session**", (route) => route.fulfill({ json: null }));
   await page.route("**/api/auth/capabilities", (route) =>
     route.fulfill({
-      json: { passwordReset: false, resetUrl: null },
+      json: { passwordAuth: true, sso: null, passwordReset: false, resetUrl: null },
     }),
   );
   await page.setViewportSize({ width: 320, height: 640 });

@@ -117,12 +117,19 @@ describe("mobile API authentication", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        jsonResponse({ passwordReset: true, resetUrl: "https://rakazo.test/reset-password" }),
+        jsonResponse({
+          passwordAuth: true,
+          sso: null,
+          passwordReset: true,
+          resetUrl: "https://rakazo.test/reset-password",
+        }),
       )
       .mockResolvedValueOnce(jsonResponse({ status: true }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(passwordResetCapabilities()).resolves.toEqual({
+      passwordAuth: true,
+      sso: null,
       passwordReset: true,
       resetUrl: "https://rakazo.test/reset-password",
     });
@@ -141,16 +148,25 @@ describe("mobile API authentication", () => {
     );
   });
 
-  it("treats a malformed capabilities response as password recovery being unavailable", async () => {
+  it("rejects a malformed capabilities response", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("not-json", { status: 200 })),
     );
 
-    await expect(passwordResetCapabilities()).resolves.toEqual({
-      passwordReset: false,
-      resetUrl: null,
-    });
+    await expect(passwordResetCapabilities()).rejects.toThrow();
+  });
+
+  it.each([
+    {},
+    { passwordAuth: "false", sso: null, passwordReset: false, resetUrl: null },
+    { passwordAuth: true, passwordReset: false, resetUrl: null, sso: {} },
+  ])("rejects malformed successful capability shapes", async (body) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(body)),
+    );
+    await expect(passwordResetCapabilities()).rejects.toThrow();
   });
 
   it("changes a password with the bearer session and revokes other sessions", async () => {

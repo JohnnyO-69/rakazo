@@ -22,7 +22,7 @@ describe("Account delete", () => {
     const row = sliceBetween(screen, "function requestDeletion(", "function applyLocale(");
     expect(row).toContain("promptAccountDeletion({");
     expect(row).toContain('deleteLabel: t("Delete")');
-    expect(row).toContain("onSubmit: (password) => void handleDeletion(password)");
+    expect(row).toContain("onSubmit: (password) => void handleDeletion(password, true)");
     expect(row).toContain("setDeleteOpen(true)");
     const visible = sliceBetween(screen, "onPress={requestDeletion}", "{deleteOpen ?");
     expect(visible).toContain("styles.destructiveTitle");
