@@ -72,6 +72,11 @@ describe("alternative pages", () => {
       "Setup",
       "Day-to-day management",
     ]);
+    expect(hermes?.intro.join(" ")).toContain("just chat");
+    expect(hermes?.sections?.[0]?.paragraphs.join(" ")).toContain("Choose provider later");
+    expect(hermes?.sources.some((source) => source.href.endsWith("/docs/user-guide/desktop"))).toBe(
+      true,
+    );
 
     for (const page of ALTERNATIVES) {
       const markdown = alternativeMarkdown(page);

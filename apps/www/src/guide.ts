@@ -59,7 +59,7 @@ export const SELF_HOST_DESCRIPTION =
 export const OPENCLAW_H1 = "Open source OpenClaw alternative";
 export const OPENCLAW_TITLE = "Open Source OpenClaw Alternative – Rakazo";
 export const OPENCLAW_DESCRIPTION =
-  "Rakazo and OpenClaw are both open source, self-hosted AI agents. Rakazo keeps setup and daily use in chat. OpenClaw's docs add a gateway, a config file, and a service you install.";
+  "Rakazo and OpenClaw are both open source, self-hosted AI agents. Rakazo keeps setup and daily use in chat. OpenClaw's docs add a gateway, a config file, and a background service you can install.";
 
 export const SELF_HOST_FAQS: readonly FaqItem[] = [
   {
@@ -85,25 +85,25 @@ export const SELF_HOST_FAQS: readonly FaqItem[] = [
   {
     question: "How does this compare with OpenClaw?",
     answer:
-      "Both are open source and run on hardware you control. After a Docker or desktop install, Rakazo is a chat for persistent teammates. OpenClaw's getting-started guide adds a wizard, a background Gateway service, and a separate step to connect a chat app.",
+      "Both are open source and run on hardware you control. After a Docker or desktop install, Rakazo is a chat for persistent teammates. OpenClaw's getting-started guide adds a wizard, a Gateway you run in the terminal or install as a background service, and a separate step to connect a chat app.",
   },
 ];
 
 export const OPENCLAW_SETUP_PARAGRAPHS = [
   "Rakazo's self-host path is the published Docker installer, or the desktop app starting that stack on this computer. You create an account and connect a model. From there it is just chat, on the web, desktop, and mobile apps. A new bot interviews you about the work, and you manage the bot from that chat. Routines are readable Markdown.",
-  "OpenClaw's getting-started guide installs the CLI, then runs a wizard. Quick start is the short path when a Claude Code or Codex login, or an API key, is already on the machine. Custom setup walks through the full flow, and `openclaw onboard --classic` is the step-by-step wizard. The Gateway then has to stay running: `openclaw gateway install` adds a LaunchAgent on macOS, a systemd user unit on Linux, or a Scheduled Task on Windows. You check `openclaw gateway status` (the guide says port 18789) and open `openclaw dashboard`. Messaging from a phone, such as Telegram, is a separate Channels step.",
+  "OpenClaw's getting-started guide installs the CLI, then runs a wizard. Quick start is the short path when a Claude Code or Codex login, or an API key, is already on the machine. Custom setup walks through the full flow, and `openclaw onboard --classic` is the step-by-step wizard. Quick start leaves the Gateway in that terminal until you stop it, so you can chat before installing a service. `openclaw gateway install` is the later step that keeps it in the background: a LaunchAgent on macOS, a systemd user unit on Linux, or a Scheduled Task on Windows. You check `openclaw gateway status` (the guide says port 18789) and open `openclaw dashboard`. Messaging from a phone, such as Telegram, is a separate Channels step.",
 ] as const;
 
 export const OPENCLAW_DAY_TO_DAY_PARAGRAPHS = [
   "Day to day, you manage Rakazo from the same chat. Schedules, memory, and approval boundaries stay with that bot, on the web, desktop, and mobile apps. Optional connectors can attach Slack, WhatsApp, Telegram, iMessage via Sendblue, and Feishu/Lark. They are not required to use the product.",
-  "OpenClaw's docs send later changes through `openclaw configure` and a JSON config file, `~/.openclaw/openclaw.json` unless you override the path. `openclaw doctor` and `openclaw triage` diagnose the install. The Gateway process is what you keep running, and chat apps are the main way you message the assistant, alongside the Control UI.",
+  "OpenClaw's docs send later changes through `openclaw configure` and a JSON config file, `~/.openclaw/openclaw.json` unless you override the path. `openclaw doctor` and `openclaw triage` diagnose the install. The Gateway is the process you keep running, in a terminal or as the installed background service, and chat apps are the main way you message the assistant, alongside the Control UI.",
 ] as const;
 
 export const OPENCLAW_FAQS: readonly FaqItem[] = [
   {
     question: "Is Rakazo simpler to set up than OpenClaw?",
     answer:
-      "The documented paths are different. Rakazo's self-host guide is a Docker installer, or the desktop app starting that stack, then an account and a model. After that Rakazo is just chat, and you manage the bot from that chat. OpenClaw's getting-started guide is an installer, a wizard (Quick start or Custom setup), then `openclaw gateway install` so the Gateway keeps running, `openclaw gateway status`, and `openclaw dashboard`. Connecting a chat app is another step. OpenClaw can be short when a model login is already detected. The ongoing surface is still the Gateway service and the config file.",
+      "The documented paths are different. Rakazo's self-host guide is a Docker installer, or the desktop app starting that stack, then an account and a model. After that Rakazo is just chat, and you manage the bot from that chat. OpenClaw's getting-started guide is an installer and a wizard (Quick start or Custom setup). You can chat while the Gateway runs in that terminal. `openclaw gateway install` keeps it running in the background, then `openclaw gateway status` and `openclaw dashboard`. Connecting a chat app is another step. OpenClaw can be short when a model login is already detected. The ongoing surface is still the Gateway and the config file.",
   },
   {
     question: "Is Rakazo a drop-in replacement for OpenClaw?",
@@ -138,14 +138,14 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
     rakazo:
       "Docker installer or the desktop app's local stack, then an account and a model. After that Rakazo is just chat: a new bot interviews you, and you manage it from the chat.",
     openclaw:
-      "CLI install, then Quick start or Custom setup. `openclaw gateway install` adds a LaunchAgent, systemd user unit, or Windows Scheduled Task. Then `openclaw gateway status` and `openclaw dashboard`. A phone channel is a separate step.",
+      "CLI install, then Quick start or Custom setup. The Gateway can stay in that terminal for a first chat. `openclaw gateway install` is the background service (LaunchAgent, systemd user unit, or Windows Scheduled Task). Then `openclaw gateway status` and `openclaw dashboard`. A phone channel is a separate step.",
   },
   {
     aspect: "Day-to-day management",
     rakazo:
       "You manage the bot from the same chat on the web, desktop, and mobile apps. Routines are readable Markdown and can run on a schedule. A bot can pause for approval at a boundary you set.",
     openclaw:
-      "Later changes go through `openclaw configure` and `~/.openclaw/openclaw.json`. `openclaw doctor` and `openclaw triage` diagnose the install. The Gateway process stays running.",
+      "Later changes go through `openclaw configure` and `~/.openclaw/openclaw.json`. `openclaw doctor` and `openclaw triage` diagnose the install. The Gateway stays running in a terminal or as the installed background service.",
   },
   {
     aspect: "What it is",
@@ -341,7 +341,7 @@ export const OPENCLAW_MARKDOWN = `# Open source OpenClaw alternative
 
 > A fair comparison of Rakazo and OpenClaw, two open source ways to run an AI agent you control.
 
-The main difference is simplicity. Like Grok Bot, Rakazo is just chat: you set up the bot and manage it from that chat. OpenClaw is also open source and self-hosted. Its [getting-started guide](${OPENCLAW_GETTING_STARTED_URL}) is a longer path: a CLI installer, an onboarding wizard, a Gateway service, and a config file.
+The main difference is simplicity. Like Grok Bot, Rakazo is just chat: you set up the bot and manage it from that chat. OpenClaw is also open source and self-hosted. Its [getting-started guide](${OPENCLAW_GETTING_STARTED_URL}) is a longer path: a CLI installer, an onboarding wizard, a Gateway you run in the terminal or install as a background service, and a config file.
 
 They are not the same product, and Rakazo does not import an OpenClaw setup. This comparison follows [OpenClaw's documentation](${OPENCLAW_DOCS_URL}) and this repository. Details change. Those docs are the full source for OpenClaw.
 
