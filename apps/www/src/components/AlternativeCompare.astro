@@ -16,6 +16,14 @@ const { page } = Astro.props;
   <p class="alt-crumb"><a href="/alternatives/">Alternatives</a></p>
   <h1>{page.h1}</h1>
   {page.intro.map((paragraph) => <p>{paragraph}</p>)}
+  {
+    page.sections?.map((section) => (
+      <section>
+        <h2>{section.heading}</h2>
+        {section.paragraphs.map((paragraph) => <p>{paragraph}</p>)}
+      </section>
+    ))
+  }
   <p class="alt-note">Public descriptions as of {COMPARED_ON}.</p>
 
   <div class="alt-table-wrap">

@@ -38,6 +38,8 @@ describe("guide pages", () => {
       expect(OPENCLAW_MARKDOWN).toContain(row.rakazo);
       expect(OPENCLAW_MARKDOWN).toContain(row.openclaw);
     }
+    expect(OPENCLAW_MARKDOWN).toContain("## Setup");
+    expect(OPENCLAW_MARKDOWN).toContain("## Day-to-day management");
     expect(SELF_HOST_MARKDOWN).toContain(PUBLISHED_IMAGES_INSTALL);
     expect(SELF_HOST_MARKDOWN).toContain("SANDBOX_CONTROL_VIA_LOOPBACK=true");
     expect(PUBLISHED_IMAGES_INSTALL).toContain("install-images.sh");
