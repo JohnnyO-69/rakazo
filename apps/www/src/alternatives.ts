@@ -342,7 +342,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
         rakazo:
           "Bring your own model credentials. Multiple providers are supported, including a custom model server.",
         other:
-          "The privacy policy and terms do not name a public model. They say Instinct may train its models on what you submit unless you opt out in settings. Vault materials and Google Workspace data are excluded.",
+          "The privacy policy and terms do not name a public model. They say Instinct may train its models on what you submit unless you opt out in settings, though material flagged for safety review can still be used. Vault materials and Google Workspace data are excluded.",
       },
       {
         topic: "Computer",
