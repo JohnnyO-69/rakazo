@@ -83,14 +83,15 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
         setResetSent(true);
         return;
       }
+      const trimmedEmail = email.trim();
       const result =
         mode === "up"
           ? await authClient.signUp.email({
-              email,
+              email: trimmedEmail,
               password,
-              name: name || email.split("@")[0] || "User",
+              name: name || trimmedEmail.split("@")[0] || "User",
             })
-          : await authClient.signIn.email({ email, password });
+          : await authClient.signIn.email({ email: trimmedEmail, password });
       if (result.error) {
         setError(authErrorText(result.error, t`Could not continue`));
         return;

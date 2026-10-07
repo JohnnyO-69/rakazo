@@ -460,6 +460,16 @@ export default function Home() {
     }
   }, [refreshBots, router, t]);
 
+  const runCreateAction = useCallback(
+    (action: "bot" | "group" | "space") => {
+      if (spaceActionRef.current.busy || spaceActionRef.current.recoveryId) return;
+      if (action === "bot") void createQuickBot();
+      else if (action === "group") router.push("/new-group");
+      else router.push("/new-space");
+    },
+    [createQuickBot, router],
+  );
+
   useLayoutEffect(() => {
     if (!nativeHeader) return;
     const signedIn = ready && hasSession;
@@ -534,14 +544,19 @@ export default function Home() {
         },
       },
     });
-  });
-
-  function runCreateAction(action: "bot" | "group" | "space") {
-    if (spaceActionRef.current.busy || spaceActionRef.current.recoveryId) return;
-    if (action === "bot") void createQuickBot();
-    else if (action === "group") router.push("/new-group");
-    else router.push("/new-space");
-  }
+  }, [
+    nativeHeader,
+    navigation,
+    ready,
+    hasSession,
+    initials,
+    activityMode,
+    toggleActivityMode,
+    runCreateAction,
+    router,
+    styles,
+    t,
+  ]);
 
   if (!ready) {
     return (

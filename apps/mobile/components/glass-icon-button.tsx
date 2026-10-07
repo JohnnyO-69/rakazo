@@ -8,7 +8,8 @@ import { NativeSymbol } from "./native-symbol";
 
 /**
  * Round icon button on Liquid Glass (iOS 26); `fallbackStyle` draws it elsewhere. The icon
- * defaults to full contrast on glass and muted on the flat fallback.
+ * defaults to full contrast on glass and muted on the flat fallback; a selected toggle fills
+ * with the primary token.
  */
 export function GlassIconButton({
   accessibilityLabel,
@@ -34,13 +35,19 @@ export function GlassIconButton({
   fallbackStyle?: StyleProp<ViewStyle>;
 }) {
   const tokens = useMobileTokens();
-  const iconColor = color ?? (iosAtLeast(26) ? tokens.foreground : tokens.mutedForeground);
+  const iconColor = selected
+    ? tokens.primaryForeground
+    : (color ?? (iosAtLeast(26) ? tokens.foreground : tokens.mutedForeground));
   return (
     <GlassSurface
       shape="circle"
-      tint={tint}
+      tint={selected ? tokens.primary : tint}
       style={{ width: size, height: size }}
-      fallbackStyle={[{ borderRadius: size / 2 }, fallbackStyle]}
+      fallbackStyle={[
+        { borderRadius: size / 2 },
+        fallbackStyle,
+        selected && { backgroundColor: tokens.primary },
+      ]}
     >
       <Pressable
         accessibilityRole="button"

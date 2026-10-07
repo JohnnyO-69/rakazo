@@ -1,7 +1,8 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { abortableDelay } from "@rakazo/core";
 import { useEffect, useRef, useState } from "react";
-import { Linking, Text, View, type ViewProps } from "react-native";
+import type { ViewProps } from "react-native";
+import { Linking, Text, View } from "react-native";
 import { rpc } from "../lib/api";
 import { appConnectPresentation } from "../lib/app-connect";
 import { useI18n } from "../lib/i18n";

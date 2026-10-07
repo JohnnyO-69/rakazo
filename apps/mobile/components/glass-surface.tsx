@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { type StyleProp, View, type ViewStyle } from "react-native";
+import type { StyleProp, ViewStyle } from "react-native";
+import { View } from "react-native";
 
 export type GlassSurfaceProps = {
   shape?: "capsule" | "circle" | "roundedRectangle";
