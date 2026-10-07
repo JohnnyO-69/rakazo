@@ -125,6 +125,11 @@ const structuredData = faqPageStructuredData(SELF_HOST_FAQS);
         Set <code>POSTGRES_PASSWORD</code> to a URI-safe random value (for example <code>openssl rand -hex 16</code>) and put the same value in <code>DATABASE_URL</code>. Set <code>BETTER_AUTH_SECRET</code>, <code>ENCRYPTION_KEY</code>, and <code>SCREEN_PROXY_SECRET</code> to independent long random values. Docker sandboxes also need
         a dedicated <code>SANDBOX_SUPERVISOR_TOKEN</code>. Keep these in <code>.env</code>, not in git.
       </p>
+      <p>
+        For host-side development with Docker Desktop, set <code>SANDBOX_CONTROL_VIA_LOOPBACK=true</code> in <code>.env</code>. The supervisor then
+        publishes its control service on a loopback port, because Docker Desktop container addresses
+        are not reachable from the host. Leave this unset when the supervisor runs inside Compose.
+      </p>
       <pre><code>{SOURCE_DEV}</code></pre>
       <p>
         The Postgres overlay publishes loopback <code>127.0.0.1:5433</code> for host-side tools. Open <a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a>. <code>docker compose down -v</code> deletes Postgres data.
