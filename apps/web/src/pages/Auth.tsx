@@ -131,14 +131,15 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
     setError(null);
     try {
       const result = await runSsoFlow(
-        (disableRedirect) =>
+        (disableRedirect, callbackURL) =>
           authClient.signIn.social({
             disableRedirect,
             provider: "oidc",
-            newUserCallbackURL: "/onboarding",
-            callbackURL:
+            newUserCallbackURL: callbackURL("/onboarding"),
+            callbackURL: callbackURL(
               searchParams.get("next") === "/integrations/setup" ? "/integrations/setup" : "/app",
-            errorCallbackURL: "/sign-in",
+            ),
+            errorCallbackURL: callbackURL("/sign-in"),
           }),
         ["/app", "/onboarding", "/integrations/setup", "/sign-in"],
       );

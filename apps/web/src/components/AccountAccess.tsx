@@ -60,12 +60,12 @@ export function AccountAccess({
           onClick={() =>
             void action(async () => {
               const result = await runSsoFlow(
-                (disableRedirect) =>
+                (disableRedirect, callbackURL) =>
                   authClient.linkSocial({
                     disableRedirect,
                     provider: "oidc",
-                    callbackURL: window.location.href,
-                    errorCallbackURL: window.location.href,
+                    callbackURL: callbackURL(window.location.href),
+                    errorCallbackURL: callbackURL(window.location.href),
                   }),
                 [window.location.href],
               );
@@ -110,13 +110,13 @@ export function AccountAccess({
                   onClick={() =>
                     void action(async () => {
                       const result = await runSsoFlow(
-                        (disableRedirect) =>
+                        (disableRedirect, callbackURL) =>
                           authClient.signIn.social({
                             disableRedirect,
                             provider: "oidc",
                             additionalData: { reauthenticate: true },
-                            callbackURL: window.location.href,
-                            errorCallbackURL: window.location.href,
+                            callbackURL: callbackURL(window.location.href),
+                            errorCallbackURL: callbackURL(window.location.href),
                           }),
                         [window.location.href],
                       );

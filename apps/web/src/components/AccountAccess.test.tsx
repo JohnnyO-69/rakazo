@@ -31,7 +31,9 @@ vi.mock("../lib/account-security", () => ({
 vi.mock("../lib/auth", () => ({
   authClient: { linkSocial: vi.fn(), signIn: { social: vi.fn() }, deleteUser: vi.fn() },
 }));
-vi.mock("../lib/sso-flow", () => ({ runSsoFlow: vi.fn(async (begin) => begin(true)) }));
+vi.mock("../lib/sso-flow", () => ({
+  runSsoFlow: vi.fn(async (begin) => begin(true, (url: string) => `popup:${url}`)),
+}));
 let host: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 const security: AccountSecurity = {
@@ -78,7 +80,8 @@ it("uses the shared desktop flow for linking", async () => {
     expect.objectContaining({
       provider: "oidc",
       disableRedirect: true,
-      callbackURL: window.location.href,
+      callbackURL: `popup:${window.location.href}`,
+      errorCallbackURL: `popup:${window.location.href}`,
     }),
   );
 });
@@ -88,7 +91,12 @@ it("uses the shared desktop flow for account-bound deletion reauthentication", a
   await click("Sign in again");
   expect(runSsoFlow).toHaveBeenCalledWith(expect.any(Function), [window.location.href]);
   expect(authClient.signIn.social).toHaveBeenCalledWith(
-    expect.objectContaining({ disableRedirect: true, additionalData: { reauthenticate: true } }),
+    expect.objectContaining({
+      disableRedirect: true,
+      additionalData: { reauthenticate: true },
+      callbackURL: `popup:${window.location.href}`,
+      errorCallbackURL: `popup:${window.location.href}`,
+    }),
   );
 });
 it("shows the password deletion path for legacy account security", async () => {
