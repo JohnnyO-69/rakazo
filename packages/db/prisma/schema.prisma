@@ -125,8 +125,6 @@ model Organization {
   @@map("organization")
 }
 
-/// Billing customer for an organization. Subscription fields are a snapshot that is
-/// overwritten from the billing provider on every sync.
 model BillingAccount {
   organizationId      String       @id
   organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -140,7 +138,6 @@ model BillingAccount {
   currentPeriodEndsAt DateTime?
   cancelAtPeriodEnd   Boolean      @default(false)
   endedAt             DateTime?
-  /// Set once the organization has started any subscription; trials are first-time only.
   subscribedAt        DateTime?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
