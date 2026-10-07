@@ -18,13 +18,15 @@ export async function continueWithSso(
   try {
     const apiBase = currentApiBase();
     const generation = currentSessionGeneration();
+    const requireCurrentSession = () => {
+      if (apiBase !== currentApiBase() || generation !== currentSessionGeneration())
+        throw new Error(t("Could not continue"));
+    };
     const callbackURL = action === "sign-in" ? "rakazo://sign-in" : "rakazo://account";
     const headers = action === "sign-in" ? {} : await authHeaders();
-    if (apiBase !== currentApiBase() || generation !== currentSessionGeneration())
-      throw new Error(t("Could not continue"));
+    requireCurrentSession();
     const previous = action === "reauthenticate" ? await sessionUser(apiBase, headers) : undefined;
-    if (apiBase !== currentApiBase() || generation !== currentSessionGeneration())
-      throw new Error(t("Could not continue"));
+    requireCurrentSession();
     const { response, body } = await fetchMobileJson<{ url?: string; code?: string }>(
       `${apiBase}/api/auth/${action === "link" ? "link-social" : "sign-in/social"}`,
       {
@@ -73,8 +75,7 @@ export async function continueWithSso(
       throw new Error(
         authErrorText({ code: callback.searchParams.get("error") }, t("Could not continue")),
       );
-    if (apiBase !== currentApiBase() || generation !== currentSessionGeneration())
-      throw new Error(t("Could not continue"));
+    requireCurrentSession();
     if (action === "link") return true;
     const cookie = callback.searchParams.get("cookie");
     const token = cookie
@@ -84,8 +85,7 @@ export async function continueWithSso(
     const user = await sessionUser(apiBase, { authorization: `Bearer ${token}` });
     if (!user || (action === "reauthenticate" && (!previous || previous !== user)))
       throw new Error(t("Could not continue"));
-    if (apiBase !== currentApiBase() || generation !== currentSessionGeneration())
-      throw new Error(t("Could not continue"));
+    requireCurrentSession();
     if (action === "sign-in" && !(await clearSpace()))
       throw new Error(t("Could not clear the previous space"));
     return await replaceSessionTokenIfCurrent(generation, token);

@@ -162,9 +162,9 @@ export function AccountAccess({
             disabled={pending || !security || (security.hasPassword && !password)}
             onClick={() =>
               void action(async () => {
-                const result = await authClient.deleteUser({
-                  ...(security?.hasPassword ? { password } : code ? { token: code.trim() } : {}),
-                });
+                const result = await authClient.deleteUser(
+                  security?.hasPassword ? { password } : code ? { token: code.trim() } : {},
+                );
                 if (result.error)
                   throw new Error(authErrorText(result.error, t`Could not continue`));
                 window.location.assign("/sign-in");

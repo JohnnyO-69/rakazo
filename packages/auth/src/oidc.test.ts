@@ -154,6 +154,12 @@ async function signIn(claims?: Record<string, unknown>) {
 }
 const rows = (model: string) => state.db[model] ?? [];
 
+function expireOidcProofs() {
+  for (const value of rows("verification")) {
+    if (String(value.identifier).startsWith("oidc-reauth-")) value.expiresAt = new Date(0);
+  }
+}
+
 beforeEach(() => {
   state.db = {
     user: [],
@@ -518,11 +524,7 @@ describe("SSO-only account deletion", () => {
   it("refuses a stale session, then accepts fresh reauthentication", async () => {
     setup();
     await signIn();
-    rows("verification")
-      .filter((value) => String(value.identifier).startsWith("oidc-reauth-"))
-      .forEach((value) => {
-        value.expiresAt = new Date(0);
-      });
+    expireOidcProofs();
     expect((await request("/delete-user", {})).status).toBe(403);
     await signIn();
     expect((await request("/delete-user", {})).status).toBe(200);
@@ -532,11 +534,7 @@ describe("SSO-only account deletion", () => {
     setup();
     await signIn();
     const sessionToken = String(rows("session")[0]!.token);
-    rows("verification")
-      .filter((value) => String(value.identifier).startsWith("oidc-reauth-"))
-      .forEach((value) => {
-        value.expiresAt = new Date(0);
-      });
+    expireOidcProofs();
     cookies = "";
     expect((await request("/delete-user", { token: "wrong-code" }, sessionToken)).status).not.toBe(
       200,

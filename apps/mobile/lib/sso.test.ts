@@ -68,12 +68,19 @@ it.each([
   await expect(continueWithSso()).rejects.toThrow();
   expect(replaceSessionTokenIfCurrent).not.toHaveBeenCalled();
 });
-it("drops results when the server or session changes", async () => {
+it.each(["server", "session"])("drops results when the %s changes", async (changed) => {
   vi.mocked(openAuthSessionAsync).mockImplementation(async () => {
-    vi.mocked(currentApiBase).mockReturnValue("https://other.example.test");
-    return { type: "success", url: "rakazo://sign-in" };
+    if (changed === "server")
+      vi.mocked(currentApiBase).mockReturnValue("https://other.example.test");
+    else vi.mocked(currentSessionGeneration).mockReturnValue(2);
+    return {
+      type: "success",
+      url: `rakazo://sign-in?cookie=${encodeURIComponent("better-auth.session_token=new-session; Path=/; HttpOnly")}`,
+    };
   });
   await expect(continueWithSso()).rejects.toThrow();
+  expect(fetchMobileJson).toHaveBeenCalledOnce();
+  expect(clearSpace).not.toHaveBeenCalled();
   expect(replaceSessionTokenIfCurrent).not.toHaveBeenCalled();
 });
 it("requires reauthentication to return the same account", async () => {
