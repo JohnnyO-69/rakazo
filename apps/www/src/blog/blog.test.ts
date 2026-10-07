@@ -2,7 +2,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ALTERNATIVES } from "../alternatives";
-import { categoryIsIndexed, isIndexedPath } from "./indexability";
+import {
+  categoryFromFrontmatter,
+  categoryIsIndexed,
+  categoryIsIndexedAtCount,
+  isIndexedPath,
+} from "./indexability";
 import { ogPages } from "../og-pages";
 import { vsCard } from "../vs-points";
 
@@ -33,6 +38,15 @@ describe("blog posts", () => {
       expect(count, file).toBeGreaterThanOrEqual(1500);
       expect(count, file).toBeLessThanOrEqual(3200);
     }
+  });
+
+  it("counts quoted categories and indexes a category at three posts", () => {
+    expect(categoryFromFrontmatter('category: "roundups"\n')).toBe("roundups");
+    expect(categoryFromFrontmatter("category: roundups\n")).toBe("roundups");
+    expect(categoryFromFrontmatter("category: 'guides'\n")).toBe("guides");
+    expect(categoryFromFrontmatter('category: "nope"\n')).toBeUndefined();
+    expect(categoryIsIndexedAtCount(2)).toBe(false);
+    expect(categoryIsIndexedAtCount(3)).toBe(true);
   });
 
   it("leaves category pages out of the index until each has three posts", () => {

@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AskCard } from "../../src/components/AskCard";
 import { bootstrapI18n, i18n } from "../../src/lib/i18n";
-import { RoutineEditor, type RoutineDraftState } from "../../src/pages/RoutineEditor";
+import type { RoutineDraftState } from "../../src/pages/RoutineEditor";
+import { RoutineEditor } from "../../src/pages/RoutineEditor";
 import { BotSettings, CreateBotForm } from "../../src/pages/shell/bot-panel";
 import "../../src/styles.css";
 
@@ -105,7 +106,10 @@ function CreateShot() {
     setReady(true);
   }, []);
   return (
-    <main data-ready={ready ? "true" : "false"} className="mx-auto max-w-[640px] bg-background p-8 text-foreground">
+    <main
+      data-ready={ready ? "true" : "false"}
+      className="mx-auto max-w-[640px] bg-background p-8 text-foreground"
+    >
       <CreateBotForm onCreate={async () => undefined} onCancel={() => undefined} />
     </main>
   );
@@ -130,7 +134,10 @@ function ModelShot() {
     return () => window.clearTimeout(timer);
   }, []);
   return (
-    <main data-ready={ready ? "true" : "false"} className="mx-auto max-w-[720px] bg-background p-8 text-foreground">
+    <main
+      data-ready={ready ? "true" : "false"}
+      className="mx-auto max-w-[720px] bg-background p-8 text-foreground"
+    >
       <BotSettings
         bot={inboxBot()}
         memoryProviderConfigured={false}
@@ -215,5 +222,7 @@ void bootstrapI18n("en").then(() => {
     ) : (
       <CreateShot />
     );
-  createRoot(document.getElementById("root")!).render(<I18nProvider i18n={i18n}>{shot}</I18nProvider>);
+  createRoot(document.getElementById("root")!).render(
+    <I18nProvider i18n={i18n}>{shot}</I18nProvider>,
+  );
 });

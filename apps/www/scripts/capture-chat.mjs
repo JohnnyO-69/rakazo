@@ -62,7 +62,9 @@ try {
       ],
       { stdio: "inherit" },
     );
-    if (result.status !== 0) process.exit(result.status ?? 1);
+    if (result.status !== 0) {
+      throw new Error(`Chrome capture failed with status ${result.status ?? 1}`);
+    }
     console.log(file);
   }
 } finally {

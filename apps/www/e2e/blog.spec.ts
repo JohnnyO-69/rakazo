@@ -1,9 +1,21 @@
+import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "@playwright/test";
+
+async function captureScreenshot(page: Page, testInfo: TestInfo, name: string) {
+  const screenshotPath = testInfo.outputPath(`${name}.png`);
+  await page.screenshot({
+    animations: "disabled",
+    caret: "hide",
+    fullPage: true,
+    path: screenshotPath,
+  });
+  await testInfo.attach(name, { contentType: "image/png", path: screenshotPath });
+}
 
 test.describe("blog", () => {
   test("index lists the posts and a post has dates, a table, and structured data", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.goto("/blog/");
     await expect(page.getByRole("heading", { level: 1, name: "Blog" })).toBeVisible();
     await expect(page.locator(".site-nav").getByRole("link", { name: "Blog" })).toHaveAttribute(
@@ -11,6 +23,7 @@ test.describe("blog", () => {
       "page",
     );
     await expect(page.getByRole("link", { name: /Best open source AI agents in 2026/ })).toBeVisible();
+    await captureScreenshot(page, testInfo, "07-blog-index");
 
     await page.goto("/blog/best-open-source-ai-agents-2026/");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -43,6 +56,7 @@ test.describe("blog", () => {
       true,
     );
     expect(parsed.some((entry) => entry["@type"] === "FAQPage")).toBe(true);
+    await captureScreenshot(page, testInfo, "07-blog-post");
 
     await page.goto("/blog/roundups/");
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");

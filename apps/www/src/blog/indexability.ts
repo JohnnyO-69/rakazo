@@ -18,6 +18,22 @@ export const CATEGORY_LABEL: Record<BlogCategory, string> = {
 
 const blogDir = join(dirname(fileURLToPath(import.meta.url)), "../content/blog");
 
+const CATEGORY_LINE = /^category:\s*["']?([a-z]+)["']?\s*$/m;
+
+/** Reads `category` from Markdown frontmatter, including quoted values. */
+export function categoryFromFrontmatter(text: string): BlogCategory | undefined {
+  const match = CATEGORY_LINE.exec(text);
+  const category = match?.[1];
+  if (category && (BLOG_CATEGORIES as readonly string[]).includes(category)) {
+    return category as BlogCategory;
+  }
+  return undefined;
+}
+
+export function categoryIsIndexedAtCount(count: number): boolean {
+  return count >= CATEGORY_INDEX_MIN;
+}
+
 export function categoryCounts(): Map<BlogCategory, number> {
   const counts = new Map<BlogCategory, number>(BLOG_CATEGORIES.map((category) => [category, 0]));
   let files: string[] = [];
@@ -28,9 +44,7 @@ export function categoryCounts(): Map<BlogCategory, number> {
   }
   for (const file of files) {
     if (!file.endsWith(".md") && !file.endsWith(".mdx")) continue;
-    const text = readFileSync(join(blogDir, file), "utf8");
-    const match = /^category:\s*([a-z]+)\s*$/m.exec(text);
-    const category = match?.[1] as BlogCategory | undefined;
+    const category = categoryFromFrontmatter(readFileSync(join(blogDir, file), "utf8"));
     if (category && counts.has(category)) {
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
@@ -39,7 +53,7 @@ export function categoryCounts(): Map<BlogCategory, number> {
 }
 
 export function categoryIsIndexed(category: BlogCategory): boolean {
-  return (categoryCounts().get(category) ?? 0) >= CATEGORY_INDEX_MIN;
+  return categoryIsIndexedAtCount(categoryCounts().get(category) ?? 0);
 }
 
 export function categoryPath(category: BlogCategory): string {

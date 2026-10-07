@@ -1,11 +1,7 @@
 ---
 import { getCollection } from "astro:content";
-import {
-  BLOG_CATEGORIES,
-  CATEGORY_LABEL,
-  categoryPath,
-  type BlogCategory,
-} from "../../blog/categories";
+import type { BlogCategory } from "../../blog/categories";
+import { BLOG_CATEGORIES, CATEGORY_LABEL, categoryPath } from "../../blog/categories";
 import { formatPostDate } from "../../blog/format";
 import SiteFrame from "../../components/SiteFrame.astro";
 

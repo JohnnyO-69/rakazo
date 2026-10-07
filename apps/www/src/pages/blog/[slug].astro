@@ -1,12 +1,12 @@
 ---
 import { getCollection, render } from "astro:content";
 import type { CollectionEntry } from "astro:content";
+import type { BlogCategory } from "../../blog/indexability";
 import {
   BLOG_CATEGORIES,
   CATEGORY_LABEL,
   categoryIsIndexed,
   categoryPath,
-  type BlogCategory,
 } from "../../blog/indexability";
 import { formatPostDate, isoDate } from "../../blog/format";
 import { blogPostStructuredData } from "../../blog/structured-data";
