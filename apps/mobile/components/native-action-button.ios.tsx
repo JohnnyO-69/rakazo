@@ -1,10 +1,11 @@
-import { Button, Host } from "@expo/ui/swift-ui";
+import { Button, Host, ProgressView } from "@expo/ui/swift-ui";
 import {
   accessibilityLabel as accessibilityName,
   buttonStyle,
   containerRelativeFrame,
   controlSize,
   disabled as disable,
+  progressViewStyle,
   tint,
 } from "@expo/ui/swift-ui/modifiers";
 import { useMobileTokens, useResolvedAppearance } from "../lib/native";
@@ -43,7 +44,7 @@ export function NativeActionButton({
       ]}
     >
       <Button
-        label={label}
+        label={busy ? undefined : label}
         onPress={inactive ? undefined : onPress}
         role={role}
         modifiers={[
@@ -52,11 +53,13 @@ export function NativeActionButton({
           ...(stretches ? [containerRelativeFrame({ axes: "horizontal" })] : []),
           disable(inactive),
           ...(color ? [tint(color)] : []),
-          ...(accessibilityLabel && accessibilityLabel !== label
-            ? [accessibilityName(accessibilityLabel)]
+          ...(busy || (accessibilityLabel && accessibilityLabel !== label)
+            ? [accessibilityName(accessibilityLabel ?? label)]
             : []),
         ]}
-      />
+      >
+        {busy ? <ProgressView modifiers={[progressViewStyle("circular")]} /> : undefined}
+      </Button>
     </Host>
   );
 }
