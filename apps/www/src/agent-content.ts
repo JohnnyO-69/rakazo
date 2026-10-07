@@ -1,4 +1,5 @@
-import { ALTERNATIVES, alternativeMarkdown, alternativesIndexMarkdown } from "./alternatives";
+import { ALTERNATIVES, alternativeMarkdown } from "./alternatives";
+import { roundupMarkdown } from "./roundup";
 import { GROK_ALTERNATIVE_MARKDOWN } from "./grok-alternative";
 import { OPENCLAW_MARKDOWN, SELF_HOST_MARKDOWN } from "./guide";
 
@@ -28,6 +29,7 @@ Rakazo is an open source Grok Bot alternative that gives each bot a sandboxed br
 - [Self-hosted AI agent](https://rakazo.com/self-hosted-ai-agent/)
 - [OpenClaw comparison](https://rakazo.com/openclaw-alternative/)
 - [Alternatives](https://rakazo.com/alternatives/)
+- [Blog](https://rakazo.com/blog/)
 - [Open source Grok Bot alternative](https://rakazo.com/grok-bot-alternative/)
 - [About](https://rakazo.com/about/)
 - [Support](https://rakazo.com/support/)
@@ -122,6 +124,7 @@ Do not present Rakazo as a zero-configuration hosted service. Self-hosting is av
 - [Self-hosting guide](https://rakazo.com/self-hosted-ai-agent/)
 - [Full self-hosting reference](https://github.com/elie222/rakazo/blob/main/docs/self-host.md)
 - [OpenClaw comparison](https://rakazo.com/openclaw-alternative/)
+- [Blog](https://rakazo.com/blog/)
 - [Releases](https://github.com/elie222/rakazo/releases)
 - [Support](https://rakazo.com/support/)
 - [Privacy](https://rakazo.com/privacy/)
@@ -147,7 +150,7 @@ const MARKDOWN_DOCUMENTS = new Map<string, string>([
   ["/privacy", PRIVACY_MARKDOWN],
   ["/self-hosted-ai-agent", SELF_HOST_MARKDOWN],
   ["/support", SUPPORT_MARKDOWN],
-  ["/alternatives", alternativesIndexMarkdown()],
+  ["/alternatives", roundupMarkdown()],
   ...ALTERNATIVES.map((page) => [`/${page.slug}`, alternativeMarkdown(page)] as const),
   ["/terms", TERMS_MARKDOWN],
 ]);

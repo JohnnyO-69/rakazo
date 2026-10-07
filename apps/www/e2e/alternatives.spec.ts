@@ -1,6 +1,7 @@
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { ALTERNATIVES, ALTERNATIVES_HUB, HUB_CARDS } from "../src/alternatives";
+import { visibleInlineCode } from "../src/inline-code";
 
 async function captureScreenshot(page: Page, testInfo: TestInfo, name: string) {
   const screenshotPath = testInfo.outputPath(`${name}.png`);
@@ -70,7 +71,7 @@ test.describe("alternatives", () => {
     await captureScreenshot(page, testInfo, "05-alternatives-hub");
 
     await page.goto("/");
-    await page.getByRole("link", { name: "Alternatives" }).click();
+    await page.locator(".site-nav").getByRole("link", { name: "Alternatives" }).click();
     await expect(page).toHaveURL(/\/alternatives\/?$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(ALTERNATIVES_HUB.h1);
   });
@@ -105,6 +106,12 @@ test.describe("alternatives", () => {
         "content",
         new RegExp(`^https://rakazo\\.com/${alternative.slug}/?$`),
       );
+      await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+        "content",
+        new RegExp(`/og/${alternative.slug}\\.png$`),
+      );
+      await expect(page.locator("p.page-updated")).toHaveText("Updated October 7, 2026.");
+      await expect(page.locator("figure.vs-card")).toBeVisible();
       await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(0);
       await expect(page.locator('meta[property="og:locale:alternate"]')).toHaveCount(0);
 
@@ -138,7 +145,7 @@ test.describe("alternatives", () => {
       );
       for (const item of alternative.faq) {
         await expect(page.getByRole("heading", { name: item.question })).toBeVisible();
-        await expect(page.getByText(item.answer)).toBeVisible();
+        await expect(page.getByText(visibleInlineCode(item.answer))).toBeVisible();
       }
 
       await captureScreenshot(page, testInfo, `06-alternative-${index}-${alternative.slug}`);
@@ -167,9 +174,8 @@ test.describe("alternatives", () => {
       "href",
       "https://rakazo.com/",
     );
-    await expect(page.getByRole("link", { name: "Alternativen" })).toHaveAttribute(
-      "href",
-      "/alternatives/",
-    );
+    await expect(
+      page.locator(".site-footer__links").getByRole("link", { name: "Alternativen" }),
+    ).toHaveAttribute("href", "/alternatives/");
   });
 });
