@@ -43,6 +43,7 @@ describe("agent content negotiation", () => {
     expect(getMarkdownAlternate("/grok-bot-alternative/")).toBe(
       "/grok-bot-alternative.md",
     );
+    expect(getMarkdownDocument("/terms/")).toContain("# Rakazo terms");
     expect(getMarkdownDocument("/missing")).toBeUndefined();
     expect(getMarkdownAlternate("/missing")).toBeUndefined();
     expect(getMarkdownAlternate("/changelog")).toBeUndefined();
@@ -70,6 +71,7 @@ describe("agent content negotiation", () => {
 
     const headResponse = markdownResponse("# Rakazo\n", "HEAD", 404);
     expect(headResponse.status).toBe(404);
+    expect(headResponse.headers.get("x-robots-tag")).toBe("noindex");
     await expect(headResponse.text()).resolves.toBe("");
   });
 });
