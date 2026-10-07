@@ -1,6 +1,6 @@
 import { OPENCLAW_H1 } from "./guide";
 import { GROK_ALTERNATIVE_H1, GROK_ALTERNATIVE_PATH } from "./grok-alternative";
-import { DOCS_URL, GITHUB_URL, OPENCLAW_ALTERNATIVE_PATH, SITE_URL } from "./site";
+import { DOCS_URL, GITHUB_URL, OPENCLAW_ALTERNATIVE_PATH } from "./site";
 
 /** Public descriptions were read on this date. */
 export const COMPARED_ON = "October 7, 2026";
@@ -62,12 +62,13 @@ export type Alternative = {
 };
 
 export const ALTERNATIVES_HUB = {
-  title: "Open Source AI Assistant Alternatives – Rakazo",
+  title:
+    "Best Personal AI Agents in 2026: Grok Bot, Muse, Dots, Instinct, Hark Pro & Open Source Alternatives",
   description:
-    "Open source comparisons of Rakazo with other AI assistants, including Grok Bot, OpenClaw, Hermes Agent, Meta's Muse, OpenAI's Dots, Instinct AI, and Hark Pro.",
-  h1: "Open source alternatives",
+    "A dated comparison of Grok Bot, Meta Muse, OpenAI Dots, Instinct, Hark Pro, OpenClaw, Hermes Agent, and Rakazo. Licenses, self-hosting, model choice, price, setup, and whether you manage the agent from chat.",
+  h1: "Best Personal AI Agents in 2026: Grok Bot, Muse, Dots, Instinct, Hark Pro & Open Source Alternatives",
   intro:
-    "Rakazo is an open source platform for persistent AI teammates you can run yourself. These pages compare it with other AI assistants using their public descriptions.",
+    "These are different products that all take on work beyond a single reply. This page compares their public descriptions as of October 7, 2026. It is not a score, a benchmark, or a claim that one of them is best at every task.",
 } as const;
 
 const MUSE_SOURCES = [
@@ -767,27 +768,3 @@ export function alternativeMarkdown(alternative: Alternative): string {
   return lines.join("\n");
 }
 
-export function alternativesIndexMarkdown(): string {
-  const pages = HUB_CARDS.map(
-    (card) => `- [${card.h1}](${SITE_URL}${card.href}) — ${card.name}`,
-  );
-  return [
-    `# ${ALTERNATIVES_HUB.h1}`,
-    "",
-    ALTERNATIVES_HUB.intro,
-    "",
-    `Public descriptions as of ${COMPARED_ON}.`,
-    "",
-    "## Pages",
-    "",
-    ...pages,
-    "",
-    `## ${GET_STARTED.heading}`,
-    "",
-    GET_STARTED.copy,
-    "",
-    `- [${GET_STARTED.docsLabel}](${DOCS_URL})`,
-    `- [${GET_STARTED.githubLabel}](${GITHUB_URL})`,
-    "",
-  ].join("\n");
-}
