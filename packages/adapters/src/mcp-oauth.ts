@@ -11,6 +11,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { isLocalMcpHost } from "@rakazo/contracts";
+import { readBoundedResponseBytes } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { sanitizeConnectorError } from "./connector-safety.js";
@@ -400,15 +401,28 @@ function oauthFetch(
 
 type OAuthRejection = { status: number; code: string; description: string };
 
+const OAUTH_ERROR_BODY_MAX_CHARS = 8_000;
+// A JavaScript character is at most 3 UTF-8 bytes, so a longer body cannot pass the character cap.
+const OAUTH_ERROR_BODY_MAX_BYTES = OAUTH_ERROR_BODY_MAX_CHARS * 3;
+
 /** Read an RFC 6749 error object without consuming the body the SDK still needs. */
 async function readOAuthRejection(response: Response): Promise<OAuthRejection | undefined> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > OAUTH_ERROR_BODY_MAX_BYTES) {
+    return undefined;
+  }
   let text: string;
   try {
-    text = await response.clone().text();
+    const bytes = await readBoundedResponseBytes(response.clone(), {
+      maxBytes: OAUTH_ERROR_BODY_MAX_BYTES,
+      tooLargeMessage: "OAuth error response is too large",
+      read: (operation) => operation(),
+    });
+    text = new TextDecoder().decode(bytes);
   } catch {
     return undefined;
   }
-  if (text.length > 8_000) return undefined;
+  if (text.length > OAUTH_ERROR_BODY_MAX_CHARS) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -426,15 +440,19 @@ async function readOAuthRejection(response: Response): Promise<OAuthRejection | 
 /** Surface a rejection only when it is the error the SDK just threw.
  *
  * Earlier challenges (a 401 while discovery continues) must not replace a
- * later, different failure. Unstructured bodies stay out of the caller-facing
- * message; the log still receives the SDK text. */
+ * later, different failure. The SDK message is already redacted and
+ * length-limited, so the description is cleaned the same way before comparing.
+ * Unstructured bodies stay out of the caller-facing message; the log still
+ * receives the SDK text. */
 function formatOAuthRejection(
   rejection: OAuthRejection,
   sdk: string,
   secrets: string[],
 ): string | undefined {
   if (sdk.includes("Raw body:")) return undefined;
-  if (sdk.trim() !== rejection.description.trim()) return undefined;
+  if (sanitizeConnectorError(rejection.description, secrets).trim() !== sdk.trim()) {
+    return undefined;
+  }
   const description = rejection.description.replace(/\s+/g, " ").trim().slice(0, 300);
   const detail = description ? `${rejection.code}: ${description}` : rejection.code;
   return sanitizeConnectorError(`HTTP ${rejection.status} ${detail}`, secrets);
