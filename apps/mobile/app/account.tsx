@@ -5,6 +5,8 @@ import {
   ActivityIndicator,
   Alert,
   Button,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -34,6 +36,7 @@ import {
 } from "../lib/appearance";
 import { explicitSignInRoute } from "../lib/auth-routing";
 import { confirmDeleteBot } from "../lib/bot-lifecycle";
+import { promptAccountDeletion } from "../lib/delete-account-prompt";
 import { setUiLocale, useI18n } from "../lib/i18n";
 import type { LiveNotificationSettings } from "../lib/live-notifications";
 import {
@@ -62,7 +65,8 @@ export default function Account() {
   const router = useRouter();
   const { focus } = useLocalSearchParams<{ focus?: string }>();
   const [me, setMe] = useState<MobileMe | null>(null);
-  const [password, setPassword] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
   const [localeSaving, setLocaleSaving] = useState(false);
   const [localeError, setLocaleError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -190,22 +194,28 @@ export default function Account() {
     }
   }
 
-  function confirmDeletion() {
+  function closeDeletePrompt() {
+    if (pending) return;
+    setDeleteOpen(false);
+    setDeletePassword("");
+  }
+
+  function requestDeletion() {
+    if (pending) return;
     setError(null);
-    Alert.alert(
-      t("Delete your account?"),
-      t(
+    const prompted = promptAccountDeletion({
+      title: t("Delete your account?"),
+      message: t(
         "This permanently deletes your account, bots, conversations, memories, files, and saved connections. This cannot be undone.",
       ),
-      [
-        { text: t("Cancel"), style: "cancel" },
-        {
-          text: t("Delete account"),
-          style: "destructive",
-          onPress: () => void handleDeletion(),
-        },
-      ],
-    );
+      cancelLabel: t("Cancel"),
+      deleteLabel: t("Delete"),
+      onSubmit: (password) => void handleDeletion(password),
+    });
+    if (!prompted) {
+      setDeletePassword("");
+      setDeleteOpen(true);
+    }
   }
 
   function applyLocale(code: AccountUiLocale) {
@@ -233,11 +243,13 @@ export default function Account() {
     });
   }
 
-  async function handleDeletion() {
+  async function handleDeletion(password: string) {
+    if (!password || pending) return;
     setPending(true);
     setError(null);
     try {
       await deleteAccount(password);
+      setDeleteOpen(false);
       router.dismissAll();
       router.replace("/sign-in");
     } catch (err) {
@@ -528,43 +540,87 @@ export default function Account() {
           </View>
         ) : null}
 
-        <View style={styles.dangerZone}>
-          <Text style={styles.dangerTitle}>{t("Delete account")}</Text>
-          <TextInput
-            accessibilityLabel={t("Current password")}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!pending}
-            onChangeText={(value) => {
-              setPassword(value);
-              setError(null);
-            }}
-            placeholder={t("Current password")}
-            placeholderTextColor={native.tertiaryLabel}
-            secureTextEntry
-            style={styles.password}
-            textContentType="password"
-            value={password}
-          />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+        <View>
           <Pressable
             accessibilityRole="button"
-            disabled={pending || !password}
-            onPress={confirmDeletion}
+            disabled={pending}
+            onPress={requestDeletion}
             style={({ pressed }) => [
-              styles.deleteButton,
-              (pending || !password) && styles.disabled,
+              styles.settingsButton,
               pressed && styles.pressed,
+              pending && styles.disabled,
             ]}
           >
-            {pending ? (
-              <ActivityIndicator color={mobileTokens().destructiveForeground} />
-            ) : (
-              <Text style={styles.deleteLabel}>{t("Delete account")}</Text>
-            )}
+            <Text style={styles.destructiveTitle}>{t("Delete account")}</Text>
+            {pending ? <ActivityIndicator color={mobileTokens().destructive} /> : null}
           </Pressable>
+          {!deleteOpen && error ? (
+            <Text accessibilityRole="alert" style={styles.error}>
+              {error}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
+      {deleteOpen ? (
+        <Modal transparent animationType="fade" onRequestClose={closeDeletePrompt}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.dialogOverlay}
+          >
+            <Pressable
+              accessibilityLabel={t("Cancel")}
+              style={StyleSheet.absoluteFill}
+              onPress={closeDeletePrompt}
+            />
+            <View style={styles.dialog}>
+              <Text style={styles.dialogTitle}>{t("Delete your account?")}</Text>
+              <Text style={styles.dialogBody}>
+                {t(
+                  "This permanently deletes your account, bots, conversations, memories, files, and saved connections. This cannot be undone.",
+                )}
+              </Text>
+              <TextInput
+                accessibilityLabel={t("Current password")}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                editable={!pending}
+                onChangeText={(value) => {
+                  setDeletePassword(value);
+                  setError(null);
+                }}
+                placeholder={t("Current password")}
+                placeholderTextColor={native.tertiaryLabel}
+                secureTextEntry
+                style={styles.dialogInput}
+                textContentType="password"
+                value={deletePassword}
+              />
+              {error ? (
+                <Text accessibilityRole="alert" style={styles.dialogError}>
+                  {error}
+                </Text>
+              ) : null}
+              <View style={styles.dialogActions}>
+                <Pressable accessibilityRole="button" onPress={closeDeletePrompt}>
+                  <Text style={styles.dialogCancel}>{t("Cancel")}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={pending || !deletePassword}
+                  onPress={() => void handleDeletion(deletePassword)}
+                >
+                  <Text
+                    style={[styles.dialogDelete, (pending || !deletePassword) && styles.disabled]}
+                  >
+                    {t("Delete")}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -777,44 +833,64 @@ function createAccountStyles() {
       fontSize: 12,
       textAlign: "center",
     },
-    dangerZone: {
-      marginTop: 12,
-      borderRadius: 16,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: tokens.destructive,
-      padding: 18,
-    },
-    dangerTitle: {
+    destructiveTitle: {
       color: tokens.destructive,
       fontSize: 17,
       fontWeight: "600",
-    },
-    password: {
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: native.fill,
-      color: native.label,
-      paddingHorizontal: 14,
-      marginTop: 16,
-      fontSize: 16,
     },
     error: {
       color: tokens.destructive,
       fontSize: 14,
       marginTop: 10,
     },
-    deleteButton: {
-      minHeight: 50,
-      borderRadius: 12,
-      alignItems: "center",
+    dialogOverlay: {
+      flex: 1,
       justifyContent: "center",
-      backgroundColor: tokens.destructive,
-      marginTop: 14,
+      padding: 24,
+      backgroundColor: "rgba(0, 0, 0, 0.62)",
     },
-    deleteLabel: {
-      color: tokens.destructiveForeground,
+    dialog: {
+      borderRadius: 14,
+      backgroundColor: native.page,
+      padding: 18,
+      gap: 12,
+    },
+    dialogTitle: {
+      color: native.label,
+      fontSize: 17,
+      fontWeight: "600",
+    },
+    dialogBody: {
+      color: native.secondaryLabel,
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    dialogInput: {
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: native.fill,
+      color: native.label,
+      paddingHorizontal: 14,
       fontSize: 16,
-      fontWeight: "700",
+    },
+    dialogError: {
+      color: tokens.destructive,
+      fontSize: 14,
+    },
+    dialogActions: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      gap: 20,
+    },
+    dialogCancel: {
+      color: native.label,
+      fontSize: 16,
+      fontWeight: "600",
+    },
+    dialogDelete: {
+      color: tokens.destructive,
+      fontSize: 16,
+      fontWeight: "600",
     },
     disabled: {
       opacity: 0.45,
