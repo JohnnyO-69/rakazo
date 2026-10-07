@@ -556,6 +556,7 @@ export default function Home() {
     router,
     styles,
     t,
+    locale,
   ]);
 
   if (!ready) {

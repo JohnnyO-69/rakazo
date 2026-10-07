@@ -1934,7 +1934,7 @@ msgstr ""
 
 #: src/lib/user-error.ts
 msgid "Enter a password"
-msgstr "{'de': 'Gib ein Passwort ein', 'es': 'Introduce una contraseña', 'fr': 'Saisissez un mot de passe', 'hi': 'पासवर्ड दर्ज करें', 'ko': '비밀번호를 입력하세요', 'pt-BR': 'Digite uma senha', 'ru': 'Введите пароль', 'tr': 'Bir parola girin', 'zh-CN': '请输入密码'}"
+msgstr "请输入密码"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Enter a username and password"
@@ -1942,7 +1942,7 @@ msgstr ""
 
 #: src/lib/user-error.ts
 msgid "Enter a valid email"
-msgstr "{'de': 'Gib eine gültige E-Mail-Adresse ein', 'es': 'Introduce un correo electrónico válido', 'fr': 'Saisissez une adresse e-mail valide', 'hi': 'मान्य ईमेल दर्ज करें', 'ko': '올바른 이메일을 입력하세요', 'pt-BR': 'Digite um e-mail válido', 'ru': 'Введите действительный адрес электронной почты', 'tr': 'Geçerli bir e-posta girin', 'zh-CN': '请输入有效的电子邮件地址'}"
+msgstr "请输入有效的电子邮件地址"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3806,7 +3806,7 @@ msgstr "软件更新"
 
 #: src/lib/user-error.ts
 msgid "Something went wrong. Try again."
-msgstr "{'de': 'Etwas ist schiefgelaufen. Versuche es erneut.', 'es': 'Algo salió mal. Inténtalo de nuevo.', 'fr': 'Un problème est survenu. Réessayez.', 'hi': 'कुछ गलत हो गया। फिर से कोशिश करें।', 'ko': '문제가 발생했습니다. 다시 시도하세요.', 'pt-BR': 'Algo deu errado. Tente novamente.', 'ru': 'Что-то пошло не так. Попробуйте ещё раз.', 'tr': 'Bir şeyler ters gitti. Tekrar deneyin.', 'zh-CN': '出了点问题。请重试。'}"
+msgstr "出了点问题。请重试。"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Space default"
