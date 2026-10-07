@@ -28,7 +28,6 @@ name: Thread
     timeout: 20000
 - longPressOn:
     text: ".*The fixture workspace is ready.*"
-    duration: 2500
 - extendedWaitUntil:
     visible: ".*Reply.*"
     timeout: 8000

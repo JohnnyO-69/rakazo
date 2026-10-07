@@ -90,9 +90,11 @@ name: Settings
     timeout: 20000
 - takeScreenshot: 14-computer
 - openLink: "rakazo:///account"
-- extendedWaitUntil:
-    visible: ".*Delete account.*"
-    timeout: 15000
+- scrollUntilVisible:
+    element: ".*Delete account.*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 50
 - scrollUntilVisible:
     element: ".*Current password.*"
     direction: DOWN
@@ -113,11 +115,16 @@ name: Settings
 - takeScreenshot: 15-delete-prompt
 - tapOn: "Cancel"
 - openLink: "rakazo:///account"
+- extendedWaitUntil:
+    visible: ".*Language.*"
+    timeout: 15000
 - scrollUntilVisible:
-    element: ".*Language.*"
-    direction: DOWN
-    timeout: 10000
-- tapOn: ".*Language.*"
+    element: "Language"
+    direction: UP
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn: "Language"
 - extendedWaitUntil:
     visible: ".*English.*|.*Cancel.*"
     timeout: 10000
