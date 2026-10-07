@@ -1,10 +1,5 @@
-import {
-  ALTERNATIVES,
-  ALTERNATIVES_HUB,
-  COMPARED_ON,
-  type FaqItem,
-  alternativePath,
-} from "./alternatives";
+import type { Alternative, FaqItem } from "./alternatives";
+import { ALTERNATIVES, ALTERNATIVES_HUB, COMPARED_ON, alternativePath } from "./alternatives";
 import { GROK_ALTERNATIVE_H1, GROK_ALTERNATIVE_PATH } from "./grok-alternative";
 import { OPENCLAW_H1 } from "./guide";
 import { OPENCLAW_ALTERNATIVE_PATH, SELF_HOST_GUIDE_PATH, SITE_URL } from "./site";
@@ -101,7 +96,7 @@ export const ROUNDUP_ROWS: readonly RoundupRow[] = [
     model: "No. Hark trains its own models.",
     price: "Free. $20 a month is 2×. $100 a month is 10×.",
     setup: "Web, iOS, or Android app.",
-    chat: "Yes, one thread, with Home and Projects beside it.",
+    chat: "Yes. Projects are separate chats.",
   },
   {
     product: "OpenClaw",
@@ -146,7 +141,7 @@ const CARD_BODY: Record<string, readonly string[]> = {
     "Hermes Agent is Nous Research's MIT-licensed agent, and you can run it on your own machine. The desktop app shares config, keys, sessions, and memory with the command-line install. First-run onboarding can reach a first message without the CLI. The app starts its own local backend. Telegram, Discord, and Slack use a gateway process you start separately. The quickstart says a model needs at least 64,000 tokens of context. Like Grok Bot, Rakazo's ongoing management stays in the chat.",
   ],
   "hark-alternative": [
-    "Hark Pro is the personal agent at hark.com, launched October 6, 2026. It is a hosted web, iOS, and Android app. Every feature in that article stays free. Twenty dollars a month is twice the usage, and one hundred dollars a month is ten times. It is one conversation, with Home, Action Buttons, Panels, and Projects beside that thread. Hark introduced Handoff on August 5, 2026. It is a virtual computer with a browser, files, and a terminal. The October 6 article says it can run up to six browsers at once, and Hark operates that computer. Training opt-out has exceptions for feedback and safety review. Rakazo uses a computer you run, and you bring the model.",
+    "Hark Pro is the personal agent at hark.com, launched October 6, 2026. It is a hosted web, iOS, and Android app. Every feature in that article stays free. Twenty dollars a month is twice the usage, and one hundred dollars a month is ten times. The article describes a messaging-style app. Projects are dedicated chats with their own threads, and Home, Action Buttons, and Panels sit beside that. Hark introduced Handoff on August 5, 2026. It is a virtual computer with a browser, files, and a terminal. The October 6 article says it can run up to six browsers at once, and Hark operates that computer. Training opt-out has exceptions for feedback and safety review. Rakazo uses a computer you run, and you bring the model.",
   ],
 };
 
@@ -173,12 +168,13 @@ const OPENCLAW_CARD: RoundupCard = {
   name: "OpenClaw",
   href: OPENCLAW_ALTERNATIVE_PATH,
   heading: OPENCLAW_H1,
-    paragraphs: [
+  paragraphs: [
     "OpenClaw is an MIT-licensed agent you run yourself, stewarded by the OpenClaw Foundation. The getting-started guide installs a CLI and runs a wizard. The Gateway can stay in that terminal so you can chat before openclaw gateway install, the later background service. Later changes go through openclaw configure and a JSON config file. Chat apps are the main surface, alongside the Control UI. After Docker or the desktop app, Rakazo is just chat, managed from that chat, like Grok Bot.",
   ],
 };
 
-const CARD_SLUGS = [
+/** Display order only. Membership comes from `ALTERNATIVES`. */
+const PREFERRED_CARD_ORDER = [
   "muse-alternative",
   "dots-alternative",
   "instinct-alternative",
@@ -186,9 +182,7 @@ const CARD_SLUGS = [
   "hermes-alternative",
 ] as const;
 
-function cardForSlug(slug: (typeof CARD_SLUGS)[number]): RoundupCard {
-  const page = ALTERNATIVES.find((item) => item.slug === slug);
-  if (!page) throw new Error(`Missing comparison page: ${slug}`);
+function alternativeCard(page: Alternative): RoundupCard {
   return {
     name: page.name,
     href: alternativePath(page),
@@ -197,12 +191,27 @@ function cardForSlug(slug: (typeof CARD_SLUGS)[number]): RoundupCard {
   };
 }
 
+function orderedAlternativeCards(): RoundupCard[] {
+  const rank = new Map<string, number>(PREFERRED_CARD_ORDER.map((slug, index) => [slug, index]));
+  return [...ALTERNATIVES]
+    .sort((left, right) => {
+      const leftRank = rank.get(left.slug) ?? PREFERRED_CARD_ORDER.length;
+      const rightRank = rank.get(right.slug) ?? PREFERRED_CARD_ORDER.length;
+      return leftRank - rightRank || left.slug.localeCompare(right.slug);
+    })
+    .map(alternativeCard);
+}
+
+const alternativeCards = orderedAlternativeCards();
+const hermesCards = alternativeCards.filter((card) => card.href === "/hermes-alternative/");
+const middleCards = alternativeCards.filter((card) => card.href !== "/hermes-alternative/");
+
 export const ROUNDUP_CARDS: readonly RoundupCard[] = [
   DEDICATED_CARDS[1],
-  ...CARD_SLUGS.filter((slug) => slug !== "hermes-alternative").map(cardForSlug),
+  ...middleCards,
   DEDICATED_CARDS[0],
   OPENCLAW_CARD,
-  cardForSlug("hermes-alternative"),
+  ...hermesCards,
 ];
 
 export const ROUNDUP_TIMELINE = [
@@ -245,7 +254,7 @@ export const ROUNDUP_CHANGELOG = [
 export const ROUNDUP_HOWTO = [
   "Choose Rakazo when the agent should live on hardware you control, the model key should be one you bring, and the daily surface should stay a chat. That is the Grok Bot shape without the hosted service. The cost is the install: Docker or the desktop app, then an account and a model. After that, routines, memory, and approvals stay in the chat.",
   "Choose Grok Bot when you already pay for Cursor or SuperGrok and you want xAI to host the computer. Choose Meta Muse for Meta's agent in the Muse app or WhatsApp, on a VM Meta runs. Choose OpenAI Dots when the agent should sit on an eligible ChatGPT plan and follow OpenAI's rules for what it may do alone. Choose Instinct when you want to text or call a hosted assistant. Choose Hark Pro for a hosted conversation with a free tier and a cloud computer Hark operates.",
-  "Choose OpenClaw when the assistant should live in chat apps you already use, and you are willing to run a Gateway and a config file. Choose Hermes Agent for MIT-licensed software and a desktop app that can reach a first message without the CLI. Messaging apps on Hermes still need a separate gateway. None of these imports another product's account, config, or vault. Read the linked page before you rely on a price, a country, or a connector.",
+  "Choose OpenClaw when the assistant should live in chat apps you already use, and you are willing to run a Gateway and a config file. Choose Hermes Agent for MIT-licensed software and a desktop app that can reach a first message without the CLI. Messaging apps on Hermes still need a separate gateway. Rakazo does not import a Grok Bot account, a Muse VM, a dot, an Instinct thread, or a Hark vault. OpenClaw documents a Hermes migration for config, memory, skills, and, if you accept it, credentials. Read the linked page before you rely on a price, a country, or a connector.",
 ] as const;
 
 export const ROUNDUP_FAQ: readonly FaqItem[] = [
@@ -262,7 +271,7 @@ export const ROUNDUP_FAQ: readonly FaqItem[] = [
   {
     question: "Is Rakazo just chat, like Grok Bot?",
     answer:
-      "Yes, after it is running. You install with Docker or the desktop app, create an account, and connect a model. A new bot interviews you, and you manage it from that chat. Grok Bot is also a chat for named bots. OpenClaw and Hermes Agent add a command-line setup and a gateway. Hark Pro, Muse, Dots, and Instinct are conversations too, on services you do not host.",
+      "Yes, after it is running. You install with Docker or the desktop app, create an account, and connect a model. A new bot interviews you, and you manage it from that chat. Grok Bot is also a chat for named bots. OpenClaw adds a command-line setup and a Gateway. Hermes Desktop can reach a first message without the CLI, and messaging apps use a separate gateway. Hark Pro, Muse, Dots, and Instinct are conversations too, on services you do not host.",
   },
   {
     question: "Is this a ranking?",

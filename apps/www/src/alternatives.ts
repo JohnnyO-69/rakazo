@@ -565,7 +565,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
     otherName: "Hark Pro",
     intro: [
       "Hark Pro is the personal agent at hark.com, launched October 6, 2026. It is a hosted app on the web, iOS, and Android. The launch article says every feature stays free, with $20 a month for twice the usage and $100 a month for ten times the usage.",
-      "Like Grok Bot, Rakazo is just chat: you set up the bot and manage it from that chat. Hark Pro is a conversation too. The same article also describes Home, Action Buttons, Panels, and Projects around that thread, and a cloud computer called Handoff that Hark operates.",
+      "Like Grok Bot, Rakazo is just chat: you set up the bot and manage it from that chat. Hark Pro feels like a messaging app. The same article describes Home, Action Buttons, and Panels, Projects as dedicated chats with their own threads, and a cloud computer called Handoff that Hark operates.",
       "Hark introduced Handoff, its computer-use agent, on August 5, 2026. This comparison uses Hark's public pages. It is not a measured benchmark.",
     ],
     rows: [
@@ -594,7 +594,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
         rakazo:
           "After you connect a model, Rakazo is just chat. You manage the bot from that chat on the web, desktop, and mobile apps. Routines are readable Markdown.",
         other:
-          "You talk in one thread. Home, Action Buttons, Panels, and Projects sit beside that thread. The privacy policy says you can review, edit, or delete memory by asking the agent.",
+          "The launch article describes a messaging-style conversation. Projects are dedicated chats with their own threads. Home, Action Buttons, and Panels sit beside that. The privacy policy says you can review, edit, or delete memory by asking the agent.",
       },
       {
         topic: "Model",
@@ -653,7 +653,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
       {
         question: "How do you manage each one day to day?",
         answer:
-          "After a Docker or desktop install and a model connection, Rakazo is just chat, like Grok Bot, and you manage the bot from that chat. Hark Pro is also a conversation. The launch article adds Home, Action Buttons, Panels, and Projects around that thread.",
+          "After a Docker or desktop install and a model connection, Rakazo is just chat, like Grok Bot, and you manage the bot from that chat. Hark Pro feels like a messaging app. The launch article adds Home, Action Buttons, and Panels, and Projects as dedicated chats with their own threads.",
       },
       {
         question: "Does Rakazo order things or run Handoff the way Hark describes?",
