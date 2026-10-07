@@ -1416,6 +1416,7 @@ function createModelsStyles() {
       justifyContent: "center",
     },
     content: {
+      width: "100%",
       padding: 20,
       gap: 12,
       paddingBottom: 40,
