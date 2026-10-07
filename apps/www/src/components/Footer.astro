@@ -47,6 +47,12 @@ const {
     terms: "Terms",
   },
 } = Astro.props;
+
+const currentPath = Astro.url.pathname.replace(/\/+$/, "") || "/";
+
+function isCurrentPage(href: string): boolean {
+  return (href.replace(/\/+$/, "") || "/") === currentPath;
+}
 ---
 
 <footer class="site-footer">
@@ -65,7 +71,7 @@ const {
           <a
             href={localeHomePath(locale)}
             hreflang={LOCALE_HREFLANG[locale]}
-            aria-current={locale === currentLocale ? "page" : undefined}
+            aria-current={isCurrentPage(localeHomePath(locale)) ? "page" : undefined}
           >
             {LOCALE_LABELS[locale]}
           </a>
@@ -76,7 +82,9 @@ const {
       <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
       <a href={DOCS_URL} target="_blank" rel="noreferrer">{linkLabels.docs}</a>
       <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">{linkLabels.changelog}</a>
-      <a href="/alternatives/">{linkLabels.alternatives}</a>
+      <a href="/alternatives/" aria-current={isCurrentPage("/alternatives/") ? "page" : undefined}>
+        {linkLabels.alternatives}
+      </a>
       <a href="/about/">{linkLabels.about}</a>
       <a href="/support/">{linkLabels.support}</a>
       <a href="/privacy/">{linkLabels.privacy}</a>

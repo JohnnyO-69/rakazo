@@ -46,6 +46,15 @@ test.describe("alternatives", () => {
       );
     }
 
+    const footerAlternatives = page
+      .locator(".site-footer__links")
+      .getByRole("link", { name: "Alternatives" });
+    await expect(footerAlternatives).toHaveAttribute("aria-current", "page");
+    await expect(
+      page.locator(".site-footer__languages").getByRole("link", { name: "English" }),
+    ).not.toHaveAttribute("aria-current", "page");
+    await expect(page.locator("footer [aria-current='page']")).toHaveCount(1);
+
     await expect(page.locator("ul.alt-index")).toHaveCSS("padding-left", "0px");
     await expect(page.getByRole("link", { name: "Self-hosting guide" })).toHaveCSS(
       "color",
@@ -132,11 +141,11 @@ test.describe("alternatives", () => {
 
   test("localized homepages keep their hreflang alternates", async ({ page }) => {
     await page.goto("/de/");
-    await expect(page.locator('link[rel="alternate"][hreflang="de"]')).toHaveAttribute(
+    await expect(page.locator('link[rel="alternate"][hreflang="de-DE"]')).toHaveAttribute(
       "href",
       "https://rakazo.com/de/",
     );
-    await expect(page.locator('link[rel="alternate"][hreflang="ko"]')).toHaveAttribute(
+    await expect(page.locator('link[rel="alternate"][hreflang="ko-KR"]')).toHaveAttribute(
       "href",
       "https://rakazo.com/ko/",
     );
@@ -144,7 +153,7 @@ test.describe("alternatives", () => {
       "href",
       "https://rakazo.com/zh/",
     );
-    await expect(page.locator('link[rel="alternate"][hreflang="en"]')).toHaveAttribute(
+    await expect(page.locator('link[rel="alternate"][hreflang="en-US"]')).toHaveAttribute(
       "href",
       "https://rakazo.com/",
     );
