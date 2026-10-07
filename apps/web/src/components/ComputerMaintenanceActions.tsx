@@ -112,7 +112,9 @@ export function ComputerMaintenanceActions({
               if (confirmAction) void run(confirmAction);
             }}
           >
-            {confirmAction === "recover" ? (
+            {pending === "recover" ? (
+              <Trans>Recovering…</Trans>
+            ) : confirmAction === "recover" ? (
               <Trans>Recover computer</Trans>
             ) : pending === "reset" ? (
               <Trans>Resetting…</Trans>

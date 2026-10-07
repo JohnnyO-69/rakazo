@@ -1,9 +1,5 @@
 export const DE_MESSAGES: Record<string, string> = {
   "No archived bots": "Keine archivierten Bots",
-  "View chat": "Chat ansehen",
-  "Restore to view chat?": "Zum Anzeigen des Chats wiederherstellen?",
-  "Archived chats are unavailable until the bot is restored.":
-    "Archivierte Chats sind erst nach dem Wiederherstellen des Bots verfügbar.",
   "Recover computer?": "Computer wiederherstellen?",
   "Recreate a computer that is not working.":
     "Einen nicht funktionierenden Computer neu erstellen.",

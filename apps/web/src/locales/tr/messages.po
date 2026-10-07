@@ -3258,7 +3258,7 @@ msgstr ""
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Recovery restores the last saved workspace. Unsaved work may be lost."
-msgstr ""
+msgstr "Kurtarma, son kaydedilen çalışma alanını geri yükler. Kaydedilmemiş çalışmalar kaybolabilir."
 
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Recreate a computer that is not working."

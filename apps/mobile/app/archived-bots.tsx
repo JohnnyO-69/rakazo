@@ -1,18 +1,17 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActionSheetIOS, ActivityIndicator, Alert, Platform, ScrollView, Text } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, Text } from "react-native";
 import { ArchivedBotList } from "../components/archived-bot-list";
 import type { MobileBot } from "../lib/api";
 import { rpc } from "../lib/api";
 import { confirmDeleteBot, restoreArchivedBot } from "../lib/bot-lifecycle";
 import { useI18n } from "../lib/i18n";
-import { useMobileTokens, useResolvedAppearance } from "../lib/native";
+import { useMobileTokens } from "../lib/native";
 import { errorText } from "../lib/user-error";
 
 export default function ArchivedBots() {
   const { t } = useI18n();
   const router = useRouter();
-  const scheme = useResolvedAppearance();
   const tokens = useMobileTokens();
   const [bots, setBots] = useState<MobileBot[] | null>(null);
   const [pending, setPending] = useState(false);
@@ -36,13 +35,12 @@ export default function ArchivedBots() {
     }, [t]),
   );
 
-  async function restore(bot: MobileBot, viewChat = false) {
+  async function restore(bot: MobileBot) {
     if (pending) return;
     setPending(true);
     try {
       await restoreArchivedBot(bot.id);
       setBots((current) => current?.filter((item) => item.id !== bot.id) ?? null);
-      if (viewChat) router.push({ pathname: "/thread", params: { botId: bot.id, name: bot.name } });
     } catch (cause) {
       Alert.alert(t("Could not restore bot"), errorText(cause, t("Try again.")));
     } finally {
@@ -57,47 +55,6 @@ export default function ArchivedBots() {
     );
   }
 
-  function viewChat(bot: MobileBot) {
-    Alert.alert(
-      t("Restore to view chat?"),
-      t("Archived chats are unavailable until the bot is restored."),
-      [
-        { text: t("Cancel"), style: "cancel" },
-        { text: t("Restore"), onPress: () => void restore(bot, true) },
-      ],
-    );
-  }
-
-  function legacyActions(bot: MobileBot) {
-    if (Platform.OS === "ios") {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: bot.name,
-          options: [t("Restore"), t("View chat"), t("Delete"), t("Cancel")],
-          cancelButtonIndex: 3,
-          destructiveButtonIndex: 2,
-          userInterfaceStyle: scheme,
-        },
-        (index) => {
-          if (index === 0) void restore(bot);
-          else if (index === 1) viewChat(bot);
-          else if (index === 2) remove(bot);
-        },
-      );
-    } else {
-      Alert.alert(
-        bot.name,
-        undefined,
-        [
-          { text: t("Restore"), onPress: () => void restore(bot) },
-          { text: t("View chat"), onPress: () => viewChat(bot) },
-          { text: t("Delete"), style: "destructive", onPress: () => remove(bot) },
-        ],
-        { cancelable: true },
-      );
-    }
-  }
-
   async function open(bot: MobileBot) {
     if (pending) return;
     setPending(true);
@@ -107,9 +64,11 @@ export default function ArchivedBots() {
         pathname: "/thread",
         params: { botId: bot.id, name: bot.name, readOnly: "1" },
       });
-    } catch {
-      // Older self-hosted servers reject reads for archived bots. Keep explicit restore/delete available.
-      legacyActions(bot);
+    } catch (cause) {
+      Alert.alert(t("Could not load bot"), errorText(cause, t("Try again.")), [
+        { text: t("Cancel"), style: "cancel" },
+        { text: t("Try again."), onPress: () => void open(bot) },
+      ]);
     } finally {
       setPending(false);
     }

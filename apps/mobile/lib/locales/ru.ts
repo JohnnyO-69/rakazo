@@ -1,9 +1,5 @@
 export const RU_MESSAGES: Record<string, string> = {
   "No archived bots": "Нет архивированных ботов",
-  "View chat": "Посмотреть чат",
-  "Restore to view chat?": "Восстановить, чтобы посмотреть чат?",
-  "Archived chats are unavailable until the bot is restored.":
-    "Архивированные чаты недоступны до восстановления бота.",
   "Recover computer?": "Восстановить компьютер?",
   "Recreate a computer that is not working.": "Пересоздать неработающий компьютер.",
   "Restore the last saved workspace.": "Восстановить последнее сохранённое рабочее пространство.",
