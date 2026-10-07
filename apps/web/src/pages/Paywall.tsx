@@ -1,6 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { BillingStatus } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
+import { Check } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authClient } from "../lib/auth";
@@ -32,6 +33,12 @@ export function PaywallPage({ status }: { status: BillingStatus }) {
   }
 
   const trialDays = status.trialDays;
+  const included = [
+    t`Bots with their own computer and browser`,
+    t`Routines that run while you're away`,
+    t`Any model, with your own key`,
+    t`Web, desktop and mobile apps`,
+  ];
   const title =
     status.canManage && status.price
       ? formatBillingPrice(status.price, i18n.locale || "en")
@@ -52,6 +59,16 @@ export function PaywallPage({ status }: { status: BillingStatus }) {
           </p>
         ) : null}
         {status.canManage ? (
+          <ul className="mb-9 flex flex-col gap-3 text-base">
+            {included.map((item) => (
+              <li key={item} className="flex items-center gap-3">
+                <Check aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {status.canManage ? (
           <Button type="submit" size="lg" disabled={pending} className={submitClass}>
             {status.trialAvailable ? (
               <Trans>Start {trialDays}-day free trial</Trans>
@@ -59,6 +76,11 @@ export function PaywallPage({ status }: { status: BillingStatus }) {
               <Trans>Subscribe</Trans>
             )}
           </Button>
+        ) : null}
+        {status.canManage && status.trialAvailable ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            <Trans>Cancel anytime.</Trans>
+          </p>
         ) : null}
         {showPortal ? (
           <Button

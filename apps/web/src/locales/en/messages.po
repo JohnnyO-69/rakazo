@@ -472,6 +472,10 @@ msgstr "Answered: {0}"
 msgid "Answered: {answer}"
 msgstr "Answered: {answer}"
 
+#: src/pages/Paywall.tsx
+msgid "Any model, with your own key"
+msgstr "Any model, with your own key"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
 msgstr "API is back, but the update did not finish. Check the host logs."
@@ -700,6 +704,10 @@ msgstr "Bots"
 msgid "Bots are working"
 msgstr "Bots are working"
 
+#: src/pages/Paywall.tsx
+msgid "Bots with their own computer and browser"
+msgstr "Bots with their own computer and browser"
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Brain label"
 msgstr "Brain label"
@@ -733,6 +741,10 @@ msgstr "Can't reach the server."
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
 msgstr "Cancel"
+
+#: src/pages/Paywall.tsx
+msgid "Cancel anytime."
+msgstr "Cancel anytime."
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Cancel new bot"
@@ -3454,6 +3466,10 @@ msgstr "Routine"
 msgid "Routines"
 msgstr "Routines"
 
+#: src/pages/Paywall.tsx
+msgid "Routines that run while you're away"
+msgstr "Routines that run while you're away"
+
 #: src/pages/RoutineEditor.tsx
 msgid "Run at"
 msgstr "Run at"
@@ -4251,6 +4267,10 @@ msgstr "Waiting in line…"
 #: src/pages/shell/message-cards.tsx
 msgid "Waiting…"
 msgstr "Waiting…"
+
+#: src/pages/Paywall.tsx
+msgid "Web, desktop and mobile apps"
+msgstr "Web, desktop and mobile apps"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
