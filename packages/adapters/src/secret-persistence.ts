@@ -7,6 +7,49 @@ import { deleteSecretBestEffort } from "./secret-store-factory.js";
 
 type Candidate = { id: string; ciphertext: string };
 type Cleanup = { old: Candidate[]; written: Candidate[]; client?: Prisma.TransactionClient };
+async function cleanupUnreferenced(
+  prisma: PrismaClient,
+  store: SecretStore,
+  candidates: Candidate[],
+): Promise<void> {
+  for (const row of new Map(candidates.map((row) => [row.ciphertext, row])).values()) {
+    try {
+      if (
+        (await prisma.secret.count({ where: { ciphertext: row.ciphertext } })) ||
+        (await prisma.botSecret.count({ where: { ciphertext: row.ciphertext } })) ||
+        (await prisma.integrationProviderConfig.count({
+          where: { ciphertext: row.ciphertext },
+        }))
+      )
+        continue;
+      await deleteSecretBestEffort(store, row.ciphertext, row.id);
+    } catch {
+      getLogger().warn("Secret cleanup failed; retry cleanup before removing provider access");
+    }
+  }
+}
+
+// Prepared writes exist before the transaction starts. Defer its cleanup until
+// the writer has adopted the committed ref (notably a live OAuth session).
+const preparedWrite = new AsyncLocalStorage<{ cleanup: Array<() => Promise<void>> }>();
+export async function persistPreparedSecret<T>(
+  prisma: PrismaClient,
+  store: SecretStore,
+  written: Candidate | undefined,
+  commit: () => Promise<T>,
+  adopted?: (result: T) => void,
+): Promise<T> {
+  const state = { cleanup: [] as Array<() => Promise<void>> };
+  try {
+    const result = await preparedWrite.run(state, commit);
+    adopted?.(result);
+    return result;
+  } finally {
+    for (const cleanup of state.cleanup) await cleanup();
+    if (written) await cleanupUnreferenced(prisma, store, [written]);
+  }
+}
+
 type Mutation = {
   where?: Record<string, unknown>;
   data?: Record<string, unknown> | Array<Record<string, unknown>>;
@@ -26,21 +69,12 @@ const parentTables = { User: "user", Space: "spaces", Bot: "bots", Organization:
 export function withSecretPersistence(prisma: PrismaClient, store: SecretStore): PrismaClient {
   const transaction = new AsyncLocalStorage<Cleanup>();
   async function cleanup(candidates: Candidate[]): Promise<void> {
-    for (const row of new Map(candidates.map((row) => [row.ciphertext, row])).values()) {
-      try {
-        if (
-          (await prisma.secret.count({ where: { ciphertext: row.ciphertext } })) ||
-          (await prisma.botSecret.count({ where: { ciphertext: row.ciphertext } })) ||
-          (await prisma.integrationProviderConfig.count({
-            where: { ciphertext: row.ciphertext },
-          }))
-        )
-          continue;
-        await deleteSecretBestEffort(store, row.ciphertext, row.id);
-      } catch {
-        getLogger().warn("Secret cleanup failed; retry cleanup before removing provider access");
-      }
+    const prepared = preparedWrite.getStore();
+    if (prepared) {
+      prepared.cleanup.push(() => cleanupUnreferenced(prisma, store, candidates));
+      return;
     }
+    await cleanupUnreferenced(prisma, store, candidates);
   }
   async function lockedRows(
     state: Cleanup,

@@ -46,8 +46,7 @@ export async function migrateSecrets(
         signal: context.signal,
       });
       const targetRemote = options.direction === "forward" && !row.ephemeral;
-      const done = remote === targetRemote;
-      if (done) {
+      if (remote === targetRemote) {
         counts.verified++;
         options.report?.(row, "verified");
         continue;

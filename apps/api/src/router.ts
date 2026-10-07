@@ -25,6 +25,7 @@ import type {
   ComposioProvider,
   ComputerExecutionLease,
   ConnectorRegistry,
+  getBotSecretMetadata,
   IntegrationProviderSettings,
   MemoryProviderResolver,
   PiOAuthLogins,
@@ -58,7 +59,6 @@ import {
   enqueueTakeoverContinuation,
   expireComputerControl,
   forgetBotSecret,
-  getBotSecretMetadata,
   hasActiveComputerControl,
   isAutoReviewCheckerConfigured,
   isComputerScreenUnavailable,
@@ -76,6 +76,7 @@ import {
   normalizeSecretDestination,
   PushSessionEndedError,
   parseModelSecret,
+  persistPreparedSecret,
   pickReusableConnection,
   planLiveConnectionSync,
   prepareApiInstall,
@@ -3680,27 +3681,27 @@ export function createRouter(deps: RouterDeps) {
           return mcpServerDto(row, await mcpOAuth.statusFor(row, context.actor));
         }),
         update: authed.mcp.servers.update.handler(async ({ context, input }) => {
-          const row = await deps.prisma.$transaction(async (tx) => {
-            // Share the OAuth broker's per-server lock so a stale authorization
-            // snapshot cannot overwrite a simultaneous credential edit.
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mcp-oauth-material'), hashtext(${input.id}))`;
-            const existing = await tx.mcpServer.findFirst({
-              where: {
-                id: input.id,
-                spaceId: context.actor.spaceId,
-                userId: context.actor.userId,
-              },
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const { existing, existingSecret } = await deps.prisma.$transaction(async (tx) => {
+              const existing = await tx.mcpServer.findFirst({
+                where: {
+                  id: input.id,
+                  spaceId: context.actor.spaceId,
+                  userId: context.actor.userId,
+                },
+              });
+              if (!existing) throw new IsolationError();
+              const existingSecret = existing.secretId
+                ? await tx.secret.findFirst({
+                    where: {
+                      id: existing.secretId,
+                      spaceId: context.actor.spaceId,
+                      userId: context.actor.userId,
+                    },
+                  })
+                : null;
+              return { existing, existingSecret };
             });
-            if (!existing) throw new IsolationError();
-            const existingSecret = existing.secretId
-              ? await tx.secret.findFirst({
-                  where: {
-                    id: existing.secretId,
-                    spaceId: context.actor.spaceId,
-                    userId: context.actor.userId,
-                  },
-                })
-              : null;
             let existingMaterial: Record<string, unknown> = {};
             if (existingSecret) {
               try {
@@ -3744,59 +3745,85 @@ export function createRouter(deps: RouterDeps) {
                   )
                 : null;
             const clearing = update.action === "store" && Object.keys(update.material).length === 0;
-            if (stored) {
-              await tx.secret.create({
-                data: {
-                  id: stored.id,
-                  userId: context.actor.userId,
-                  spaceId: context.actor.spaceId,
-                  kind: "mcp",
-                  ciphertext: stored.ciphertext,
-                },
-              });
-            }
-            const updated = await tx.mcpServer.update({
-              where: { id: existing.id },
-              data: {
-                slug: config.slug,
-                name: config.name,
-                description: config.description,
-                transport: config.transport,
-                endpoint: nextEndpoint,
-                command: "command" in config ? config.command : null,
-                args: ("args" in config ? config.args : []) as Prisma.InputJsonValue,
-                env: ("env" in config
-                  ? Object.fromEntries(Object.keys(config.env).map((key) => [key, true]))
-                  : {}) as Prisma.InputJsonValue,
-                headers: ("headers" in config
-                  ? Object.fromEntries(Object.keys(config.headers).map((key) => [key, true]))
-                  : {}) as Prisma.InputJsonValue,
-                enabled: config.enabled,
-                revision: { increment: 1 },
-                ...(stored ? { secretId: stored.id } : clearing ? { secretId: null } : {}),
-              },
-            });
-            if (stored) {
-              if (existing.secretId)
-                await tx.secret.deleteMany({
-                  where: {
-                    id: existing.secretId,
-                    spaceId: context.actor.spaceId,
-                    userId: context.actor.userId,
-                  },
-                });
-            } else if (clearing && existing.secretId) {
-              await tx.secret.deleteMany({
-                where: {
-                  id: existing.secretId,
-                  spaceId: context.actor.spaceId,
-                  userId: context.actor.userId,
-                },
-              });
-            }
-            return updated;
-          });
-          return mcpServerDto(row, await mcpOAuth.statusFor(row, context.actor));
+            const row = await persistPreparedSecret(
+              deps.prisma,
+              deps.secrets,
+              stored ?? undefined,
+              () =>
+                deps.prisma.$transaction(async (tx) => {
+                  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mcp-oauth-material'), hashtext(${input.id}))`;
+                  const current = await tx.mcpServer.findFirst({
+                    where: {
+                      id: input.id,
+                      spaceId: context.actor.spaceId,
+                      userId: context.actor.userId,
+                    },
+                  });
+                  if (!current) throw new IsolationError();
+                  if (
+                    current.revision !== existing.revision ||
+                    current.secretId !== existing.secretId ||
+                    current.endpoint !== existing.endpoint
+                  )
+                    return null;
+                  if (current.secretId)
+                    await tx.$queryRaw`SELECT id FROM secrets WHERE id = ${current.secretId} FOR UPDATE`;
+                  const secret = current.secretId
+                    ? await tx.secret.findFirst({
+                        where: {
+                          id: current.secretId,
+                          spaceId: context.actor.spaceId,
+                          userId: context.actor.userId,
+                        },
+                      })
+                    : null;
+                  if (secret?.ciphertext !== existingSecret?.ciphertext) return null;
+                  if (stored) {
+                    await tx.secret.create({
+                      data: {
+                        id: stored.id,
+                        userId: context.actor.userId,
+                        spaceId: context.actor.spaceId,
+                        kind: "mcp",
+                        ciphertext: stored.ciphertext,
+                      },
+                    });
+                  }
+                  const updated = await tx.mcpServer.update({
+                    where: { id: existing.id },
+                    data: {
+                      slug: config.slug,
+                      name: config.name,
+                      description: config.description,
+                      transport: config.transport,
+                      endpoint: nextEndpoint,
+                      command: "command" in config ? config.command : null,
+                      args: ("args" in config ? config.args : []) as Prisma.InputJsonValue,
+                      env: ("env" in config
+                        ? Object.fromEntries(Object.keys(config.env).map((key) => [key, true]))
+                        : {}) as Prisma.InputJsonValue,
+                      headers: ("headers" in config
+                        ? Object.fromEntries(Object.keys(config.headers).map((key) => [key, true]))
+                        : {}) as Prisma.InputJsonValue,
+                      enabled: config.enabled,
+                      revision: { increment: 1 },
+                      ...(stored ? { secretId: stored.id } : clearing ? { secretId: null } : {}),
+                    },
+                  });
+                  if ((stored || clearing) && existing.secretId)
+                    await tx.secret.deleteMany({
+                      where: {
+                        id: existing.secretId,
+                        spaceId: context.actor.spaceId,
+                        userId: context.actor.userId,
+                      },
+                    });
+                  return updated;
+                }),
+            );
+            if (row) return mcpServerDto(row, await mcpOAuth.statusFor(row, context.actor));
+          }
+          throw new ORPCError("CONFLICT", { message: "MCP credentials changed; retry" });
         }),
         remove: authed.mcp.servers.remove.handler(async ({ context, input }) => {
           const server = await deps.prisma.mcpServer.findFirst({
@@ -5188,15 +5215,12 @@ export function createRouter(deps: RouterDeps) {
         const scope = botSecretScope(context.actor, bot.id);
         let row: Awaited<ReturnType<typeof getBotSecretMetadata>>;
         try {
-          row = await deps.prisma.$transaction(async (tx) => {
-            await storeBotSecret({
-              tx,
-              secretStore: deps.secrets,
-              scope,
-              destination: input.destination,
-              plaintext: input.value,
-            });
-            return getBotSecretMetadata(tx, scope, input.destination.name);
+          row = await storeBotSecret({
+            prisma: deps.prisma,
+            secretStore: deps.secrets,
+            scope,
+            destination: input.destination,
+            plaintext: input.value,
           });
         } catch (error) {
           throw mapBotSecretStoreError(error);

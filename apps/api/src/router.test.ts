@@ -614,6 +614,136 @@ describe("MCP server deletion", () => {
   });
 });
 
+describe("MCP prepared credential updates", () => {
+  it("keeps slow secret I/O outside transactions and retries a concurrent OAuth edit", async () => {
+    let clock = 0;
+    let active = false;
+    let writes = 0;
+    const server = {
+      id: "server",
+      spaceId: "space",
+      userId: "user",
+      slug: "demo",
+      name: "Demo",
+      description: "",
+      enabled: true,
+      transport: "streamable_http",
+      endpoint: "https://mcp.example.test/mcp",
+      secretId: "old",
+      revision: 1,
+      args: [],
+      env: {},
+      headers: {},
+      command: null,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    };
+    const rows = new Map([["old", { id: "old", ciphertext: "old-ref" }]]);
+    const values = new Map([
+      [
+        "old-ref",
+        JSON.stringify({ oauth: { tokens: { access_token: "old", token_type: "bearer" } } }),
+      ],
+    ]);
+    const prisma = {
+      mcpServer: {
+        findFirst: async () => ({ ...server }),
+        update: async ({
+          data,
+        }: {
+          data: { secretId: string; revision: { increment: number } };
+        }) => {
+          Object.assign(server, data, { revision: server.revision + data.revision.increment });
+          return { ...server };
+        },
+      },
+      secret: {
+        findFirst: async ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null,
+        create: async ({ data }: { data: { id: string; ciphertext: string } }) => {
+          rows.set(data.id, data);
+          return data;
+        },
+        deleteMany: async ({ where }: { where: { id: string } }) => {
+          rows.delete(where.id);
+          return { count: 1 };
+        },
+        count: async ({ where }: { where: { ciphertext: string } }) =>
+          [...rows.values()].filter((row) => row.ciphertext === where.ciphertext).length,
+      },
+      botSecret: { count: async () => 0 },
+      integrationProviderConfig: { count: async () => 0 },
+      $executeRaw: async () => 1,
+      $queryRaw: async () => [],
+      async $transaction(callback: (tx: typeof prisma) => Promise<unknown>) {
+        active = true;
+        const start = clock;
+        try {
+          const result = await callback(prisma);
+          if (clock - start > 5000) throw new Error("Transaction expired");
+          return result;
+        } finally {
+          active = false;
+        }
+      },
+    };
+    const secrets = {
+      load: async (ref: string) => {
+        expect(active).toBe(false);
+        clock += 15000;
+        return values.get(ref)!;
+      },
+      put: async (plaintext: string) => {
+        expect(active).toBe(false);
+        clock += 15000;
+        const id = `write-${++writes}`;
+        values.set(id, plaintext);
+        if (writes === 1) {
+          rows.set("concurrent", { id: "concurrent", ciphertext: "concurrent-ref" });
+          values.set(
+            "concurrent-ref",
+            JSON.stringify({
+              oauth: { tokens: { access_token: "concurrent", token_type: "bearer" } },
+            }),
+          );
+          server.secretId = "concurrent";
+          server.revision++;
+        }
+        return { id, ref: id, ciphertext: id };
+      },
+      delete: vi.fn(async (ref: string) => {
+        expect(active).toBe(false);
+        values.delete(ref);
+      }),
+    };
+    const deps = {
+      prisma,
+      secrets,
+      env: {
+        defaultProvider: "fake",
+        defaultModel: "fake-model",
+        webOrigin: "http://127.0.0.1:5173",
+        screenProxySecret: "fake-test-secret",
+        sandboxProvider: "fake",
+      },
+      dataDir: "/tmp/rakazo-router-test",
+    } as unknown as RouterDeps;
+    const actor = {
+      spaceId: "space",
+      userId: "user",
+      email: "user@rakazo.test",
+      isDeploymentOwner: true,
+    } satisfies Actor;
+    const client = createRouterClient(createRouter(deps), { context: { actor } as never });
+    await client.mcp.servers.update({ id: "server", secret: "updated-key" });
+    expect(writes).toBe(2);
+    expect(values.has("write-1")).toBe(false);
+    expect(JSON.parse(values.get(server.secretId)!)).toMatchObject({
+      secret: "updated-key",
+      oauth: { tokens: { access_token: "concurrent" } },
+    });
+  });
+});
+
 describe("MCP loopback endpoints", () => {
   const LOOPBACK = "http://localhost:3100/api/auth/get-session";
 

@@ -1,10 +1,17 @@
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { AdapterContext } from "@rakazo/adapter-kit";
-import type { PrismaClient } from "@rakazo/db";
+import type { Prisma, PrismaClient } from "@rakazo/db";
 import { withTransactionRetry } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
-import { withSecretPersistence } from "./secret-persistence.js";
+import { McpConnector } from "./mcp-connector.js";
+import { McpOAuthBroker } from "./mcp-oauth.js";
+import { McpSession } from "./mcp-transport.js";
+import { createRunSecretWriter } from "./run-secret.js";
+import { persistPreparedSecret, withSecretPersistence } from "./secret-persistence.js";
+import { ComposedSecretStore } from "./secret-store-factory.js";
 import { infisicalFake } from "./secret-store-fake.js";
+import { EncryptedSecretStore } from "./secrets.js";
 
 const context: AdapterContext = {
   operationId: "test",
@@ -19,6 +26,8 @@ type Row = {
   userId?: string;
   spaceId?: string;
   botId?: string;
+  endpoint?: string;
+  secretId?: string | null;
   organizationId?: string;
 };
 type Args = { where?: Record<string, unknown>; data?: Row; create?: Row; update?: Row };
@@ -37,6 +46,7 @@ function database() {
     ["space", [{ id: "space", organizationId: "organization" }]],
     ["organization", [{ id: "organization" }]],
     ["bot", []],
+    ["mcpServer", []],
   ]);
   const matches = (row: Row, where: Record<string, unknown> = {}) =>
     Object.entries(where).every(([key, value]) => {
@@ -48,6 +58,10 @@ function database() {
   const client: Record<string, unknown> = {};
   for (const [table, rows] of tables) {
     client[table] = {
+      findFirst: async (args: Args) => {
+        const row = rows.find((row) => matches(row, args.where));
+        return row ? { ...row } : null;
+      },
       findMany: async (args: Args) =>
         rows.filter((row) => matches(row, args.where)).map((row) => ({ ...row })),
       count: async (args: Args) => rows.filter((row) => matches(row, args.where)).length,
@@ -107,6 +121,7 @@ function database() {
     };
   }
   client.$queryRaw = async (query: { sql: string; values: unknown[] }) => {
+    if (!query.sql) return [];
     const table = query.sql.match(/FROM "([^"]+)"/)?.[1];
     const names: Record<string, string> = {
       secrets: "secret",
@@ -124,6 +139,7 @@ function database() {
         .map((row) => ({ ...row })) ?? []
     );
   };
+  client.$executeRaw = async () => 1;
   client.$extends = (extension: { query: { $allModels: { $allOperations: Hook } } }) => {
     const extended: Record<string, unknown> = {};
     for (const [table] of tables) {
@@ -147,6 +163,7 @@ function database() {
       );
     }
     extended.$queryRaw = client.$queryRaw;
+    extended.$executeRaw = client.$executeRaw;
     extended.$transaction = async (
       callback: ((tx: Record<string, unknown>) => Promise<unknown>) | Promise<unknown>[],
     ) => {
@@ -309,4 +326,286 @@ describe("secret persistence cleanup", () => {
       await store.close();
     }
   });
+});
+
+describe("MCP OAuth prepared persistence", () => {
+  it.each(["encrypted", "infisical"] as const)(
+    "keeps %s sessions alive through their own connect and tool refresh",
+    async (provider) => {
+      const fake = infisicalFake();
+      const store =
+        provider === "encrypted"
+          ? new EncryptedSecretStore("fake-encryption-key")
+          : new InfisicalSecretStore(fake.options);
+      const db = database();
+      const prisma = withSecretPersistence(db.prisma, store);
+      const initial = await store.put(
+        JSON.stringify({ oauth: { tokens: { access_token: "old", token_type: "bearer" } } }),
+        context,
+      );
+      db.tables
+        .get("secret")!
+        .push({ id: initial.id, ciphertext: initial.ciphertext, spaceId: "space", userId: "user" });
+      db.tables.get("mcpServer")!.push({
+        id: "server",
+        endpoint: "https://mcp.example.test/mcp",
+        secretId: initial.id,
+        spaceId: "space",
+        userId: "user",
+      });
+      const assignment = () => ({
+        serverId: "server",
+        allowAllTools: true,
+        server: {
+          ...db.tables.get("mcpServer")![0],
+          slug: "demo",
+          transport: "streamable_http",
+          revision: 1,
+          args: [],
+        },
+      });
+      Object.assign(prisma, {
+        botMcpServer: { findMany: async () => [assignment()], findFirst: async () => assignment() },
+      });
+      const broker = new McpOAuthBroker(prisma, store);
+      const held = new Map<McpSession, OAuthClientProvider>();
+      let refreshOnConnect = false;
+      const closed = new Set<McpSession>();
+      const connect = vi
+        .spyOn(McpSession.prototype, "connectRemote")
+        .mockImplementation(async function (this: McpSession, options) {
+          held.set(this, options.authProvider!);
+          if (refreshOnConnect)
+            await options.authProvider!.saveTokens({
+              access_token: "connect-refreshed",
+              token_type: "bearer",
+            });
+          return { transport: "streamable-http", usedFallback: false };
+        });
+      const close = vi.spyOn(McpSession.prototype, "close").mockImplementation(async function (
+        this: McpSession,
+      ) {
+        closed.add(this);
+      });
+      const list = vi
+        .spyOn(McpSession.prototype, "listTools")
+        .mockResolvedValue({ tools: [{ name: "echo", inputSchema: { type: "object" } }] });
+      const call = vi.spyOn(McpSession.prototype, "callTool").mockImplementation(async function (
+        this: McpSession,
+      ) {
+        await held.get(this)!.saveTokens({ access_token: "tool-refreshed", token_type: "bearer" });
+        expect(closed.has(this)).toBe(false);
+        return { content: [{ type: "text", text: "ok" }] };
+      });
+      const actor = { ...context, botId: "bot" };
+      const other = new McpConnector(prisma, store, {}, broker);
+      const owner = new McpConnector(prisma, store, {}, broker);
+      try {
+        expect(await other.discoverTools(actor)).toHaveLength(1);
+        const otherSession = [...held.keys()][0]!;
+        refreshOnConnect = true;
+        const tools = await owner.discoverTools(actor);
+        expect(tools).toHaveLength(1);
+        expect(closed.has(otherSession)).toBe(true);
+        const ownerSession = [...held.keys()][1]!;
+        expect(closed.has(ownerSession)).toBe(false);
+        refreshOnConnect = false;
+        expect(await owner.discoverTools(actor)).toHaveLength(1);
+        expect(connect).toHaveBeenCalledTimes(2);
+        expect(await other.discoverTools(actor)).toHaveLength(1);
+        const secondOther = [...held.keys()][2]!;
+        const events = [];
+        for await (const event of owner.execute(
+          { tool: tools[0]!.name, args: {}, executionId: "call", route: tools[0]!.route },
+          actor,
+        ))
+          events.push(event);
+        expect(events.find((event) => event.type === "error")).toBeUndefined();
+        expect(events).toMatchObject([{ type: "result" }]);
+        expect(closed.has(secondOther)).toBe(true);
+        expect(closed.has(ownerSession)).toBe(false);
+        expect(await owner.discoverTools(actor)).toHaveLength(1);
+        expect(connect).toHaveBeenCalledTimes(3);
+      } finally {
+        await owner.close();
+        await other.close();
+        await store.close();
+        connect.mockRestore();
+        close.mockRestore();
+        list.mockRestore();
+        call.mockRestore();
+      }
+    },
+  );
+
+  it("keeps slow provider I/O outside the five-second transaction and cleans CAS losers and pre-create failures", async () => {
+    const fake = infisicalFake();
+    const store = new InfisicalSecretStore(fake.options);
+    const db = database();
+    let clock = 0;
+    let active = false;
+    const nativeExtend = db.prisma.$extends.bind(db.prisma);
+    // Virtual time makes a healthy 15-second provider request deterministic.
+    db.prisma.$extends = ((extension: never) => {
+      const client = nativeExtend(extension) as unknown as PrismaClient;
+      const transaction = client.$transaction.bind(client);
+      client.$transaction = (async (callback: never) => {
+        const start = clock;
+        active = true;
+        try {
+          return await transaction(async (tx) => {
+            const result = await (callback as (tx: Prisma.TransactionClient) => Promise<unknown>)(
+              tx,
+            );
+            if (clock - start > 5000) throw new Error("Transaction expired");
+            return result;
+          });
+        } finally {
+          active = false;
+        }
+      }) as typeof client.$transaction;
+      return client;
+    }) as unknown as typeof db.prisma.$extends;
+    const prisma = withSecretPersistence(db.prisma, store);
+    db.tables.get("mcpServer")!.push({
+      id: "server",
+      endpoint: "https://mcp.example.test/mcp",
+      secretId: null,
+      spaceId: "space",
+      userId: "user",
+    });
+    const put = store.put.bind(store);
+    let race = true;
+    const slowPut = vi.spyOn(store, "put").mockImplementation(async (...args) => {
+      expect(active).toBe(false);
+      clock += 15000;
+      const record = await put(...args);
+      if (race) {
+        race = false;
+        const staticRecord = await put(JSON.stringify({ secret: "concurrent-static" }), context);
+        db.tables.get("secret")!.push({
+          id: staticRecord.id,
+          ciphertext: staticRecord.ciphertext,
+          spaceId: "space",
+          userId: "user",
+        });
+        db.tables.get("mcpServer")![0]!.secretId = staticRecord.id;
+      }
+      return record;
+    });
+    const load = store.load.bind(store);
+    const slowLoad = vi.spyOn(store, "load").mockImplementation(async (...args) => {
+      expect(active).toBe(false);
+      clock += 15000;
+      return load(...args);
+    });
+    const broker = new McpOAuthBroker(prisma, store);
+    const oauth = await broker.providerFor(
+      { id: "server", endpoint: "https://mcp.example.test/mcp", secretId: null },
+      context,
+      { material: { oauth: {} } },
+    );
+    try {
+      await oauth!.saveTokens({ access_token: "fresh", token_type: "bearer" });
+      expect(slowPut).toHaveBeenCalledTimes(2);
+      expect(fake.values.size).toBe(1);
+      const row = db.tables.get("secret")![0]!;
+      expect(JSON.parse(await load(row.ciphertext!, row.id))).toMatchObject({
+        secret: "concurrent-static",
+        oauth: { tokens: { access_token: "fresh" } },
+      });
+      const write = await store.put("unused", context);
+      await expect(
+        persistPreparedSecret(prisma, store, write, () =>
+          prisma.$transaction(async () => {
+            throw new Error("pre-create failure");
+          }),
+        ),
+      ).rejects.toThrow("pre-create failure");
+      expect(fake.values.size).toBe(1);
+      expect(clock).toBeGreaterThan(5000);
+    } finally {
+      slowPut.mockRestore();
+      slowLoad.mockRestore();
+      await store.close();
+    }
+  });
+});
+
+describe("prepared run-secret writes", () => {
+  it.each([false, true])(
+    "prepares slow secret input outside the transaction (bot credential: %s)",
+    async (credentialAsk) => {
+      const fake = infisicalFake();
+      const store = new ComposedSecretStore(
+        new EncryptedSecretStore("fake-key"),
+        new InfisicalSecretStore(fake.options),
+      );
+      const db = database();
+      const prisma = withSecretPersistence(db.prisma, store);
+      const credential = credentialAsk
+        ? {
+            name: "example_api",
+            origin: "https://api.example.test",
+            auth: { type: "bearer" as const },
+          }
+        : undefined;
+      Object.assign(prisma, {
+        run: { findFirst: async () => ({ botId: "bot", userId: "user" }) },
+        message: {
+          findFirst: async () => ({
+            blocks: [
+              { kind: "ask", text: "API key", input: "secret", status: "pending", credential },
+            ],
+          }),
+        },
+      });
+      let active = false;
+      let clock = 0;
+      const put = store.put.bind(store);
+      const slow = vi.spyOn(store, "put").mockImplementation(async (...args) => {
+        expect(active).toBe(false);
+        clock += 15000;
+        return put(...args);
+      });
+      const writer = createRunSecretWriter(store);
+      const input = {
+        spaceId: "space",
+        runId: "run",
+        threadId: "thread",
+        messageId: "message",
+        answeredByUserId: "user",
+        answer: "fake-value",
+      };
+      try {
+        await writer.withPrepared!(prisma, input, async (prepared) => {
+          active = true;
+          const start = clock;
+          try {
+            await prisma.$transaction(async (tx) => {
+              await prepared.store({
+                botId: "bot",
+                runId: "run",
+                userId: "user",
+                spaceId: "space",
+                plaintext: input.answer,
+                credential,
+                tx,
+              });
+              if (clock - start > 5000) throw new Error("Transaction expired");
+            });
+          } finally {
+            active = false;
+          }
+        });
+        expect(fake.values.size).toBe(credentialAsk ? 1 : 0);
+        await writer.withPrepared!(prisma, input, async () => false);
+        expect(fake.values.size).toBe(credentialAsk ? 1 : 0);
+        expect(slow).toHaveBeenCalledTimes(2);
+      } finally {
+        slow.mockRestore();
+        await store.close();
+      }
+    },
+  );
 });

@@ -35,6 +35,7 @@ type SessionEntry = {
   material: OAuthMaterial;
   digest?: string;
   ref?: string;
+  recordId?: string;
 };
 type PendingSession = {
   revision: number;
@@ -330,7 +331,7 @@ export class McpConnector implements ConnectorProvider {
       if (existing.ref && server.secretId) {
         try {
           const plaintext = await this.secrets.load(existing.ref, {
-            recordId: server.secretId,
+            recordId: existing.recordId ?? server.secretId,
             signal: context.signal,
           });
           if (credentialDigest(plaintext) !== existing.digest) await this.evict(sessionKey);
@@ -358,15 +359,30 @@ export class McpConnector implements ConnectorProvider {
     }
     if (existing) await this.evict(sessionKey);
 
-    const promise = this.connectSession(server, context, (ref) => {
+    let connected: SessionEntry | undefined;
+    const promise = this.connectSession(server, context, (ref, recordId, digest) => {
       const entry = this.connecting.get(sessionKey);
-      if (entry) entry.ref = ref;
-    }).then(async ({ session, material, ref, digest }) => {
+      if (entry?.promise === promise) entry.ref = ref;
+      const live = this.sessions.get(sessionKey);
+      if (live && live === connected) {
+        live.ref = ref;
+        live.recordId = recordId;
+        live.digest = digest;
+      }
+    }).then(async ({ session, material, ref, digest, recordId }) => {
       if (this.connecting.get(sessionKey)?.invalidated) {
         await session.close();
         throw new Error("Secret changed during MCP connection; retry");
       }
-      this.sessions.set(sessionKey, { session, revision: server.revision, material, ref, digest });
+      connected = {
+        session,
+        revision: server.revision,
+        material,
+        ref,
+        digest,
+        recordId,
+      };
+      this.sessions.set(sessionKey, connected);
       return session;
     });
     this.connecting.set(sessionKey, { revision: server.revision, promise });
@@ -380,8 +396,14 @@ export class McpConnector implements ConnectorProvider {
   private async connectSession(
     server: McpServer,
     context: AdapterContext,
-    onRef: (ref: string) => void,
-  ): Promise<{ session: McpSession; material: OAuthMaterial; ref?: string; digest?: string }> {
+    onRef: (ref: string, recordId: string, digest?: string) => void,
+  ): Promise<{
+    session: McpSession;
+    material: OAuthMaterial;
+    ref?: string;
+    digest?: string;
+    recordId?: string;
+  }> {
     const session = new McpSession({ name: `rakazo-${server.slug}` });
     // Hoisted so a throw after the secret is decoded can still hand the material out.
     let material: OAuthMaterial | undefined;
@@ -395,14 +417,16 @@ export class McpConnector implements ConnectorProvider {
             },
           })
         : null;
-      if (secret) onRef(secret.ciphertext);
+      let ref = secret?.ciphertext;
+      let recordId = secret?.id;
+      if (secret) onRef(secret.ciphertext, secret.id);
       const plaintext = secret
         ? await this.secrets.load(secret.ciphertext, {
             recordId: secret.id,
             signal: context.signal,
           })
         : undefined;
-      const digest = plaintext === undefined ? undefined : credentialDigest(plaintext);
+      let digest = plaintext === undefined ? undefined : credentialDigest(plaintext);
       material = plaintext === undefined ? {} : (JSON.parse(plaintext) as OAuthMaterial);
       const loaded = { material, ...(secret ? { secretId: secret.id } : {}) };
       const args = Array.isArray(server.args) ? server.args.map(String) : [];
@@ -427,7 +451,12 @@ export class McpConnector implements ConnectorProvider {
         );
         const authProvider =
           !localHttp && this.oauth
-            ? await this.oauth.providerFor(server, context, loaded)
+            ? await this.oauth.providerFor(server, context, loaded, (record) => {
+                ref = record.ref;
+                recordId = record.id;
+                digest = credentialDigest(JSON.stringify(record.material));
+                onRef(ref, recordId, digest);
+              })
             : undefined;
         const staticToken = material.secret
           ? material.secret.startsWith("Bearer ")
@@ -454,7 +483,7 @@ export class McpConnector implements ConnectorProvider {
           signal: context.signal,
         });
       }
-      return { session, material, ref: secret?.ciphertext, digest };
+      return { session, material, ref, digest, recordId };
     } catch (error) {
       await session.close().catch(() => undefined);
       // Redact here, while the material is still in hand. This one rejection is handed

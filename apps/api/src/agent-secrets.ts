@@ -1,12 +1,13 @@
 import { ORPCError } from "@orpc/server";
 import type { SecretStore } from "@rakazo/adapter-kit";
+import { persistPreparedSecret } from "@rakazo/adapters";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { Prisma, withTransactionRetry } from "@rakazo/db";
 
 type AgentSecretDeps = {
   prisma: PrismaClient;
-  secrets: Pick<SecretStore, "put">;
+  secrets: SecretStore;
 };
 
 function agentSecretDto(row: { id: string; name: string; createdAt: Date; updatedAt: Date }) {
@@ -52,42 +53,44 @@ export async function putAgentSecret(
       userId: actor.userId,
       signal,
     });
-    return deps.prisma.$transaction(
-      async (tx) => {
-        const existing = await tx.agentSecret.findUnique({
-          where: { spaceId_name: { spaceId: actor.spaceId, name: input.name } },
-          select: { secretId: true },
-        });
-        await tx.secret.create({
-          data: {
-            id: stored.id,
-            userId: actor.userId,
-            spaceId: actor.spaceId,
-            kind: "agent-environment",
-            ciphertext: stored.ciphertext,
-          },
-        });
-        const updated = await tx.agentSecret.upsert({
-          where: { spaceId_name: { spaceId: actor.spaceId, name: input.name } },
-          create: {
-            spaceId: actor.spaceId,
-            createdByUserId: actor.userId,
-            name: input.name,
-            secretId: stored.id,
-          },
-          update: {
-            createdByUserId: actor.userId,
-            secretId: stored.id,
-          },
-        });
-        if (existing && existing.secretId !== stored.id) {
-          await tx.secret.deleteMany({
-            where: { id: existing.secretId, spaceId: actor.spaceId },
+    return persistPreparedSecret(deps.prisma, deps.secrets, stored, () =>
+      deps.prisma.$transaction(
+        async (tx) => {
+          const existing = await tx.agentSecret.findUnique({
+            where: { spaceId_name: { spaceId: actor.spaceId, name: input.name } },
+            select: { secretId: true },
           });
-        }
-        return updated;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          await tx.secret.create({
+            data: {
+              id: stored.id,
+              userId: actor.userId,
+              spaceId: actor.spaceId,
+              kind: "agent-environment",
+              ciphertext: stored.ciphertext,
+            },
+          });
+          const updated = await tx.agentSecret.upsert({
+            where: { spaceId_name: { spaceId: actor.spaceId, name: input.name } },
+            create: {
+              spaceId: actor.spaceId,
+              createdByUserId: actor.userId,
+              name: input.name,
+              secretId: stored.id,
+            },
+            update: {
+              createdByUserId: actor.userId,
+              secretId: stored.id,
+            },
+          });
+          if (existing && existing.secretId !== stored.id) {
+            await tx.secret.deleteMany({
+              where: { id: existing.secretId, spaceId: actor.spaceId },
+            });
+          }
+          return updated;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
     );
   });
   return agentSecretDto(row);

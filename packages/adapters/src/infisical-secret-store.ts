@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
   AdapterContext,
   SecretContext,
@@ -78,7 +78,6 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
     this.lifetime.abort();
     this.token = undefined;
     for (const ref of this.cache.keys()) this.dropCached(ref);
-    this.cache.clear();
     this.lastSeen.clear();
     this.reads.clear();
     this.clearListeners();
@@ -109,9 +108,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
   }
   private remember(ref: string, value: string): void {
     if (this.closed) return;
-    const previous = this.cache.get(ref);
-    if (previous) clearTimeout(previous.timer);
-    this.cache.delete(ref);
+    this.dropCached(ref);
     while (this.cache.size >= (this.options.cacheMaxEntries ?? 256)) {
       const oldest = this.cache.keys().next().value;
       if (oldest !== undefined) this.dropCached(oldest);
@@ -129,7 +126,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
   }
   private key(ref: string, context: SecretContext): string {
     const recordId = typeof context === "string" ? context : context.recordId;
-    const prefix = `rakazo_${createHash("sha256").update(recordId).digest("hex").slice(0, 24)}_`;
+    const prefix = `rakazo_${credentialDigest(recordId).slice(0, 24)}_`;
     const key = ref.slice(INFISICAL_REF_PREFIX.length);
     if (
       !ref.startsWith(INFISICAL_REF_PREFIX) ||
@@ -155,7 +152,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
     context.signal.throwIfAborted();
     if (options.ephemeral) throw new Error("Ephemeral secrets require local encrypted storage");
     const recordId = options.recordId ?? randomUUID();
-    const key = `rakazo_${createHash("sha256").update(recordId).digest("hex").slice(0, 24)}_${randomUUID()}`;
+    const key = `rakazo_${credentialDigest(recordId).slice(0, 24)}_${randomUUID()}`;
     const ref = INFISICAL_REF_PREFIX + key;
     try {
       await this.request(

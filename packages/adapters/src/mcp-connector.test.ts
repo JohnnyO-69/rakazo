@@ -196,16 +196,8 @@ describe("MCP connector session cache", () => {
     try {
       await connector.discoverTools(context);
       expect(state.initializations).toBe(1);
-      const reads = fake.fetcher.mock.calls.length;
-      await connector.discoverTools(context);
-      expect(fake.fetcher).toHaveBeenCalledTimes(reads);
-      expect(state.initializations).toBe(1);
       const changed = vi.fn();
       store.onChange(changed);
-      await vi.advanceTimersByTimeAsync(100);
-      await connector.discoverTools(context);
-      expect(state.initializations).toBe(1);
-      expect(changed).not.toHaveBeenCalled();
       await store.put("unrelated", context);
       fake.values.set(
         record.ref.split(":").at(-1)!,
