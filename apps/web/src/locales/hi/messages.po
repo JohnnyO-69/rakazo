@@ -742,10 +742,6 @@ msgstr "सर्वर तक नहीं पहुंचा जा सका�
 msgid "Cancel"
 msgstr "रद्द करें"
 
-#: src/pages/Paywall.tsx
-msgid "Cancel anytime."
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Cancel new bot"
 msgstr "नया बॉट रद्द करें"

@@ -742,10 +742,6 @@ msgstr "Server nicht erreichbar."
 msgid "Cancel"
 msgstr "Abbrechen"
 
-#: src/pages/Paywall.tsx
-msgid "Cancel anytime."
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Cancel new bot"
 msgstr "Neuen Bot abbrechen"

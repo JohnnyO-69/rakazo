@@ -77,11 +77,6 @@ export function PaywallPage({ status }: { status: BillingStatus }) {
             )}
           </Button>
         ) : null}
-        {status.canManage && status.trialAvailable ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            <Trans>Cancel anytime.</Trans>
-          </p>
-        ) : null}
         {showPortal ? (
           <Button
             type="button"

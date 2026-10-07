@@ -742,10 +742,6 @@ msgstr "Can't reach the server."
 msgid "Cancel"
 msgstr "Cancel"
 
-#: src/pages/Paywall.tsx
-msgid "Cancel anytime."
-msgstr "Cancel anytime."
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Cancel new bot"
 msgstr "Cancel new bot"

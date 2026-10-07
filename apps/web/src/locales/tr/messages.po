@@ -742,10 +742,6 @@ msgstr "Sunucuya ulaşılamıyor."
 msgid "Cancel"
 msgstr "İptal"
 
-#: src/pages/Paywall.tsx
-msgid "Cancel anytime."
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Cancel new bot"
 msgstr "Yeni botu iptal et"

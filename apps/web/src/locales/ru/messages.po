@@ -742,10 +742,6 @@ msgstr "Не удаётся связаться с сервером."
 msgid "Cancel"
 msgstr "Отмена"
 
-#: src/pages/Paywall.tsx
-msgid "Cancel anytime."
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Cancel new bot"
 msgstr "Отменить создание бота"
