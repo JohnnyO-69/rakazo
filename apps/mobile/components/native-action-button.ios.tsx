@@ -1,10 +1,10 @@
-import { Button, Host, ProgressView } from "@expo/ui/swift-ui";
+import { Button, Host, ProgressView, Text } from "@expo/ui/swift-ui";
 import {
   accessibilityLabel as accessibilityName,
   buttonStyle,
-  containerRelativeFrame,
   controlSize,
   disabled as disable,
+  frame,
   progressViewStyle,
   tint,
 } from "@expo/ui/swift-ui/modifiers";
@@ -37,6 +37,7 @@ export function NativeActionButton({
   return (
     <Host
       colorScheme={scheme}
+      ignoreSafeArea="container"
       matchContents={stretches ? { vertical: true } : true}
       style={[
         stretches ? { alignSelf: "stretch", minHeight: 48 } : { alignSelf: "flex-start" },
@@ -44,13 +45,12 @@ export function NativeActionButton({
       ]}
     >
       <Button
-        label={busy ? undefined : label}
+        label={busy || stretches ? undefined : label}
         onPress={inactive ? undefined : onPress}
         role={role}
         modifiers={[
           buttonStyle(swiftStyle(prominence)),
           controlSize(stretches ? "large" : "regular"),
-          ...(stretches ? [containerRelativeFrame({ axes: "horizontal" })] : []),
           disable(inactive),
           ...(color ? [tint(color)] : []),
           ...(busy || (accessibilityLabel && accessibilityLabel !== label)
@@ -58,7 +58,16 @@ export function NativeActionButton({
             : []),
         ]}
       >
-        {busy ? <ProgressView modifiers={[progressViewStyle("circular")]} /> : undefined}
+        {busy ? (
+          <ProgressView
+            modifiers={[
+              progressViewStyle("circular"),
+              ...(stretches ? [frame({ maxWidth: Infinity })] : []),
+            ]}
+          />
+        ) : stretches ? (
+          <Text modifiers={[frame({ maxWidth: Infinity })]}>{label}</Text>
+        ) : undefined}
       </Button>
     </Host>
   );
