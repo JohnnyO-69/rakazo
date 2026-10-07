@@ -93,13 +93,13 @@ async function main() {
         ok: true,
         screenshots: await publishShots(work, path.join(outDir, section.id)),
       });
-    } catch (error) {
+    } catch (_error) {
       results.push({
         id: section.id,
         title: section.title,
         ok: false,
         screenshots: await publishShots(work, path.join(outDir, section.id)).catch(() => []),
-        error: error instanceof Error ? error.message.split("\n")[0] : String(error),
+        error: "flow failed",
       });
     }
   }
@@ -133,7 +133,7 @@ function parseSections(argv: string[]) {
   const sections: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (!arg) continue;
+    if (!arg || arg === "--") continue;
     if (arg === "--section") {
       const value = argv[index + 1];
       if (!value) throw new Error("--section needs a name");
@@ -171,8 +171,7 @@ async function publishShots(work: string, dest: string) {
   const found = new Map<string, string>();
   await walk(work, async (file) => {
     const name = path.basename(file);
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.png$/.test(name)) return;
-    if (/^test-(failed|finished)/i.test(name)) return;
+    if (!/^\d{2}-[a-z0-9-]+\.png$/i.test(name)) return;
     found.set(name, file);
   });
   await rm(dest, { recursive: true, force: true });

@@ -109,6 +109,12 @@ export async function seedIosScreenshotFixture(input: {
       spaceId: me.spaceId,
       userId: me.userId,
     });
+    await ensureActivity(db.prisma, {
+      threadId: researcher.threadId,
+      botId: researcher.id,
+      spaceId: me.spaceId,
+      userId: me.userId,
+    });
     await ensureText(db.prisma, group.threadId, "bot", writer.id, GROUP_READY);
   } finally {
     await db.prisma.$disconnect();
@@ -187,6 +193,47 @@ async function ensureThreadCopy(
       ],
     });
   }
+}
+
+async function ensureActivity(
+  prisma: ReturnType<typeof createDb>["prisma"],
+  input: { threadId: string; botId: string; spaceId: string; userId: string },
+) {
+  const existing = await prisma.run.findFirst({
+    where: { threadId: input.threadId, status: "completed" },
+    select: { id: true },
+  });
+  if (existing) return;
+  const source = await prisma.message.findFirst({
+    where: { threadId: input.threadId, role: "user" },
+    select: { id: true },
+  });
+  const task = await prisma.task.create({
+    data: {
+      spaceId: input.spaceId,
+      userId: input.userId,
+      botId: input.botId,
+      threadId: input.threadId,
+      prompt: "Prepare the fixture workspace",
+      status: "completed",
+    },
+  });
+  await prisma.run.create({
+    data: {
+      spaceId: input.spaceId,
+      userId: input.userId,
+      botId: input.botId,
+      threadId: input.threadId,
+      taskId: task.id,
+      status: "completed",
+      trigger: "user",
+      modelProvider: "scripted",
+      modelId: "scripted",
+      sourceMessageId: source?.id,
+      startedAt: new Date(Date.now() - 2_000),
+      completedAt: new Date(),
+    },
+  });
 }
 
 async function ensureText(

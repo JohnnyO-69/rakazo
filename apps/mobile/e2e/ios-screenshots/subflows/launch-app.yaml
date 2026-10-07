@@ -11,8 +11,9 @@ appId: com.rakazo.app
       visible: "Account"
     commands:
       - tapOn: "Account"
-      - extendedWaitUntil:
-          visible: "Sign out"
+      - scrollUntilVisible:
+          element: "Sign out"
+          direction: DOWN
           timeout: 15000
       - tapOn: "Sign out"
 - extendedWaitUntil:

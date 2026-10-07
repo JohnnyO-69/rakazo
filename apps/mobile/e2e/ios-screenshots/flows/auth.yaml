@@ -23,7 +23,7 @@ name: Auth
 - hideKeyboard
 - tapOn: "Sign in"
 - extendedWaitUntil:
-    visible: "Invalid credentials|Could not sign in"
+    visible: "Invalid email or password|Invalid credentials|Could not sign in"
     timeout: 20000
 - takeScreenshot: 03-sign-in-error
 - tapOn: "Use a custom server|Custom server"

@@ -7,7 +7,7 @@ name: Settings
       RAKAZO_ACTIVE_EMAIL: ${RAKAZO_SCREENSHOT_EMAIL}
 - openLink: "rakazo:///account"
 - extendedWaitUntil:
-    visible: "Change password"
+    visible: ".*Change password.*"
     timeout: 15000
 - takeScreenshot: 01-account
 - tapOn: "Dark"
@@ -60,7 +60,7 @@ name: Settings
 - takeScreenshot: 08-integrations-advanced
 - openLink: "rakazo:///voice"
 - extendedWaitUntil:
-    visible: "This device"
+    visible: ".*This device.*"
     timeout: 15000
 - takeScreenshot: 09-voice
 - openLink: "rakazo:///ai-data-sharing"
@@ -70,7 +70,7 @@ name: Settings
 - takeScreenshot: 10-ai-data-sharing
 - openLink: "rakazo:///routine?botId=${RAKAZO_SCREENSHOT_BOT_ID}&botName=Researcher&routineId=${RAKAZO_SCREENSHOT_ROUTINE_ID}"
 - extendedWaitUntil:
-    visible: "Weekly fixture review"
+    visible: ".*Weekly fixture review.*"
     timeout: 15000
 - takeScreenshot: 11-routine
 - openLink: "rakazo:///bot-settings?botId=${RAKAZO_SCREENSHOT_BOT_ID}"
@@ -81,45 +81,45 @@ name: Settings
 - takeScreenshot: 12-bot-settings
 - openLink: "rakazo:///group-settings?groupId=${RAKAZO_SCREENSHOT_GROUP_ID}"
 - extendedWaitUntil:
-    visible: "Delete group"
+    visible: ".*Delete group.*"
     timeout: 15000
 - takeScreenshot: 13-group-settings
 - openLink: "rakazo:///computer?botId=${RAKAZO_SCREENSHOT_BOT_ID}&name=Researcher"
 - extendedWaitUntil:
-    visible: "Take control|Open computer"
+    visible: ".*Take control.*|.*Open computer.*"
     timeout: 20000
 - takeScreenshot: 14-computer
 - openLink: "rakazo:///account"
 - extendedWaitUntil:
-    visible: "Delete account"
+    visible: ".*Delete account.*"
     timeout: 15000
 - scrollUntilVisible:
-    element: "Current password"
+    element: ".*Current password.*"
     direction: DOWN
     timeout: 10000
 - tapOn: "Current password"
 - inputText: ${RAKAZO_SCREENSHOT_PASSWORD}
 - hideKeyboard
 - scrollUntilVisible:
-    element: "Delete account"
+    element: ".*Delete account.*"
     direction: DOWN
     timeout: 10000
 - tapOn:
-    text: "Delete account"
+    text: ".*Delete account.*"
     index: 1
 - extendedWaitUntil:
-    visible: "Delete your account"
+    visible: ".*Delete your account.*"
     timeout: 10000
 - takeScreenshot: 15-delete-prompt
 - tapOn: "Cancel"
 - openLink: "rakazo:///account"
 - scrollUntilVisible:
-    element: "Language"
+    element: ".*Language.*"
     direction: DOWN
     timeout: 10000
-- tapOn: "Language"
+- tapOn: ".*Language.*"
 - extendedWaitUntil:
-    visible: "English|Cancel"
+    visible: ".*English.*|.*Cancel.*"
     timeout: 10000
 - takeScreenshot: 16-language
 - tapOn: "Cancel"
