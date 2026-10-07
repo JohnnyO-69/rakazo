@@ -14,13 +14,19 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { AppMark } from "../components/app-mark";
 import { useAvatarStyle } from "../components/avatar-style";
 import { BotAvatar } from "../components/bot-avatar";
 import { NativeActionButton } from "../components/native-action-button";
 import { NativeSegmentedControl } from "../components/native-segmented-control";
-import { NativeSwitch } from "../components/native-switch";
 import { NativeSymbol } from "../components/native-symbol";
-import { Chevron } from "../components/row-accessories";
+import {
+  SettingsGroup,
+  SettingsLabel,
+  SettingsRow,
+  SettingsSwitch,
+  useStackedSettings,
+} from "../components/settings-group";
 import type { MobileBot, MobileMe } from "../lib/api";
 import {
   currentApiBase,
@@ -107,6 +113,7 @@ export default function Account() {
   );
   const loadRemoteImagesLabel = t("Load web images automatically");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const stackOptions = useStackedSettings();
   const styles = useThemedStyles(createAccountStyles);
   const versionInfo = getAppVersionInfo();
   const updateLabel = formatUpdateLabel(versionInfo.update, t);
@@ -128,17 +135,18 @@ export default function Account() {
   }, []);
 
   const usageBlock = (
-    <View accessibilityLabel={t("Usage")} style={styles.profile}>
-      <Text style={styles.settingsTitle}>{t("Usage")}</Text>
-      {usage ? (
-        <Text style={styles.email}>
-          {t("{runs} runs · {tokens} tokens", {
-            runs: usage.runs,
-            tokens: usage.inputTokens + usage.outputTokens,
-          })}
-        </Text>
-      ) : null}
-    </View>
+    <SettingsRow
+      accessible
+      title={t("Usage")}
+      detail={
+        usage
+          ? t("{runs} runs · {tokens} tokens", {
+              runs: usage.runs,
+              tokens: usage.inputTokens + usage.outputTokens,
+            })
+          : undefined
+      }
+    />
   );
 
   useFocusEffect(
@@ -272,25 +280,32 @@ export default function Account() {
 
   return (
     <SafeAreaView edges={["bottom"]} style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
-        {focus === "usage" ? usageBlock : null}
-        <View style={styles.profile}>
-          <Text style={styles.name}>{me?.name || t("Your account")}</Text>
-          {me?.email ? <Text style={styles.email}>{me.email}</Text> : null}
-        </View>
-        {focus !== "usage" ? usageBlock : null}
+      <ScrollView
+        contentContainerStyle={[styles.content, stackOptions && styles.compactContent]}
+        contentInsetAdjustmentBehavior="automatic"
+      >
+        {focus === "usage" ? <SettingsGroup>{usageBlock}</SettingsGroup> : null}
+        <SettingsGroup>
+          <SettingsRow
+            accessible
+            detail={me?.email || undefined}
+            prominent
+            title={me?.name || t("Your account")}
+          />
+          {focus !== "usage" ? usageBlock : null}
+        </SettingsGroup>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push("/change-password")}
-          style={({ pressed }) => [styles.settingsButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.settingsTitle}>{t("Change password")}</Text>
-          <Chevron />
-        </Pressable>
+        <SettingsGroup>
+          <SettingsRow
+            accessibilityRole="button"
+            chevron="right"
+            onPress={() => router.push("/change-password")}
+            title={t("Change password")}
+          />
+        </SettingsGroup>
 
-        <View accessibilityLabel={t("Appearance")} style={styles.avatarSection}>
-          <Text style={styles.settingsTitle}>{t("Appearance")}</Text>
+        <View accessibilityLabel={t("Appearance")} style={styles.section}>
+          <SettingsLabel>{t("Appearance")}</SettingsLabel>
           <NativeSegmentedControl
             accessibilityLabel={t("Appearance")}
             onChange={(value) => void setAppearancePreference(value)}
@@ -303,9 +318,9 @@ export default function Account() {
           />
         </View>
 
-        <View accessibilityLabel={t("Avatar style")} style={styles.avatarSection}>
-          <Text style={styles.settingsTitle}>{t("Avatars")}</Text>
-          <View style={styles.avatarOptions}>
+        <View accessibilityLabel={t("Avatar style")} style={styles.section}>
+          <SettingsLabel>{t("Avatars")}</SettingsLabel>
+          <View style={[styles.options, stackOptions && styles.optionsStacked]}>
             {(["robot", "organic"] as const).map((style) => {
               const selected = avatarStyle === style;
               const styleLabel = style === "robot" ? t("Robot") : t("Organic");
@@ -317,7 +332,12 @@ export default function Account() {
                   accessibilityState={{ selected, disabled: avatarPending }}
                   disabled={avatarPending}
                   onPress={() => void selectAvatarStyle(style)}
-                  style={({ pressed }) => [styles.avatarOption, pressed && styles.pressed]}
+                  style={({ pressed }) => [
+                    styles.option,
+                    styles.avatarOption,
+                    !stackOptions && styles.optionSideBySide,
+                    pressed && styles.pressed,
+                  ]}
                 >
                   <BotAvatar
                     color={style === "robot" ? "#8B5CF6" : "#D62F8B"}
@@ -325,7 +345,7 @@ export default function Account() {
                     size={42}
                     variant={style}
                   />
-                  <Text style={styles.avatarLabel}>{styleLabel}</Text>
+                  <Text style={styles.optionLabel}>{styleLabel}</Text>
                   <NativeSymbol
                     android={selected ? "checkmark-circle" : "ellipse-outline"}
                     color={selected ? native.label : native.tertiaryLabel}
@@ -336,34 +356,30 @@ export default function Account() {
               );
             })}
           </View>
-          {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
+          <SettingsGroup>
+            {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
+          </SettingsGroup>
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("Language")}
-          accessibilityValue={{ text: UI_LOCALE_LABELS[locale] }}
-          accessibilityState={{ disabled: localeSaving }}
-          disabled={localeSaving}
-          onPress={openLanguagePicker}
-          style={({ pressed }) => [
-            styles.settingsButton,
-            pressed && styles.pressed,
-            localeSaving && { opacity: 0.6 },
-          ]}
-        >
-          <Text style={styles.settingsTitle}>{t("Language")}</Text>
-          <View style={styles.settingsTrailing}>
-            <Text style={styles.settingsValue}>{UI_LOCALE_LABELS[locale]}</Text>
-            <Chevron />
-          </View>
-        </Pressable>
-        {localeError ? <Text style={styles.error}>{localeError}</Text> : null}
+        <SettingsGroup>
+          <SettingsRow
+            accessibilityRole="button"
+            accessibilityLabel={t("Language")}
+            accessibilityValue={{ text: UI_LOCALE_LABELS[locale] }}
+            accessibilityState={{ disabled: localeSaving }}
+            chevron="right"
+            dimmed={localeSaving}
+            disabled={localeSaving}
+            onPress={openLanguagePicker}
+            title={t("Language")}
+            value={UI_LOCALE_LABELS[locale]}
+          />
+          {localeError ? <Text style={styles.error}>{localeError}</Text> : null}
+        </SettingsGroup>
 
         {Platform.OS === "android" ? (
-          <View accessibilityLabel={t("Notifications")} style={styles.profile}>
-            <Text style={styles.settingsTitle}>{t("Notifications")}</Text>
-            <NotificationSwitch
+          <SettingsGroup accessibilityLabel={t("Notifications")} label={t("Notifications")}>
+            <SettingsSwitch
               label={t("Live working status")}
               detail={t("While agents are working")}
               value={notifications.liveConnection}
@@ -372,14 +388,14 @@ export default function Account() {
                 void updateNotifications({ ...notifications, liveConnection })
               }
             />
-            <NotificationSwitch
+            <SettingsSwitch
               label={t("Agent messages")}
               detail={t("Replies and completed work")}
               value={notifications.messages}
               disabled={notificationPending || !notificationsReady}
               onChange={(messages) => void updateNotifications({ ...notifications, messages })}
             />
-            <NotificationSwitch
+            <SettingsSwitch
               label={t("Scheduled tasks")}
               detail={t("Alerts from routines")}
               value={notifications.scheduledTasks}
@@ -388,7 +404,7 @@ export default function Account() {
                 void updateNotifications({ ...notifications, scheduledTasks })
               }
             />
-            <NotificationSwitch
+            <SettingsSwitch
               label={t("Needs attention")}
               detail={t("Questions, approvals, takeover")}
               value={notifications.needsAttention}
@@ -397,129 +413,85 @@ export default function Account() {
                 void updateNotifications({ ...notifications, needsAttention })
               }
             />
-            <Pressable
+            <SettingsRow
               accessibilityRole="button"
               onPress={() => void openPromotedNotificationSettings()}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: native.label, fontSize: 14 }}>{t("Live update settings")}</Text>
-            </Pressable>
-            <Pressable
+              title={t("Live update settings")}
+            />
+            <SettingsRow
               accessibilityRole="button"
               onPress={() => void openLiveNotificationSettings()}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: native.label, fontSize: 14 }}>
-                {t("Notification settings")}
-              </Text>
-            </Pressable>
+              title={t("Notification settings")}
+            />
             {notificationError ? <Text style={styles.error}>{notificationError}</Text> : null}
-          </View>
+          </SettingsGroup>
         ) : null}
 
-        <View style={styles.group}>
-          <Pressable
+        <SettingsGroup>
+          <SettingsRow
             accessibilityRole="button"
+            chevron="right"
             disabled={pending}
             onPress={() => router.push("/models")}
-            style={({ pressed }) => [styles.groupRow, pressed && styles.pressed]}
-          >
-            <Text style={styles.settingsTitle}>{t("Models")}</Text>
-            <Chevron />
-          </Pressable>
-
-          <Pressable
+            title={t("Models")}
+          />
+          <SettingsRow
             accessibilityRole="button"
+            chevron="right"
             disabled={pending}
             onPress={() => router.push("/voice")}
-            style={({ pressed }) => [
-              styles.groupRow,
-              styles.groupDivider,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.settingsTitle}>{t("Voice")}</Text>
-            <Chevron />
-          </Pressable>
-
-          <Pressable
+            title={t("Voice")}
+          />
+          <SettingsRow
             accessibilityRole="button"
+            chevron="right"
             disabled={pending}
             onPress={() => router.push("/integrations")}
-            style={({ pressed }) => [
-              styles.groupRow,
-              styles.groupDivider,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.settingsTitle}>{t("Integrations")}</Text>
-            <Chevron />
-          </Pressable>
-
-          <Pressable
+            title={t("Integrations")}
+          />
+          <SettingsRow
             accessibilityRole="button"
+            chevron="right"
             disabled={pending}
             onPress={() => router.push("/ai-data-sharing")}
-            style={({ pressed }) => [
-              styles.groupRow,
-              styles.groupDivider,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.settingsTitle}>{t("AI data sharing")}</Text>
-            <Chevron />
-          </Pressable>
-
+            title={t("AI data sharing")}
+          />
           {me?.isDeploymentOwner ? (
-            <Pressable
+            <SettingsRow
               accessibilityRole="button"
+              chevron="right"
               onPress={() => router.push("/integration-setup")}
-              style={({ pressed }) => [
-                styles.groupRow,
-                styles.groupDivider,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.settingsTitle}>{t("Server integrations")}</Text>
-              <Chevron />
-            </Pressable>
+              title={t("Server integrations")}
+            />
           ) : null}
-        </View>
+        </SettingsGroup>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("Advanced")}
-          accessibilityState={{ expanded: advancedOpen }}
-          onPress={() => setAdvancedOpen((open) => !open)}
-          style={({ pressed }) => [styles.settingsButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.settingsTitle}>{t("Advanced")}</Text>
-          <Chevron expanded={advancedOpen} />
-        </Pressable>
-        {advancedOpen ? (
-          <View style={styles.avatarSection}>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t("Stream replies")}</Text>
-              <NativeSwitch
-                accessibilityLabel={t("Stream replies")}
-                onValueChange={(checked) =>
-                  void setResponseStreamingPreference(checked ? "on" : "off")
-                }
-                value={streamReplies}
-              />
-            </View>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{loadRemoteImagesLabel}</Text>
-              <NativeSwitch
-                accessibilityLabel={loadRemoteImagesLabel}
-                onValueChange={(checked) => void setRemoteImagesPreference(checked ? "on" : "off")}
-                value={loadRemoteImages}
-              />
-            </View>
-          </View>
-        ) : null}
+        <SettingsGroup>
+          <SettingsRow
+            accessibilityRole="button"
+            accessibilityLabel={t("Advanced")}
+            accessibilityState={{ expanded: advancedOpen }}
+            chevron={advancedOpen ? "down" : "right"}
+            onPress={() => setAdvancedOpen((open) => !open)}
+            title={t("Advanced")}
+          />
+          {advancedOpen ? (
+            <SettingsSwitch
+              label={t("Stream replies")}
+              value={streamReplies}
+              onChange={(checked) => void setResponseStreamingPreference(checked ? "on" : "off")}
+            />
+          ) : null}
+          {advancedOpen ? (
+            <SettingsSwitch
+              label={loadRemoteImagesLabel}
+              value={loadRemoteImages}
+              onChange={(checked) => void setRemoteImagesPreference(checked ? "on" : "off")}
+            />
+          ) : null}
+        </SettingsGroup>
 
-        <View>
+        <View style={styles.section}>
           <NativeActionButton
             disabled={pending}
             fill
@@ -527,60 +499,61 @@ export default function Account() {
             onPress={() => void handleSignOut()}
             prominence="secondary"
           />
-          {signOutError ? (
-            <Text accessibilityRole="alert" style={styles.error}>
-              {signOutError}
-            </Text>
-          ) : null}
+          <SettingsGroup>
+            {signOutError ? (
+              <Text accessibilityRole="alert" style={styles.error}>
+                {signOutError}
+              </Text>
+            ) : null}
+          </SettingsGroup>
         </View>
 
         {archivedBots.length > 0 ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push("/archived-bots")}
-            style={styles.settingsButton}
-          >
-            <Text style={styles.settingsTitle}>{t("Archived bots")}</Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Text style={styles.email}>{archivedBots.length}</Text>
-              <Chevron />
+          <SettingsGroup>
+            <SettingsRow
+              accessibilityRole="button"
+              chevron="right"
+              onPress={() => router.push("/archived-bots")}
+              title={t("Archived bots")}
+              value={String(archivedBots.length)}
+            />
+          </SettingsGroup>
+        ) : null}
+
+        <View style={styles.about}>
+          <AppMark />
+          {versionInfo.nativeLabel || updateLabel ? (
+            <View
+              accessibilityLabel={versionAccessibility}
+              accessibilityRole="summary"
+              style={styles.versionFooter}
+            >
+              {versionInfo.nativeLabel ? (
+                <Text style={styles.versionLine}>{versionInfo.nativeLabel}</Text>
+              ) : null}
+              {updateLabel ? <Text style={styles.versionLine}>{updateLabel}</Text> : null}
             </View>
-          </Pressable>
-        ) : null}
+          ) : null}
+        </View>
 
-        {versionInfo.nativeLabel || updateLabel ? (
-          <View
-            accessibilityLabel={versionAccessibility}
-            accessibilityRole="summary"
-            style={styles.versionFooter}
-          >
-            {versionInfo.nativeLabel ? (
-              <Text style={styles.versionLine}>{versionInfo.nativeLabel}</Text>
-            ) : null}
-            {updateLabel ? <Text style={styles.versionLine}>{updateLabel}</Text> : null}
-          </View>
-        ) : null}
-
-        <View>
-          <Pressable
+        <SettingsGroup>
+          <SettingsRow
             accessibilityRole="button"
+            destructive
+            dimmed={pending}
             disabled={pending}
             onPress={requestDeletion}
-            style={({ pressed }) => [
-              styles.settingsButton,
-              pressed && styles.pressed,
-              pending && styles.disabled,
-            ]}
-          >
-            <Text style={styles.destructiveTitle}>{t("Delete account")}</Text>
-            {pending ? <ActivityIndicator color={mobileTokens().destructive} /> : null}
-          </Pressable>
+            title={t("Delete account")}
+            trailing={
+              pending ? <ActivityIndicator color={mobileTokens().destructive} /> : undefined
+            }
+          />
           {!deleteOpen && deleteError ? (
             <Text accessibilityRole="alert" style={styles.error}>
               {deleteError}
             </Text>
           ) : null}
-        </View>
+        </SettingsGroup>
       </ScrollView>
       {deleteOpen ? (
         <Modal transparent animationType="fade" onRequestClose={closeDeletePrompt}>
@@ -656,163 +629,77 @@ export default function Account() {
   );
 }
 
-function NotificationSwitch({
-  label,
-  detail,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  detail: string;
-  value: boolean;
-  disabled: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <View
-      style={{
-        minHeight: 54,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-      }}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: native.label, fontSize: 15 }}>{label}</Text>
-        <Text style={{ color: native.secondaryLabel, fontSize: 12.5, marginTop: 2 }}>{detail}</Text>
-      </View>
-      <NativeSwitch
-        accessibilityHint={detail}
-        accessibilityLabel={label}
-        disabled={disabled}
-        onValueChange={onChange}
-        value={value}
-      />
-    </View>
-  );
-}
-
 function createAccountStyles() {
   const tokens = mobileTokens();
   return StyleSheet.create({
     screen: {
       flex: 1,
-      backgroundColor: native.page,
+      backgroundColor: native.groupedPage,
     },
     content: {
       flexGrow: 1,
-      padding: 20,
-      gap: 20,
-    },
-    profile: {
-      borderRadius: 16,
-      backgroundColor: native.fill,
-      padding: 18,
-      gap: 4,
-    },
-    name: {
-      color: native.label,
-      fontSize: 20,
-      fontWeight: "600",
-    },
-    email: {
-      color: native.secondaryLabel,
-      fontSize: 15,
-    },
-    settingsButton: {
-      minHeight: 62,
-      borderRadius: 14,
-      backgroundColor: native.fill,
       paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingTop: 16,
+      paddingBottom: 32,
+      gap: 28,
+    },
+    compactContent: {
+      paddingHorizontal: 8,
+    },
+    section: {
+      gap: 7,
+    },
+    options: {
       flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    group: {
-      borderRadius: 14,
-      backgroundColor: native.fill,
-      overflow: "hidden",
-    },
-    groupRow: {
-      minHeight: 52,
-      paddingHorizontal: 16,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    groupDivider: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: native.separator,
-    },
-    avatarSection: {
-      borderRadius: 16,
-      backgroundColor: native.fill,
-      padding: 18,
-      gap: 14,
-    },
-    avatarOptions: {
-      flexDirection: "row",
-      gap: 12,
-    },
-    avatarOption: {
-      flex: 1,
-      paddingVertical: 4,
-      alignItems: "center",
-      justifyContent: "center",
       gap: 8,
     },
-    avatarLabel: {
-      color: native.label,
-      fontSize: 14,
-      fontWeight: "600",
+    optionsStacked: {
+      flexDirection: "column",
     },
-    settingsTitle: {
-      color: native.label,
-      fontSize: 17,
-      fontWeight: "600",
-    },
-    switchRow: {
-      minHeight: 44,
-      flexDirection: "row",
+    option: {
+      minHeight: 48,
+      borderRadius: 14,
+      borderCurve: "continuous",
+      borderWidth: 2,
+      borderColor: "transparent",
+      backgroundColor: native.groupedCell,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
       alignItems: "center",
-      gap: 12,
+      justifyContent: "center",
     },
-    switchLabel: {
+    optionSideBySide: {
       flex: 1,
+    },
+    avatarOption: {
+      minHeight: 96,
+      gap: 8,
+    },
+    optionLabel: {
       color: native.label,
       fontSize: 15,
-    },
-    settingsTrailing: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      minWidth: 0,
-    },
-    settingsValue: {
-      color: native.secondaryLabel,
-      fontSize: 15,
-    },
-    versionFooter: {
-      marginTop: 4,
-      alignItems: "center",
-      gap: 2,
-    },
-    versionLine: {
-      color: native.tertiaryLabel,
-      fontSize: 12,
+      fontWeight: "600",
       textAlign: "center",
     },
-    destructiveTitle: {
-      color: tokens.destructive,
-      fontSize: 17,
-      fontWeight: "600",
+    about: {
+      alignItems: "center",
+      gap: 16,
+      paddingTop: 8,
+      paddingBottom: 22,
+    },
+    versionFooter: {
+      alignItems: "center",
+    },
+    versionLine: {
+      color: native.secondaryLabel,
+      fontSize: 13,
+      textAlign: "center",
     },
     error: {
       color: tokens.destructive,
-      fontSize: 14,
-      marginTop: 10,
+      fontSize: 15,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
     },
     dialogOverlay: {
       flex: 1,
@@ -878,7 +765,7 @@ function createAccountStyles() {
       opacity: 0.45,
     },
     pressed: {
-      opacity: 0.7,
+      backgroundColor: native.fillPressed,
     },
   });
 }
