@@ -45,6 +45,11 @@ test.describe("Grok Bot alternative", () => {
     await expect(
       page.getByRole("heading", { name: "How is Rakazo different from Grok Bot?" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "Can I use my Claude Pro/Max or ChatGPT Plus/Pro subscription?",
+      }),
+    ).toBeVisible();
 
     const jsonLd = await page.locator('script[type="application/ld+json"]').textContent();
     expect(jsonLd).toContain('"@type":"FAQPage"');
@@ -52,6 +57,7 @@ test.describe("Grok Bot alternative", () => {
     expect(jsonLd).toContain("Can I self-host Grok Bot?");
     expect(jsonLd).toContain("How is Rakazo different from Grok Bot?");
     expect(jsonLd).toContain("does not publish its source for you to run");
+    expect(jsonLd).toContain("Rakazo does not pay the model bill.");
 
     await expect(page.locator(".site-nav").getByRole("link", { name: "Grok Bot" })).toBeVisible();
     const footerGrok = page

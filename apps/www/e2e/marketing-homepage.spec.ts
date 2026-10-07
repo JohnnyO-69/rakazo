@@ -89,6 +89,73 @@ test.describe("marketing homepage", () => {
   });
 });
 
+test.describe("homepage models, FAQ, and roster", () => {
+  test("names providers, answers the subscription question, and keeps an eight-card grid", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/");
+    await page.waitForLoadState("load");
+
+    const selfHost = page.locator("#selfhost");
+    await expect(selfHost).toContainText("Claude Pro/Max");
+    await expect(selfHost).toContainText("Sonnet");
+    await expect(selfHost).toContainText("Opus");
+    await expect(selfHost).toContainText("ChatGPT Plus/Pro");
+    await expect(selfHost).toContainText("OpenRouter");
+    await expect(selfHost).toContainText("Ollama");
+    await expect(selfHost).toContainText("LM Studio");
+    await expect(selfHost).toContainText("This Mac");
+    await expect(selfHost).toContainText("This computer");
+    await expect(selfHost).toContainText("Mac Mini");
+
+    const faq = page.locator("#faq");
+    await expect(
+      faq.getByRole("heading", {
+        name: "Can I use my Claude Pro/Max or ChatGPT Plus/Pro subscription?",
+      }),
+    ).toBeVisible();
+    await expect(faq).toContainText("Rakazo does not pay the model bill.");
+    await expect(faq.getByRole("heading", { level: 3 })).toHaveCount(3);
+    const jsonLd = await page.locator('script[type="application/ld+json"]').textContent();
+    expect(jsonLd).toContain('"@type":"FAQPage"');
+    expect(jsonLd).toContain("Can I use my Claude Pro/Max or ChatGPT Plus/Pro subscription?");
+
+    const roster = page.locator("#roster");
+    const cards = roster.locator(".roster-card");
+    await expect(cards).toHaveCount(8);
+    await expect(roster.getByRole("heading", { name: "Coding Agent" })).toBeVisible();
+    await expect(roster.getByRole("heading", { name: "Bug Triage" })).toHaveCount(0);
+    const columns = await roster.locator(".card-grid-4").evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").length,
+    );
+    expect(columns).toBe(4);
+    const tops = await cards.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().top),
+    );
+    expect(new Set(tops.slice(0, 4)).size).toBe(1);
+    expect(new Set(tops.slice(4)).size).toBe(1);
+    expect(tops[4]).toBeGreaterThan(tops[0] ?? 0);
+
+    await faq.scrollIntoViewIfNeeded();
+    await captureScreenshot(page, testInfo, "06-marketing-homepage-faq");
+    await roster.scrollIntoViewIfNeeded();
+    await captureScreenshot(page, testInfo, "07-marketing-homepage-roster");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(cards).toHaveCount(8);
+    const mobileColumns = await roster.locator(".card-grid-4").evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").length,
+    );
+    expect(mobileColumns).toBe(1);
+    const overflow = await roster.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth + 1,
+    );
+    expect(overflow).toBe(true);
+    await captureScreenshot(page, testInfo, "08-marketing-homepage-roster-mobile");
+  });
+});
+
 test.describe("marketing not-found page", () => {
   test("is noindex with no canonical or og:url", async ({ page }) => {
     const response = await page.goto("/this-page-does-not-exist/");

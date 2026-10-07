@@ -20,6 +20,11 @@ type JsonNode = {
   operatingSystem?: string;
   isAccessibleForFree?: boolean;
   offers?: { price?: string; priceCurrency?: string };
+  mainEntity?: Array<{
+    "@type": string;
+    name: string;
+    acceptedAnswer: { "@type": string; text: string };
+  }>;
 };
 
 describe("homepage structured data", () => {
@@ -33,6 +38,32 @@ describe("homepage structured data", () => {
     expect(organization?.legalName).toBe("Inbox Zero Inc.");
     expect(organization).not.toHaveProperty("alternateName");
     expect(website?.name).toBe("Rakazo");
+  });
+
+  it("publishes homepage FAQ entries when they are passed", () => {
+    const withFaq = homeStructuredData({
+      pageUrl: "https://rakazo.com/",
+      title: "Rakazo",
+      description: "Page description",
+      siteDescription: "Site description",
+      inLanguage: "en",
+      defaultInLanguage: "en",
+      availableLanguages: ["English"],
+      faq: [{ question: "Can I sign in?", answer: "Yes." }],
+    });
+    const faqPage = (withFaq["@graph"] as readonly JsonNode[]).find(
+      (node) => node["@type"] === "FAQPage",
+    );
+    expect(faqPage).toMatchObject({
+      "@type": "FAQPage",
+      mainEntity: [
+        {
+          "@type": "Question",
+          name: "Can I sign in?",
+          acceptedAnswer: { "@type": "Answer", text: "Yes." },
+        },
+      ],
+    });
   });
 
   it("describes Rakazo as the free multi-platform application", () => {

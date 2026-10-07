@@ -66,6 +66,11 @@ describe("agent content negotiation", () => {
     expect(AGENT_INSTRUCTIONS).toContain("## When to use Rakazo");
     expect(AGENT_INSTRUCTIONS).toContain("## How an agent should use Rakazo");
     expect(AGENT_INSTRUCTIONS).toContain("Self-hosting is available now");
+    expect(AGENT_INSTRUCTIONS).toContain("Claude Pro/Max");
+    expect(HOME_MARKDOWN).toContain(
+      "Can I use my Claude Pro/Max or ChatGPT Plus/Pro subscription?",
+    );
+    expect(HOME_MARKDOWN).toContain("Coding Agent");
   });
 
   it("returns cache-safe Markdown responses and omits bodies for HEAD", async () => {
