@@ -4,6 +4,7 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Auth, AuthEnv } from "./index.js";
 import { createAuth } from "./index.js";
+import { isCurrentOidcAccount, oidcAccountSubject } from "./oidc.js";
 
 const state = vi.hoisted(() => ({ db: {} as Record<string, Record<string, unknown>[]> }));
 vi.mock("better-auth/adapters/prisma", () => ({ prismaAdapter: () => memoryAdapter(state.db) }));
@@ -314,6 +315,50 @@ describe("OIDC callbacks", () => {
     expect(rows("account")).toHaveLength(2);
     expect(new Set(rows("account").map((account) => account.userId)).size).toBe(1);
   });
+  it("offers linking after issuer replacement, retains old links, and preserves linking safety", async () => {
+    setup();
+    await request("/sign-up/email", {
+      email: "sso@example.test",
+      password: "test-password-123",
+      name: "Local",
+    });
+    await request(await start(undefined, true));
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: true });
+    const oldAccountId = rows("account").find(
+      (account) => account.providerId === "oidc",
+    )!.accountId;
+    auth.disposeOidcDiscovery();
+    activeIssuer = "https://replacement.example.test";
+    setup({
+      oidc: {
+        issuer: activeIssuer,
+        clientId: "test-client",
+        clientSecret: "test-client-secret",
+        name: "Replacement",
+        scopes: ["openid"],
+        allowSignupBypass: false,
+      },
+    });
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: false });
+    const rejected = await request(
+      await start({ sub: "subject-1", email: "sso@example.test", email_verified: false }, true),
+    );
+    expect(rejected.headers.get("location")).toContain("error=unable_to_link_account");
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: false });
+    const mismatch = await request(
+      await start(
+        { sub: "subject-1", email: "different@example.test", email_verified: true },
+        true,
+      ),
+    );
+    expect(mismatch.headers.get("location")).toContain("error=");
+    const linked = await request(await start(undefined, true));
+    expect(linked.headers.get("location")).toBe(`${origin}/app`);
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: true });
+    expect(rows("account").filter((account) => account.providerId === "oidc")).toHaveLength(2);
+    expect(rows("account").some((account) => account.accountId === oldAccountId)).toBe(true);
+    expect(new Set(rows("account").map((account) => account.userId)).size).toBe(1);
+  });
   it.each([false, undefined])("refuses unverified explicit linking (%s)", async (verified) => {
     setup();
     await request("/sign-up/email", {
@@ -562,4 +607,19 @@ describe("SSO-only account deletion", () => {
     expect((await request("/delete-user", { password: "wrong-password" })).status).toBe(400);
     expect((await request("/delete-user", { password: "test-password-123" })).status).toBe(200);
   });
+});
+
+it("counts only stored OIDC subjects bound to the current issuer", () => {
+  const account = {
+    providerId: "oidc",
+    accountId: oidcAccountSubject(issuer, "subject-1"),
+    idToken: jwt({ sub: "subject-1" }),
+  };
+  expect(isCurrentOidcAccount(account, issuer)).toBe(true);
+  expect(isCurrentOidcAccount(account, undefined)).toBe(false);
+  expect(isCurrentOidcAccount(account, "https://replacement.example.test")).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, providerId: "credential" }, issuer)).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, accountId: "unbound" }, issuer)).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, idToken: null }, issuer)).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, idToken: "malformed" }, issuer)).toBe(false);
 });

@@ -27,9 +27,7 @@ export function oidcDiscovery(config: OidcConfig) {
         accountSubject: ({ profile }) => {
           if (typeof profile.sub !== "string" || !profile.sub.trim()) return "";
           // Subjects are unique within an issuer, never across different IdPs.
-          return createHash("sha256")
-            .update(JSON.stringify([config.issuer, profile.sub]))
-            .digest("hex");
+          return oidcAccountSubject(config.issuer, profile.sub);
         },
         requireIdTokenVerification: true,
         // Every round-trip can serve as fresh authentication for account deletion.
@@ -141,4 +139,30 @@ export function oidcDiscovery(config: OidcConfig) {
       clearTimeout(timer);
     },
   };
+}
+
+export function oidcAccountSubject(issuer: string, subject: string) {
+  return createHash("sha256")
+    .update(JSON.stringify([issuer, subject]))
+    .digest("hex");
+}
+
+/** Stored ID tokens were verified during linking; bind their subject to the stored account ID. */
+export function isCurrentOidcAccount(
+  account: { providerId: string; accountId: string; idToken?: string | null },
+  issuer: string | undefined,
+) {
+  if (!issuer || account.providerId !== "oidc" || !account.idToken) return false;
+  try {
+    const claims = JSON.parse(
+      Buffer.from(account.idToken.split(".")[1] ?? "", "base64url").toString(),
+    );
+    return (
+      claims.iss === issuer &&
+      typeof claims.sub === "string" &&
+      account.accountId === oidcAccountSubject(issuer, claims.sub)
+    );
+  } catch {
+    return false;
+  }
 }

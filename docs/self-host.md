@@ -211,7 +211,8 @@ Register this redirect URI at the provider (using your public `BETTER_AUTH_URL` 
 https://app.example.com/api/auth/callback/oidc
 ```
 
-Web, Electron and mobile use the same provider redirect URI. Mobile completes the callback
+Web, Electron and mobile use the same provider redirect URI. Electron completes SSO in a
+sandboxed in-app popup sharing the app's session, then returns to the main window. Mobile completes the callback
 on the API, then returns to `rakazo://sign-in` (or `rakazo://account` for linking and reauthentication) through Better Auth's Expo authorization proxy
 and a native auth browser session. The `rakazo` app scheme is trusted by the auth server;
 never register a client secret in the mobile app. Mobile stores the resulting session with
@@ -222,7 +223,10 @@ claims stay unverified, including on subsequent sign-ins. Sign-in never links ac
 If an email belongs to another account, sign in to that existing account and choose **Link SSO**
 in account settings. Linking requires an authenticated session, a verified provider email and
 matching email addresses. The issuer and provider subject identify the linked account thereafter. Changing issuers does
-not reuse an old identity; link the new identity from the existing signed-in account.
+not reuse an old identity. Old-issuer links remain stored but do not count as linked to the
+current provider, so **Link SSO** becomes available again. Link the new identity from the
+existing signed-in account; authenticated-session, verified-email and matching-email checks
+still apply. Restoring the old issuer makes its existing links usable again.
 
 SSO signup follows closed registration and the deployment allowlist before creating an account.
 Allowlisted provider emails must be verified; the password signup's first-account exemption

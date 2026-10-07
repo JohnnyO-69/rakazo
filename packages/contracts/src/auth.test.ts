@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { authCapabilitiesSchema } from "./auth.js";
+import { authCapabilitiesSchema, legacyAuthCapabilitiesSchema } from "./auth.js";
 
 it("requires explicit password and SSO capabilities", () => {
   expect(authCapabilitiesSchema.safeParse({ passwordReset: false, resetUrl: null }).success).toBe(
@@ -13,4 +13,19 @@ it("requires explicit password and SSO capabilities", () => {
       sso: { name: "SSO", availability: "checking" },
     }).passwordAuth,
   ).toBe(false);
+});
+
+it("only accepts complete legacy capabilities without partial SSO fields", () => {
+  expect(
+    legacyAuthCapabilitiesSchema.parse({ passwordReset: false, resetUrl: null, billing: true }),
+  ).toEqual({ passwordAuth: true, sso: null, passwordReset: false, resetUrl: null, billing: true });
+  for (const value of [
+    {},
+    { passwordReset: false },
+    { passwordReset: false, resetUrl: null, passwordAuth: false },
+    { passwordReset: false, resetUrl: null, sso: null },
+    { passwordReset: "false", resetUrl: null },
+  ]) {
+    expect(legacyAuthCapabilitiesSchema.safeParse(value).success).toBe(false);
+  }
 });

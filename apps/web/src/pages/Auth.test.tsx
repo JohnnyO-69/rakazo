@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { authClient } from "../lib/auth";
 import type { AuthCapabilities } from "../lib/auth-capabilities";
 import { fetchAuthCapabilities } from "../lib/auth-capabilities";
 import { AuthPage } from "./Auth";
@@ -51,6 +52,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  delete window.rakazoDesktop;
 });
 async function render(mode: "in" | "up" = "in") {
   await act(async () =>
@@ -92,4 +94,22 @@ it("shows both auth choices in mixed mode", async () => {
   await render();
   expect(host.querySelector('input[type="password"]')).not.toBeNull();
   expect(host.textContent).toContain("Continue with Example");
+});
+
+it("selects a non-redirecting SSO request on desktop", async () => {
+  window.rakazoDesktop = {} as NonNullable<Window["rakazoDesktop"]>;
+  vi.mocked(fetchAuthCapabilities).mockResolvedValue(capabilities);
+  vi.mocked(authClient.signIn.social).mockResolvedValue({
+    data: null,
+    error: { message: "Unavailable", status: 503, statusText: "Unavailable" },
+  });
+  await render();
+  const button = Array.from(host.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes("Continue with"),
+  );
+  expect(button).toBeDefined();
+  await act(async () => button!.click());
+  expect(authClient.signIn.social).toHaveBeenCalledWith(
+    expect.objectContaining({ provider: "oidc", disableRedirect: true }),
+  );
 });

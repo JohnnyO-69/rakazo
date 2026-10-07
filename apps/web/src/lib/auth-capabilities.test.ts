@@ -17,6 +17,11 @@ it("validates configured SSO even during discovery downtime", async () => {
 });
 it.each([
   {},
+  { passwordReset: false, resetUrl: null, sso: null },
+  { passwordReset: false, resetUrl: null, passwordAuth: false },
+  { passwordReset: "false", resetUrl: null },
+  { passwordReset: false, resetUrl: "invalid" },
+  { passwordReset: false, resetUrl: null, billing: "false" },
   { passwordAuth: true },
   { ...capability, sso: {} },
   { ...capability, passwordAuth: "false" },
@@ -33,4 +38,18 @@ it("rejects HTTP errors", async () => {
     vi.fn(async () => Response.json({}, { status: 503 })),
   );
   await expect(fetchAuthCapabilities()).rejects.toThrow();
+});
+
+it("accepts old capabilities for the bundled desktop client", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ passwordReset: false, resetUrl: null, billing: false })),
+  );
+  await expect(fetchAuthCapabilities()).resolves.toEqual({
+    passwordAuth: true,
+    sso: null,
+    passwordReset: false,
+    resetUrl: null,
+    billing: false,
+  });
 });

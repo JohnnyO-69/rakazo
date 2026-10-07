@@ -1225,6 +1225,7 @@ msgstr "Не удалось подключиться к экрану компь�
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
+#: src/lib/sso-flow.ts
 #: src/lib/user-error.ts
 #: src/pages/Auth.tsx
 #: src/pages/Shell.tsx

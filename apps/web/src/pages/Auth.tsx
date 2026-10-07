@@ -8,6 +8,7 @@ import { authClient } from "../lib/auth";
 import type { AuthCapabilities } from "../lib/auth-capabilities";
 import { fetchAuthCapabilities } from "../lib/auth-capabilities";
 import { clearSpaceSelection } from "../lib/rpc";
+import { runSsoFlow } from "../lib/sso-flow";
 import { authErrorText, credentialIssueText } from "../lib/user-error";
 
 type AuthMode = "in" | "up" | "forgot";
@@ -129,13 +130,18 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
     setPending(true);
     setError(null);
     try {
-      const result = await authClient.signIn.social({
-        provider: "oidc",
-        newUserCallbackURL: "/onboarding",
-        callbackURL:
-          searchParams.get("next") === "/integrations/setup" ? "/integrations/setup" : "/app",
-        errorCallbackURL: "/sign-in",
-      });
+      const result = await runSsoFlow(
+        (disableRedirect) =>
+          authClient.signIn.social({
+            disableRedirect,
+            provider: "oidc",
+            newUserCallbackURL: "/onboarding",
+            callbackURL:
+              searchParams.get("next") === "/integrations/setup" ? "/integrations/setup" : "/app",
+            errorCallbackURL: "/sign-in",
+          }),
+        ["/app", "/onboarding", "/integrations/setup", "/sign-in"],
+      );
       if (result.error) setError(authErrorText(result.error, t`Could not continue`));
     } catch {
       setError(t`Could not continue`);

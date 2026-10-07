@@ -13,7 +13,12 @@ import type {
   Space,
   SpaceNavigation,
 } from "@rakazo/contracts";
-import { accountSecuritySchema, authCapabilitiesSchema } from "@rakazo/contracts";
+import {
+  accountSecuritySchema,
+  authCapabilitiesSchema,
+  legacyAccountSecurity,
+  legacyAuthCapabilitiesSchema,
+} from "@rakazo/contracts";
 import type { ThreadHistory } from "@rakazo/core";
 import {
   aiConsentTarget,
@@ -484,7 +489,7 @@ export async function passwordResetCapabilities(): Promise<PasswordResetCapabili
     { headers: { origin: "rakazo://" } },
   );
   if (!response.ok) throw new Error(t("Could not load sign-in options"));
-  return authCapabilitiesSchema.parse(body);
+  return authCapabilitiesSchema.or(legacyAuthCapabilitiesSchema).parse(body);
 }
 
 export async function requestPasswordReset(email: string, redirectTo: string): Promise<void> {
@@ -1338,7 +1343,12 @@ export async function fetchAccountSecurity(): Promise<AccountSecurity> {
   const { response, body } = await fetchMobileJson<unknown>(
     `${currentApiBase()}/api/auth/account-security`,
     { headers: { origin: "rakazo://", ...(await authHeaders()) } },
+    null,
   );
+  // Older servers support password accounts and the original change/delete endpoints.
+  if (response.status === 404) {
+    return legacyAccountSecurity;
+  }
   if (!response.ok) throw new Error(t("Could not load sign-in options"));
   return accountSecuritySchema.parse(body);
 }

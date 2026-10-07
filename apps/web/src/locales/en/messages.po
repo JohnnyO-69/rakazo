@@ -1225,6 +1225,7 @@ msgstr "Could not connect to the computer screen"
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
+#: src/lib/sso-flow.ts
 #: src/lib/user-error.ts
 #: src/pages/Auth.tsx
 #: src/pages/Shell.tsx

@@ -22,3 +22,18 @@ export const accountSecuritySchema = z.object({
   sso: z.object({ name: z.string().min(1) }).nullable(),
 });
 export type AccountSecurity = z.infer<typeof accountSecuritySchema>;
+
+/** Only a complete pre-SSO shape may opt into password-only compatibility. */
+export const legacyAuthCapabilitiesSchema = authCapabilitiesSchema
+  .omit({ sso: true, passwordAuth: true })
+  .strict()
+  .transform((value) => ({ ...value, passwordAuth: true, sso: null }));
+
+/** Pre-SSO servers only had credential accounts and password-protected deletion. */
+export const legacyAccountSecurity: AccountSecurity = {
+  hasPassword: true,
+  freshOidcAuth: false,
+  ssoLinked: false,
+  emailDeletion: false,
+  sso: null,
+};

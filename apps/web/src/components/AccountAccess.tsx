@@ -4,6 +4,7 @@ import { Button, Input, Label } from "@rakazo/ui-web";
 import { useEffect, useState } from "react";
 import { fetchAccountSecurity, requestAccountDeletionCode } from "../lib/account-security";
 import { authClient } from "../lib/auth";
+import { runSsoFlow } from "../lib/sso-flow";
 import { authErrorText } from "../lib/user-error";
 
 export function AccountAccess({
@@ -58,11 +59,16 @@ export function AccountAccess({
           disabled={pending}
           onClick={() =>
             void action(async () => {
-              const result = await authClient.linkSocial({
-                provider: "oidc",
-                callbackURL: window.location.href,
-                errorCallbackURL: window.location.href,
-              });
+              const result = await runSsoFlow(
+                (disableRedirect) =>
+                  authClient.linkSocial({
+                    disableRedirect,
+                    provider: "oidc",
+                    callbackURL: window.location.href,
+                    errorCallbackURL: window.location.href,
+                  }),
+                [window.location.href],
+              );
               if (result.error) throw new Error(authErrorText(result.error, t`Could not continue`));
             })
           }
@@ -103,12 +109,17 @@ export function AccountAccess({
                   disabled={pending}
                   onClick={() =>
                     void action(async () => {
-                      const result = await authClient.signIn.social({
-                        provider: "oidc",
-                        additionalData: { reauthenticate: true },
-                        callbackURL: window.location.href,
-                        errorCallbackURL: window.location.href,
-                      });
+                      const result = await runSsoFlow(
+                        (disableRedirect) =>
+                          authClient.signIn.social({
+                            disableRedirect,
+                            provider: "oidc",
+                            additionalData: { reauthenticate: true },
+                            callbackURL: window.location.href,
+                            errorCallbackURL: window.location.href,
+                          }),
+                        [window.location.href],
+                      );
                       if (result.error)
                         throw new Error(authErrorText(result.error, t`Could not continue`));
                     })

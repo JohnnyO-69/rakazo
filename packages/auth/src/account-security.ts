@@ -8,8 +8,8 @@ import {
   getSessionFromCtx,
   sessionMiddleware,
 } from "better-auth/api";
-
 import { bearer } from "better-auth/plugins";
+import { isCurrentOidcAccount } from "./oidc.js";
 
 export const OIDC_FRESH_AGE = 5 * 60;
 export const oidcProofKey = (sessionId: string) => `oidc-reauth-${sessionId}`;
@@ -17,6 +17,7 @@ export const oidcProofKey = (sessionId: string) => `oidc-reauth-${sessionId}`;
 export function accountSecurity(
   email: TransactionalEmailProvider | undefined,
   ssoName?: string,
+  ssoIssuer?: string,
 ): BetterAuthPlugin {
   return {
     id: "account-security",
@@ -40,7 +41,7 @@ export function accountSecurity(
                 proof.value === ctx.context.session.user.id &&
                 proof.expiresAt.getTime() > Date.now(),
             ),
-            ssoLinked: accounts.some((account) => account.providerId === "oidc"),
+            ssoLinked: accounts.some((account) => isCurrentOidcAccount(account, ssoIssuer)),
             hasPassword: Boolean(credential?.password),
             emailDeletion: Boolean(email),
             sso: ssoName ? { name: ssoName } : null,
