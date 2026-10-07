@@ -9,11 +9,16 @@ vi.mock("../lib/rpc", () => ({ rpc: { me: api.me, billing: { status: api.status 
 vi.mock("../lib/bootstrap", () => ({ peekInitialBootstrap: () => undefined }));
 vi.mock("../pages/Paywall", () => ({ PaywallPage: () => <div>paywall</div> }));
 
-import { SubscriptionGate } from "./SubscriptionGate";
-
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-async function renderGate() {
+/** Fresh module per test: the capability lookup is cached for the page's lifetime. */
+async function renderGate(billing: boolean) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ billing })),
+  );
+  vi.resetModules();
+  const { SubscriptionGate } = await import("./SubscriptionGate");
   const container = document.createElement("div");
   const root = createRoot(container);
   await act(async () => {
@@ -31,11 +36,20 @@ async function renderGate() {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
-it("renders the app without a billing request when billing is off", async () => {
+it("opens without waiting on me or billing when the deployment does not bill", async () => {
+  const { container, root } = await renderGate(false);
+  expect(container.textContent).toBe("app");
+  expect(api.me).not.toHaveBeenCalled();
+  expect(api.status).not.toHaveBeenCalled();
+  act(() => root.unmount());
+});
+
+it("skips the billing request for users billing does not apply to", async () => {
   api.me.mockResolvedValue({ billingEnabled: false });
-  const { container, root } = await renderGate();
+  const { container, root } = await renderGate(true);
   expect(container.textContent).toBe("app");
   expect(api.status).not.toHaveBeenCalled();
   act(() => root.unmount());
@@ -44,7 +58,7 @@ it("renders the app without a billing request when billing is off", async () => 
 it("shows the paywall without access and opens once a recheck finds access", async () => {
   api.me.mockResolvedValue({ billingEnabled: true });
   api.status.mockResolvedValue({ access: false });
-  const { container, root } = await renderGate();
+  const { container, root } = await renderGate(true);
   expect(container.textContent).toBe("paywall");
 
   api.status.mockResolvedValue({ access: true });

@@ -153,13 +153,13 @@ msgstr "{name} çalışmasını tamamladı"
 msgid "{name} stopped"
 msgstr "{name} durduruldu"
 
-#: src/pages/BillingSettingsPanel.tsx
-msgid "{price} · {seats} seats"
-msgstr ""
-
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} kaldı · bot yalnızca izliyor"
+
+#: src/pages/BillingSettingsPanel.tsx
+msgid "{seats, plural, one {# seat} other {# seats}}"
+msgstr ""
 
 #: src/components/ArtifactFileCard.tsx
 msgid "{size} B"

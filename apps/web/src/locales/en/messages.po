@@ -153,13 +153,13 @@ msgstr "{name} finished"
 msgid "{name} stopped"
 msgstr "{name} stopped"
 
-#: src/pages/BillingSettingsPanel.tsx
-msgid "{price} · {seats} seats"
-msgstr "{price} · {seats} seats"
-
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} left · bot is watching, not acting"
+
+#: src/pages/BillingSettingsPanel.tsx
+msgid "{seats, plural, one {# seat} other {# seats}}"
+msgstr "{seats, plural, one {# seat} other {# seats}}"
 
 #: src/components/ArtifactFileCard.tsx
 msgid "{size} B"

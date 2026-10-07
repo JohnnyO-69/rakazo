@@ -36,6 +36,10 @@ test("billing paywall holds the app until the subscription is active", async ({
   await signup(page, `billing-${stamp}@rakazo.test`, "password12", `Billing ${stamp}`);
   await completeOnboarding(page);
 
+  await page.route("**/api/auth/capabilities", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), billing: true } });
+  });
   await page.route("**/rpc/me", (route) => enableBilling(route, "me"));
   await page.route("**/rpc/bootstrap", (route) => enableBilling(route, "bootstrap"));
   let status = billingStatus({});

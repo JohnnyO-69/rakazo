@@ -215,7 +215,8 @@ metadata, never reset tokens. The inbox route is not registered in test, staging
 ### Billing
 
 Billing stays off, with no paywall, unless `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and
-`STRIPE_PRICE_ID` are all set (see `.env.example`).
+`STRIPE_PRICE_ID` are all set (see `.env.example`). Setting only some of them stops the API at
+startup.
 
 ### Logging
 

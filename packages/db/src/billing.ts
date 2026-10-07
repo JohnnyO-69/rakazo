@@ -1,5 +1,6 @@
 import type { BillingSubscriptionSnapshot } from "@rakazo/adapter-kit";
 import type { BillingAccount, PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
 
 /** Subscription states that let an organization use the product. */
 const ACCESS_STATUSES = new Set(["trialing", "active", "past_due"]);
@@ -37,7 +38,10 @@ export async function syncBillingSnapshot(
   customerId: string,
   load: () => Promise<BillingSubscriptionSnapshot | null>,
 ): Promise<boolean> {
-  const startedAt = new Date();
+  // The database clock, so API instances with skewed clocks still order correctly.
+  const [{ startedAt }] = await prisma.$queryRaw<[{ startedAt: Date }]>(
+    Prisma.sql`SELECT clock_timestamp() AS "startedAt"`,
+  );
   const snapshot = await load();
   const written = await prisma.billingAccount.updateMany({
     where: { customerId, OR: [{ syncedAt: null }, { syncedAt: { lt: startedAt } }] },

@@ -545,6 +545,7 @@ export async function createApp(
     c.json({
       passwordReset: Boolean(email),
       resetUrl: email ? new URL("/reset-password", env.webOrigin).href : null,
+      billing: Boolean(billing),
     }),
   );
   if (localEmailEmulator && env.nodeEnv === "development") {

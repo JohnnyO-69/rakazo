@@ -13,6 +13,17 @@ type GateState =
   | { kind: "open" }
   | { kind: "paywall"; status: BillingStatus };
 
+let billingCapability: Promise<boolean> | undefined;
+
+/** Public and DB-free, so a deployment without billing opens without waiting on bootstrap. */
+function deploymentBills(): Promise<boolean> {
+  billingCapability ??= fetch("/api/auth/capabilities")
+    .then((response) => (response.ok ? response.json() : {}))
+    .then((body: { billing?: unknown }) => body.billing === true)
+    .catch(() => false);
+  return billingCapability;
+}
+
 function loadMe(): Promise<Me> {
   const primed = peekInitialBootstrap();
   if (!primed) return rpc.me();
@@ -28,7 +39,7 @@ function gateFor(status: BillingStatus): GateState {
 
 /**
  * Holds the app behind the paywall when the deployment bills. Self-hosted
- * installs never reach the billing request. Enforcement belongs to the API,
+ * installs only make the capabilities request. Enforcement belongs to the API,
  * so a failed lookup here falls through to the app.
  */
 export function SubscriptionGate({
@@ -42,10 +53,11 @@ export function SubscriptionGate({
 
   useEffect(() => {
     let active = true;
-    loadMe()
-      .then(async (me) =>
-        me.billingEnabled ? gateFor(await rpc.billing.status()) : { kind: "open" as const },
-      )
+    deploymentBills()
+      .then(async (bills): Promise<GateState> => {
+        if (!bills || !(await loadMe()).billingEnabled) return { kind: "open" };
+        return gateFor(await rpc.billing.status());
+      })
       .catch((): GateState => ({ kind: "open" }))
       .then((next) => {
         if (active) setState(next);

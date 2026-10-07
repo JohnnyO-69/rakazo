@@ -1,4 +1,4 @@
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { BillingStatus } from "@rakazo/contracts";
 import { Button, Skeleton } from "@rakazo/ui-web";
 import { useEffect, useState } from "react";
@@ -78,13 +78,13 @@ export function BillingSettingsPanel() {
           )}
           {price ? (
             <p className="mt-3 text-[14px] text-foreground/75">
+              {price}
               {seats > 1 ? (
-                <Trans>
-                  {price} · {seats} seats
-                </Trans>
-              ) : (
-                price
-              )}
+                <>
+                  {" · "}
+                  <Plural value={seats} one="# seat" other="# seats" />
+                </>
+              ) : null}
             </p>
           ) : null}
           {dateLabel ? (
