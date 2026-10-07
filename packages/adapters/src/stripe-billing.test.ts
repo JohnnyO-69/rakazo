@@ -32,7 +32,7 @@ describe("Stripe billing HTTP boundary", () => {
     ).toBe("a[0][price]=p&a[0][quantity]=2&d=true");
   });
 
-  it("sends the checkout shape with a stable idempotency key and pinned version", async () => {
+  it("sends the checkout shape with a fresh session per attempt and pinned version", async () => {
     const { wire, provider } = setup();
     const { customerId } = await provider.createCustomer({
       email: "owner@example.com",
@@ -57,16 +57,42 @@ describe("Stripe billing HTTP boundary", () => {
       cancel_url: urls.cancelUrl,
     });
     expect(plain.form).not.toHaveProperty("subscription_data[trial_period_days]");
-    const plainKey = plain.headers.get("idempotency-key");
-    expect(plainKey).toMatch(/^checkout:[0-9a-f]{64}$/);
+    expect(plain.headers.get("idempotency-key")).toBeNull();
 
     await provider.createCheckout({ customerId, seats: 4, trialDays: 14, ...urls });
-    const trial = wire.requests.at(-1)!;
-    expect(trial.form["subscription_data[trial_period_days]"]).toBe("14");
-    expect(trial.headers.get("idempotency-key")).not.toBe(plainKey);
+    expect(wire.requests.at(-1)!.form["subscription_data[trial_period_days]"]).toBe("14");
+  });
 
-    await provider.createCheckout({ customerId, seats: 4, ...urls });
-    expect(wire.requests.at(-1)!.headers.get("idempotency-key")).toBe(plainKey);
+  it("reads every page of subscriptions", async () => {
+    const { wire, provider } = setup();
+    wire.pageSize = 2;
+    const { customerId } = await provider.createCustomer({
+      email: "owner@example.com",
+      organizationId: "org_1",
+    });
+    for (const status of ["active", "canceled", "canceled", "canceled", "incomplete"]) {
+      await provider.createCheckout({ customerId, seats: 1, ...urls });
+      wire.completeCheckout(customerId, status);
+    }
+    await expect(provider.getCustomerSubscription(customerId)).resolves.toMatchObject({
+      status: "active",
+    });
+    await provider.cancelCustomerSubscriptions(customerId);
+    expect(wire.subscriptions.every((s) => s.status === "canceled")).toBe(true);
+  });
+
+  it("cancels unpaid and paused subscriptions, which can still resume", async () => {
+    const { wire, provider } = setup();
+    const { customerId } = await provider.createCustomer({
+      email: "owner@example.com",
+      organizationId: "org_1",
+    });
+    for (const status of ["unpaid", "paused"]) {
+      await provider.createCheckout({ customerId, seats: 1, ...urls });
+      wire.completeCheckout(customerId, status);
+    }
+    await provider.cancelCustomerSubscriptions(customerId);
+    expect(wire.subscriptions.map((s) => s.status)).toEqual(["canceled", "canceled"]);
   });
 
   it("maps Stripe statuses onto the neutral set", () => {

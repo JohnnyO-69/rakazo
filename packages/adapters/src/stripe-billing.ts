@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type {
   BillingCheckoutRequest,
   BillingPrice,
@@ -50,7 +50,10 @@ const subscriptionSchema = z.object({
     ),
   }),
 });
-const subscriptionListSchema = z.object({ data: z.array(subscriptionSchema) });
+const subscriptionListSchema = z.object({
+  data: z.array(subscriptionSchema),
+  has_more: z.boolean(),
+});
 type StripeSubscription = z.infer<typeof subscriptionSchema>;
 
 /** Stripe REST wire format and credentials stay inside this adapter. */
@@ -112,8 +115,8 @@ export class StripeBillingProvider implements BillingProvider {
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
     });
-    const key = `checkout:${createHash("sha256").update(body).digest("hex")}`;
-    const session = urlSchema.parse(await this.request("POST", "/v1/checkout/sessions", body, key));
+    // No idempotency key: identical params from a later attempt must get a fresh session.
+    const session = urlSchema.parse(await this.request("POST", "/v1/checkout/sessions", body));
     return { url: session.url };
   }
 
@@ -146,7 +149,9 @@ export class StripeBillingProvider implements BillingProvider {
 
   async cancelCustomerSubscriptions(customerId: string) {
     for (const subscription of await this.listSubscriptions(customerId)) {
-      if (mapStripeSubscriptionStatus(subscription.status) === "canceled") continue;
+      // Only terminal states; unpaid and paused subscriptions can still resume and charge.
+      if (subscription.status === "canceled" || subscription.status === "incomplete_expired")
+        continue;
       await this.request("DELETE", `/v1/subscriptions/${encodeURIComponent(subscription.id)}`);
     }
   }
@@ -156,9 +161,23 @@ export class StripeBillingProvider implements BillingProvider {
   }
 
   private async listSubscriptions(customerId: string): Promise<StripeSubscription[]> {
-    const query = encodeStripeForm({ customer: customerId, status: "all", limit: 100 });
-    return subscriptionListSchema.parse(await this.request("GET", `/v1/subscriptions?${query}`))
-      .data;
+    const all: StripeSubscription[] = [];
+    let startingAfter: string | undefined;
+    for (;;) {
+      const query = encodeStripeForm({
+        customer: customerId,
+        status: "all",
+        limit: 100,
+        starting_after: startingAfter,
+      });
+      const page = subscriptionListSchema.parse(
+        await this.request("GET", `/v1/subscriptions?${query}`),
+      );
+      all.push(...page.data);
+      const last = page.data.at(-1);
+      if (!page.has_more || !last) return all;
+      startingAfter = last.id;
+    }
   }
 
   private async request(

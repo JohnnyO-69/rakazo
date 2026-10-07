@@ -1,5 +1,6 @@
 import type { BillingSubscriptionSnapshot } from "@rakazo/adapter-kit";
 import type { BillingAccount, PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
 
 /** Subscription states that let an organization use the product. */
 const ACCESS_STATUSES = new Set(["trialing", "active", "past_due"]);
@@ -28,37 +29,46 @@ export function createBillingAccount(
 }
 
 /**
- * Overwrites the subscription snapshot for a customer. `null` clears it. Returns false when
- * no account is stored for the customer.
+ * Loads the customer's current subscription and overwrites the stored snapshot (`null` clears
+ * it). A per-customer advisory lock spans load and write, so concurrent syncs apply in order and
+ * an older read never overwrites a newer one. Returns false when no account is stored.
  */
-export async function writeBillingSnapshot(
+export async function syncBillingSnapshot(
   prisma: PrismaClient,
   customerId: string,
-  snapshot: BillingSubscriptionSnapshot | null,
+  load: () => Promise<BillingSubscriptionSnapshot | null>,
 ): Promise<boolean> {
-  const overwrite = prisma.billingAccount.updateMany({
-    where: { customerId },
-    data: {
-      subscriptionId: snapshot?.subscriptionId ?? null,
-      subscriptionItemId: snapshot?.subscriptionItemId ?? null,
-      priceId: snapshot?.priceId ?? null,
-      status: snapshot?.status ?? null,
-      seats: snapshot?.seats ?? null,
-      trialEndsAt: snapshot?.trialEndsAt ?? null,
-      currentPeriodEndsAt: snapshot?.currentPeriodEndsAt ?? null,
-      cancelAtPeriodEnd: snapshot?.cancelAtPeriodEnd ?? false,
-      endedAt: snapshot?.endedAt ?? null,
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT pg_advisory_xact_lock(hashtextextended(${`billing:${customerId}`}, 0))::text AS "lock"
+      `);
+      const snapshot = await load();
+      const written = await tx.billingAccount.updateMany({
+        where: { customerId },
+        data: {
+          subscriptionId: snapshot?.subscriptionId ?? null,
+          subscriptionItemId: snapshot?.subscriptionItemId ?? null,
+          priceId: snapshot?.priceId ?? null,
+          status: snapshot?.status ?? null,
+          seats: snapshot?.seats ?? null,
+          trialEndsAt: snapshot?.trialEndsAt ?? null,
+          currentPeriodEndsAt: snapshot?.currentPeriodEndsAt ?? null,
+          cancelAtPeriodEnd: snapshot?.cancelAtPeriodEnd ?? false,
+          endedAt: snapshot?.endedAt ?? null,
+        },
+      });
+      if (snapshot) {
+        await tx.billingAccount.updateMany({
+          where: { customerId, subscribedAt: null },
+          data: { subscribedAt: new Date() },
+        });
+      }
+      return written.count > 0;
     },
-  });
-  if (!snapshot) return (await overwrite).count > 0;
-  const [written] = await prisma.$transaction([
-    overwrite,
-    prisma.billingAccount.updateMany({
-      where: { customerId, subscribedAt: null },
-      data: { subscribedAt: new Date() },
-    }),
-  ]);
-  return written.count > 0;
+    // The load is a provider round-trip; leave room for its own timeout.
+    { maxWait: 10_000, timeout: 45_000 },
+  );
 }
 
 /** Billable seats: every organization member, never fewer than one. */

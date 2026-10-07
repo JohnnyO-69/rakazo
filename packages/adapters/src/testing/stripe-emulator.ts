@@ -11,6 +11,8 @@ export class StripeEmulator {
   readonly customers = new Map<string, Record<string, unknown>>();
   readonly checkouts = new Map<string, Record<string, string>>();
   readonly subscriptions: StripeSubscriptionRecord[] = [];
+  /** Largest page the list endpoint returns; lower it to exercise pagination. */
+  pageSize = 100;
   /** Next response fails with this Stripe error. */
   failNext: { status: number; message: string } | undefined;
   private readonly idempotent = new Map<string, unknown>();
@@ -117,14 +119,17 @@ export class StripeEmulator {
         object: "billing_portal.session",
         url: `https://billing.stripe.com/p/session/${form.customer}`,
       });
-    if (method === "GET" && path === "/v1/subscriptions")
-      return Response.json({
-        object: "list",
-        has_more: false,
-        data: this.forCustomer(form.customer ?? "").filter(
-          (s) => form.status === "all" || s.status !== "canceled",
-        ),
-      });
+    if (method === "GET" && path === "/v1/subscriptions") {
+      const matching = this.forCustomer(form.customer ?? "").filter(
+        (s) => form.status === "all" || s.status !== "canceled",
+      );
+      const start = form.starting_after
+        ? matching.findIndex((s) => s.id === form.starting_after) + 1
+        : 0;
+      const limit = Math.min(Number(form.limit ?? 10), this.pageSize);
+      const data = matching.slice(start, start + limit);
+      return Response.json({ object: "list", has_more: start + limit < matching.length, data });
+    }
     const item = /^\/v1\/subscription_items\/([^/]+)$/.exec(path);
     if (method === "POST" && item) {
       const found = this.subscriptions

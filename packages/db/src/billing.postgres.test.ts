@@ -6,7 +6,7 @@ import {
   organizationForMember,
   organizationSeatCount,
   ownedBillingAccounts,
-  writeBillingSnapshot,
+  syncBillingSnapshot,
 } from "./billing.js";
 import type { PrismaClient } from "./client.js";
 import { createDb } from "./client.js";
@@ -95,19 +95,21 @@ describePostgres("billing accounts (PostgreSQL)", () => {
   });
 
   it("overwrites the snapshot idempotently and records the first subscription once", async () => {
-    await expect(writeBillingSnapshot(prisma, "cus_unknown", snapshot)).resolves.toBe(false);
+    await expect(syncBillingSnapshot(prisma, "cus_unknown", async () => snapshot)).resolves.toBe(
+      false,
+    );
 
-    await expect(writeBillingSnapshot(prisma, customerId, snapshot)).resolves.toBe(true);
+    await expect(syncBillingSnapshot(prisma, customerId, async () => snapshot)).resolves.toBe(true);
     const first = await billingAccountForOrganization(prisma, organizationId);
     expect(first).toMatchObject({ status: "trialing", seats: 2, subscriptionItemId: "si_1" });
     expect(first?.subscribedAt).toBeInstanceOf(Date);
 
-    await writeBillingSnapshot(prisma, customerId, { ...snapshot, status: "active" });
+    await syncBillingSnapshot(prisma, customerId, async () => ({ ...snapshot, status: "active" }));
     const second = await billingAccountForOrganization(prisma, organizationId);
     expect(second?.status).toBe("active");
     expect(second?.subscribedAt).toEqual(first?.subscribedAt);
 
-    await writeBillingSnapshot(prisma, customerId, null);
+    await syncBillingSnapshot(prisma, customerId, async () => null);
     const cleared = await billingAccountForOrganization(prisma, organizationId);
     expect(cleared).toMatchObject({
       subscriptionId: null,
@@ -118,6 +120,33 @@ describePostgres("billing accounts (PostgreSQL)", () => {
       cancelAtPeriodEnd: false,
     });
     expect(cleared?.subscribedAt).toEqual(first?.subscribedAt);
+  });
+
+  it("applies concurrent syncs in order so an older read cannot win", async () => {
+    let releaseOlder!: () => void;
+    let olderLoaded!: () => void;
+    const loaded = new Promise<void>((resolve) => {
+      olderLoaded = resolve;
+    });
+    const older = syncBillingSnapshot(prisma, customerId, async () => {
+      olderLoaded();
+      await new Promise<void>((release) => {
+        releaseOlder = release;
+      });
+      return { ...snapshot, status: "trialing" };
+    });
+    await loaded;
+    const newer = syncBillingSnapshot(prisma, customerId, async () => ({
+      ...snapshot,
+      status: "active",
+    }));
+    // Without the lock the newer sync would finish here and the older write would land last.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    releaseOlder();
+    await Promise.all([older, newer]);
+    await expect(billingAccountForOrganization(prisma, organizationId)).resolves.toMatchObject({
+      status: "active",
+    });
   });
 
   it("deletes the account with its organization", async () => {

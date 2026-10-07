@@ -28,6 +28,8 @@ export function PaywallPage({ status }: { status: BillingStatus }) {
       window.location.assign(url);
     } catch {
       setError(t`Could not open billing`);
+    } finally {
+      // Desktop opens the URL in the system browser and this page stays, so re-enable.
       setPending(false);
     }
   }

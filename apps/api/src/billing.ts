@@ -9,7 +9,7 @@ import {
   organizationForMember,
   organizationSeatCount,
   ownedBillingAccounts,
-  writeBillingSnapshot,
+  syncBillingSnapshot,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
@@ -70,8 +70,9 @@ export function createBillingService(deps: {
   }
 
   async function sync(customerId: string): Promise<void> {
-    const snapshot = await provider.getCustomerSubscription(customerId);
-    const written = await writeBillingSnapshot(prisma, customerId, snapshot);
+    const written = await syncBillingSnapshot(prisma, customerId, () =>
+      provider.getCustomerSubscription(customerId),
+    );
     if (!written)
       getLogger().warn("billing sync for unknown customer", { "billing.customer_id": customerId });
   }
@@ -117,6 +118,11 @@ export function createBillingService(deps: {
     async checkout(actor) {
       const { organizationId } = await managedOrganization(actor);
       let account = await billingAccountForOrganization(prisma, organizationId);
+      if (account) {
+        // Decide from the provider, not a snapshot a missed webhook may have left stale.
+        await sync(account.customerId);
+        account = await billingAccountForOrganization(prisma, organizationId);
+      }
       if (hasBillingAccess(account?.status ?? null)) {
         throw new ORPCError("CONFLICT", { message: "Already subscribed" });
       }
