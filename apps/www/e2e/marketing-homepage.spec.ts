@@ -49,10 +49,10 @@ test.describe("marketing homepage", () => {
     await page.goto("/zh/");
     await page.waitForLoadState("load");
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("真正属于你的 AI 队友");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("真正属于你的开源 Grok Bot 替代品");
     const selfHost = page.locator("#selfhost");
     await expect(selfHost).toBeVisible();
-    await expect(selfHost.getByRole("heading", { level: 2 })).toHaveText("电脑归你所有");
+    await expect(selfHost.getByRole("heading", { level: 2 })).toHaveText("自托管。电脑归你所有。");
     await expect(selfHost.getByRole("button", { name: "开始使用" })).toBeVisible();
     await expect(selfHost.getByRole("link", { name: "在 GitHub 上查看" })).toBeVisible();
     await expect(selfHost.getByRole("link", { name: "阅读文档" })).toBeVisible();

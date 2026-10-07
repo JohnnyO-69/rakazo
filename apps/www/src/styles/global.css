@@ -348,7 +348,8 @@ button {
 .hero h1,
 .section-heading,
 .stats-band h2,
-.privacy-copy h1 {
+.privacy-copy h1,
+.guide h1 {
   margin: 0;
   color: var(--ink);
   font-family: Aeonik, Geist, ui-sans-serif, system-ui, sans-serif;
@@ -2123,6 +2124,107 @@ button {
 .privacy-copy a:hover,
 .privacy-copy a:focus-visible {
   color: #1d4ed8;
+}
+
+.guide {
+  max-width: 920px;
+  padding: 72px 0 110px;
+}
+
+.guide h1 {
+  margin-bottom: 18px;
+}
+
+.guide h2 {
+  margin: 48px 0 12px;
+  color: var(--ink);
+  font-family: Aeonik, Geist, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(1.6rem, 3vw, 32px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.guide h3 {
+  margin: 28px 0 8px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.guide p,
+.guide li {
+  color: var(--body);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.guide ul {
+  display: grid;
+  gap: 10px;
+  padding-left: 22px;
+}
+
+.guide a {
+  color: var(--blue);
+}
+
+.guide a:hover,
+.guide a:focus-visible {
+  color: #1d4ed8;
+}
+
+.guide pre {
+  overflow-x: auto;
+  margin: 18px 0;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  padding: 16px 18px;
+  color: var(--ink);
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.compare-scroll {
+  overflow-x: auto;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.compare {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.compare th,
+.compare td {
+  border-bottom: 1px solid var(--line);
+  padding: 14px 16px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.compare tr:last-child th,
+.compare tr:last-child td {
+  border-bottom: 0;
+}
+
+.compare thead th {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--surface-soft);
+}
+
+.compare tbody th {
+  color: var(--ink);
+  font-weight: 600;
+  width: 22%;
 }
 
 @keyframes pulse {
