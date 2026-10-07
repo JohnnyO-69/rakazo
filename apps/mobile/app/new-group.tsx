@@ -55,6 +55,7 @@ export default function NewGroup() {
     <>
       <Stack.Screen options={{ title: t("New group") }} />
       <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         style={{ flex: 1, backgroundColor: tokens.background }}
         contentContainerStyle={{ padding: 24 }}
       >

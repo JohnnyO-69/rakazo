@@ -140,6 +140,7 @@ export function ComputerUpdateProgress() {
                       { text: t("Cancel"), style: "cancel" },
                       {
                         text: t("Nothing is still running"),
+                        style: "destructive",
                         onPress: () => {
                           setBusy(true);
                           setError(false);

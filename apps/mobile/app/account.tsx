@@ -1,9 +1,8 @@
 import type { AvatarStyle } from "@rakazo/contracts";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -38,7 +37,6 @@ import {
   setAppearancePreference,
 } from "../lib/appearance";
 import { explicitSignInRoute } from "../lib/auth-routing";
-import { confirmDeleteBot } from "../lib/bot-lifecycle";
 import { promptAccountDeletion } from "../lib/delete-account-prompt";
 import { setUiLocale, useI18n } from "../lib/i18n";
 import type { LiveNotificationSettings } from "../lib/live-notifications";
@@ -118,9 +116,6 @@ export default function Account() {
     void rpc<MobileMe>("me")
       .then(setMe)
       .catch(() => undefined);
-    void rpc<MobileBot[]>("bots/listArchived")
-      .then(setArchivedBots)
-      .catch(() => undefined);
     void rpc<{ runs: number; inputTokens: number; outputTokens: number }>("usage/summary")
       .then(setUsage)
       .catch(() => undefined);
@@ -146,14 +141,19 @@ export default function Account() {
     </View>
   );
 
-  async function restoreBot(botId: string) {
-    try {
-      await rpc("bots/restore", { botId });
-      setArchivedBots((bots) => bots.filter((bot) => bot.id !== botId));
-    } catch (restoreError) {
-      Alert.alert(t("Could not restore bot"), errorText(restoreError, t("Try again.")));
-    }
-  }
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void rpc<MobileBot[]>("bots/listArchived")
+        .then((bots) => {
+          if (active) setArchivedBots(bots);
+        })
+        .catch(() => undefined);
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
 
   async function selectAvatarStyle(next: AvatarStyle) {
     if (next === avatarStyle) return;
@@ -535,29 +535,17 @@ export default function Account() {
         </View>
 
         {archivedBots.length > 0 ? (
-          <View style={styles.archivedSection}>
-            <Text style={styles.sectionTitle}>{t("Archived bots")}</Text>
-            {archivedBots.map((bot) => (
-              <View key={bot.id} style={styles.archivedRow}>
-                <Text numberOfLines={1} style={styles.archivedName}>
-                  {bot.name}
-                </Text>
-                <Pressable onPress={() => void restoreBot(bot.id)} hitSlop={8}>
-                  <Text style={styles.restoreLabel}>{t("Restore")}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() =>
-                    confirmDeleteBot(bot, () =>
-                      setArchivedBots((bots) => bots.filter((item) => item.id !== bot.id)),
-                    )
-                  }
-                  hitSlop={8}
-                >
-                  <Text style={styles.archivedDeleteLabel}>{t("Delete")}</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push("/archived-bots")}
+            style={styles.settingsButton}
+          >
+            <Text style={styles.settingsTitle}>{t("Archived bots")}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={styles.email}>{archivedBots.length}</Text>
+              <Chevron />
+            </View>
+          </Pressable>
         ) : null}
 
         {versionInfo.nativeLabel || updateLabel ? (
@@ -732,35 +720,10 @@ function createAccountStyles() {
       color: native.secondaryLabel,
       fontSize: 15,
     },
-    archivedSection: {
-      borderRadius: 16,
-      backgroundColor: native.fill,
-      padding: 18,
-      gap: 14,
-    },
     sectionTitle: {
       color: native.secondaryLabel,
       fontSize: 14,
       fontWeight: "600",
-    },
-    archivedRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 14,
-    },
-    archivedName: {
-      flex: 1,
-      color: native.label,
-      fontSize: 16,
-    },
-    restoreLabel: {
-      color: native.label,
-      fontSize: 14,
-      fontWeight: "600",
-    },
-    archivedDeleteLabel: {
-      color: tokens.destructive,
-      fontSize: 14,
     },
     settingsButton: {
       minHeight: 62,

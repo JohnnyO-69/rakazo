@@ -511,19 +511,19 @@ export default function Home() {
             items: [
               {
                 type: "action" as const,
-                title: t("New bot"),
+                label: t("New bot"),
                 icon: { type: "sfSymbol" as const, name: "person.crop.circle.badge.plus" },
                 onPress: () => runCreateAction("bot"),
               },
               {
                 type: "action" as const,
-                title: t("New group"),
+                label: t("New group"),
                 icon: { type: "sfSymbol" as const, name: "person.2" },
                 onPress: () => runCreateAction("group"),
               },
               {
                 type: "action" as const,
-                title: t("New space"),
+                label: t("New space"),
                 icon: { type: "sfSymbol" as const, name: "square.grid.2x2" },
                 onPress: () => runCreateAction("space"),
               },
@@ -647,7 +647,11 @@ export default function Home() {
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         indicatorStyle={appearance === "dark" ? "white" : "black"}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          // iOS moves the active search bar to the bottom and removes the navigation inset.
+          nativeHeader && searching ? { paddingTop: insets.top + 12 } : undefined,
+        ]}
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={
           <RefreshControl
