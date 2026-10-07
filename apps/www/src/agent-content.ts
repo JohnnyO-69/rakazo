@@ -10,7 +10,7 @@ export const HOME_MARKDOWN = `# Rakazo
 
 Rakazo is an open source Grok Bot alternative that gives each bot a sandboxed browser and shell. Bots can use connected tools, save repeatable routines as readable Markdown, work on a schedule, and pause for approval when a task crosses a boundary you set. You choose where Rakazo runs.
 
-Sign in with Claude Pro/Max or ChatGPT Plus/Pro, or use an API key, OpenRouter, Grok or SuperGrok, or a local OpenAI-compatible server (Ollama, LM Studio). Rakazo does not pay the model bill. On a Mac, the desktop app's This computer option installs Rakazo on that machine, and This Mac lets bots use it. A Mac Mini can stay on. Rakazo is the chat plus that computer.
+Sign in with Claude Pro/Max or ChatGPT Plus/Pro, or use an API key, OpenRouter, Grok or SuperGrok, or a local OpenAI-compatible server (Ollama, LM Studio). Rakazo does not pay the model bill. On a Mac, the desktop app's This computer option installs Rakazo on that machine. A Mac Mini can stay on. Rakazo is the chat plus that computer.
 
 ## Best-fit jobs
 

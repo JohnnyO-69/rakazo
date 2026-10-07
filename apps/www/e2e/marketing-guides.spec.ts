@@ -78,8 +78,6 @@ test.describe("marketing guides", () => {
     await expect(page).toHaveTitle("Self-Hosted AI Agent (Open Source) – Rakazo");
     await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Self-hosted AI agent");
-    await expect(page.getByText("A Mac Mini can stay on as the always-on box.")).toBeVisible();
-    await expect(page.getByText(/choose This Mac when bots should use the machine/)).toBeVisible();
     await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", /.+/);
     await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
       "content",

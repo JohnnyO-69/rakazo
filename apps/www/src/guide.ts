@@ -42,7 +42,7 @@ export const CADDY_SNIPPET = `app.example.com {
 }`;
 
 export const RUN_ON_YOUR_MAC =
-  "Run on your Mac with the desktop app. This computer installs Rakazo on that Mac. After it starts, choose This Mac when bots should use the machine in front of you, or leave them on Docker. A Mac Mini can stay on as the always-on box.";
+  "Run on your Mac with the desktop app. This computer installs Rakazo on that Mac. A Mac Mini can stay on as the always-on box.";
 
 export type FaqItem = {
   question: string;

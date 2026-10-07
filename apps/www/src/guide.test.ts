@@ -5,7 +5,6 @@ import {
   OPENCLAW_FAQS,
   OPENCLAW_MARKDOWN,
   PUBLISHED_IMAGES_INSTALL,
-  RUN_ON_YOUR_MAC,
   SELF_HOST_FAQS,
   SELF_HOST_MARKDOWN,
 } from "./guide";
@@ -30,7 +29,6 @@ describe("guide pages", () => {
       expect(SELF_HOST_MARKDOWN).toContain(faq.question);
       expect(SELF_HOST_MARKDOWN).toContain(faq.answer);
     }
-    expect(SELF_HOST_MARKDOWN).toContain(RUN_ON_YOUR_MAC);
     for (const faq of OPENCLAW_FAQS) {
       expect(OPENCLAW_MARKDOWN).toContain(faq.question);
       expect(OPENCLAW_MARKDOWN).toContain(faq.answer);

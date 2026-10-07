@@ -1,5 +1,6 @@
 import { DEMO_ROSTER, type RosterBot } from "../demo";
 import { SITE_DESCRIPTION } from "../site";
+import { CLAUDE_CHATGPT_SUBSCRIPTION_FAQ } from "../subscription-faq";
 import type { Locale } from "./locales";
 
 export type HomeCopy = {
@@ -310,7 +311,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     selfHost: {
       eyebrow: "Self-hosted",
       heading: "Self-hosted. The computer is yours.",
-      copy: "Run on your Mac, or any machine you control. In the desktop app, This computer installs Rakazo there, and This Mac lets bots use that Mac. A Mac Mini can stay on. Your keys, your model, your data.",
+      copy: "Run on your Mac, or any machine you control. The desktop app's This computer option installs Rakazo there. A Mac Mini can stay on. Your keys, your model, your data.",
       features: [
         {
           title: "Your model",
@@ -335,11 +336,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     faq: {
       heading: "FAQ",
       items: [
-        {
-          question: "Can I use my Claude Pro/Max or ChatGPT Plus/Pro subscription?",
-          answer:
-            "Yes — sign in with that subscription, or use an API key / OpenRouter / a local OpenAI-compatible server (Ollama, LM Studio, etc.). Rakazo does not pay the model bill.",
-        },
+        CLAUDE_CHATGPT_SUBSCRIPTION_FAQ,
         {
           question: "Do I need an API key if I already pay for Claude or ChatGPT?",
           answer:
@@ -471,7 +468,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     selfHost: {
       eyebrow: "Self-hosted",
       heading: "Self-hosted. Der Computer gehört dir.",
-      copy: "Auf deinem Mac oder auf jeder Maschine, die du kontrollierst. In der Desktop-App installiert This computer Rakazo dort, und This Mac lässt Bots diesen Mac nutzen. Ein Mac Mini kann an bleiben. Deine Keys, dein Modell, deine Daten.",
+      copy: "Auf deinem Mac oder auf jeder Maschine, die du kontrollierst. In der Desktop-App installiert This computer Rakazo dort. Ein Mac Mini kann an bleiben. Deine Keys, dein Modell, deine Daten.",
       features: [
         {
           title: "Dein Modell",
@@ -631,7 +628,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     selfHost: {
       eyebrow: "셀프 호스트",
       heading: "셀프 호스트. 컴퓨터는 당신 것",
-      copy: "Mac에서, 또는 당신이 관리하는 머신에서 실행하세요. 데스크톱 앱의 This computer가 Rakazo를 그곳에 설치하고, This Mac은 봇이 그 Mac을 쓰게 합니다. Mac Mini는 켜 둔 채 둘 수 있습니다. 키, 모델, 데이터는 모두 당신 것.",
+      copy: "Mac에서, 또는 당신이 관리하는 머신에서 실행하세요. 데스크톱 앱의 This computer가 Rakazo를 그곳에 설치합니다. Mac Mini는 켜 둔 채 둘 수 있습니다. 키, 모델, 데이터는 모두 당신 것.",
       features: [
         {
           title: "당신 모델",
@@ -791,7 +788,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     selfHost: {
       eyebrow: "自托管",
       heading: "自托管。电脑归你所有。",
-      copy: "在你的 Mac 上运行，或在你控制的任何机器上运行。桌面应用里，This computer 会把 Rakazo 装在那台机器上，This Mac 让 Bot 使用这台 Mac。Mac Mini 可以一直开着。密钥、模型、数据，都归你所有。",
+      copy: "在你的 Mac 上运行，或在你控制的任何机器上运行。桌面应用里，This computer 会把 Rakazo 装在那台机器上。Mac Mini 可以一直开着。密钥、模型、数据，都归你所有。",
       features: [
         {
           title: "你的模型",
