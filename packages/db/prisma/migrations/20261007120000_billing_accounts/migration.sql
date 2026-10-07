@@ -12,6 +12,7 @@ CREATE TABLE "billing_accounts" (
     "cancelAtPeriodEnd" BOOLEAN NOT NULL DEFAULT false,
     "endedAt" TIMESTAMP(3),
     "subscribedAt" TIMESTAMP(3),
+    "syncedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

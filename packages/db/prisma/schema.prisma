@@ -139,6 +139,7 @@ model BillingAccount {
   cancelAtPeriodEnd   Boolean      @default(false)
   endedAt             DateTime?
   subscribedAt        DateTime?
+  syncedAt            DateTime?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 

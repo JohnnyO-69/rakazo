@@ -140,7 +140,7 @@ describePostgres("billing accounts (PostgreSQL)", () => {
       ...snapshot,
       status: "active",
     }));
-    // Without the lock the newer sync would finish here and the older write would land last.
+    // The newer sync writes first; the older one, which started earlier, must not land on top.
     await new Promise((resolve) => setTimeout(resolve, 200));
     releaseOlder();
     await Promise.all([older, newer]);
