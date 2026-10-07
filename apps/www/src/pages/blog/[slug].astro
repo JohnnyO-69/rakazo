@@ -55,7 +55,17 @@ const posts = (await getCollection("blog")).sort(
 );
 const categoryPosts = category ? posts.filter((entry) => entry.data.category === category) : [];
 const indexed = category ? categoryIsIndexed(category) : true;
-const toc = headings.filter((heading) => heading.depth === 2);
+const toc = [
+  { slug: "tldr", text: "TL;DR" },
+  { slug: "comparison", text: "Comparison" },
+  ...headings.filter((heading) => heading.depth === 2).map((heading) => ({
+    slug: heading.slug,
+    text: heading.text,
+  })),
+  { slug: "faq", text: "FAQ" },
+  { slug: "sources", text: "Sources" },
+  { slug: "related", text: "Related" },
+];
 const pageUrl = post ? new URL(`/blog/${post.id}/`, SITE_URL).toString() : "";
 const image = post ? new URL(ogPublicPath(blogOgId(post.id)), SITE_URL).toString() : "";
 const structuredData = post
@@ -93,7 +103,7 @@ const structuredData = post
         <span>{post.data.author}</span>
       </p>
       <aside class="tldr">
-        <h2>TL;DR</h2>
+        <h2 id="tldr">TL;DR</h2>
         <p>{post.data.tldr}</p>
       </aside>
       {
@@ -110,6 +120,7 @@ const structuredData = post
           </nav>
         )
       }
+      <h2 id="comparison">Comparison</h2>
       <ComparisonTable
         caption={post.data.comparison.caption}
         columns={post.data.comparison.columns}
@@ -119,7 +130,7 @@ const structuredData = post
         <Content />
       </div>
       <FaqList items={post.data.faq} />
-      <h2>Sources</h2>
+      <h2 id="sources">Sources</h2>
       <ul class="source-list">
         {post.data.sources.map((source) => (
           <li>
@@ -129,7 +140,7 @@ const structuredData = post
           </li>
         ))}
       </ul>
-      <h2>Related</h2>
+      <h2 id="related">Related</h2>
       <ul class="blog-related">
         {post.data.related.map((link) => (
           <li>

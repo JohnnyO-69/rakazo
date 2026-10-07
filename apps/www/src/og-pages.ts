@@ -1,6 +1,6 @@
 import { ALTERNATIVES, ALTERNATIVES_HUB } from "./alternatives";
 import { GROK_ALTERNATIVE_H1 } from "./grok-alternative";
-import { OPENCLAW_H1, SELF_HOST_TITLE } from "./guide";
+import { OPENCLAW_H1 } from "./guide";
 
 export type OgPage = {
   id: string;
@@ -40,7 +40,7 @@ export function ogPages(): OgPage[] {
     {
       id: "self-hosted-ai-agent",
       kicker: "Guide",
-      title: SELF_HOST_TITLE.replace(" (Open Source) – Rakazo", ""),
+      title: "Self-hosted AI agent",
     },
     ...BLOG_OG,
   ];
