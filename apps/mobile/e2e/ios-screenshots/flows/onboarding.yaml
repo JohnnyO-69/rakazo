@@ -29,6 +29,6 @@ name: Onboarding
 - takeScreenshot: 04-choice-card
 - tapOn: "Day-to-day work"
 - extendedWaitUntil:
-    visible: "Day-to-day work"
+    notVisible: "Inbox & email"
     timeout: 15000
 - takeScreenshot: 05-choice-selected
