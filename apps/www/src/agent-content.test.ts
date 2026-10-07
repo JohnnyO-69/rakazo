@@ -35,7 +35,19 @@ describe("agent content negotiation", () => {
   it("maps canonical and trailing-slash page paths to Markdown documents", () => {
     expect(getMarkdownDocument("/")).toContain("# Rakazo");
     expect(getMarkdownDocument("/about/")).toContain("# About Rakazo");
+    expect(getMarkdownDocument("/self-hosted-ai-agent/")).toContain(
+      "# Self-hosted AI agent",
+    );
+    expect(getMarkdownDocument("/openclaw-alternative")).toContain(
+      "OpenClaw",
+    );
     expect(getMarkdownAlternate("/")).toBe("/index.md");
+    expect(getMarkdownAlternate("/self-hosted-ai-agent/")).toBe(
+      "/self-hosted-ai-agent.md",
+    );
+    expect(getMarkdownAlternate("/openclaw-alternative/")).toBe(
+      "/openclaw-alternative.md",
+    );
     expect(getMarkdownAlternate("/support/")).toBe("/support.md");
     expect(getMarkdownDocument("/missing")).toBeUndefined();
     expect(getMarkdownAlternate("/missing")).toBeUndefined();

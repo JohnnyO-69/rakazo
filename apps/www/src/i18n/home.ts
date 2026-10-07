@@ -96,6 +96,7 @@ export type HomeCopy = {
     languagesLabel: string;
     links: {
       docs: string;
+      openClaw: string;
       changelog: string;
       about: string;
       support: string;
@@ -384,6 +385,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       languagesLabel: "Language",
       links: {
         docs: "Docs",
+        openClaw: "OpenClaw alternative",
         changelog: "Changelog",
         about: "About",
         support: "Support",
@@ -516,6 +518,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       languagesLabel: "Sprache",
       links: {
         docs: "Dokumentation",
+        openClaw: "OpenClaw-Alternative",
         changelog: "Änderungsprotokoll",
         about: "Über uns",
         support: "Support",
@@ -647,6 +650,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       languagesLabel: "언어",
       links: {
         docs: "문서",
+        openClaw: "OpenClaw 대안",
         changelog: "변경 내역",
         about: "소개",
         support: "지원",
@@ -778,6 +782,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       languagesLabel: "语言",
       links: {
         docs: "文档",
+        openClaw: "OpenClaw 替代方案",
         changelog: "更新日志",
         about: "关于",
         support: "支持",
