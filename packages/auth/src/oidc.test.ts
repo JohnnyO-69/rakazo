@@ -51,7 +51,7 @@ function jwt(claims: Record<string, unknown>) {
 }
 
 function setup(options: Partial<AuthEnv> = {}) {
-  const prisma = {
+  const prisma: Record<string, unknown> = {
     deploymentSettings: {
       findUnique: vi.fn(async () => null),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -60,8 +60,10 @@ function setup(options: Partial<AuthEnv> = {}) {
     member: { findMany: vi.fn(async () => []) },
     messagingIdentity: { deleteMany: vi.fn(async () => ({})) },
     organization: { deleteMany: vi.fn(async () => ({})) },
-    $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
   };
+  prisma.$transaction = vi.fn(async (operations: (tx: unknown) => Promise<unknown>) =>
+    operations(prisma),
+  );
   auth = createAuth(prisma as never, {
     secret: "offline-test-secret-with-at-least-32-characters",
     baseURL: origin,
