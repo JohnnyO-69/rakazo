@@ -50,7 +50,10 @@ const {
 } = Astro.props;
 
 const currentPath = Astro.url.pathname.replace(/\/+$/, "") || "/";
-const grokCurrent = currentPath === GROK_ALTERNATIVE_PATH.replace(/\/+$/, "");
+
+function isCurrentPage(href: string): boolean {
+  return (href.replace(/\/+$/, "") || "/") === currentPath;
+}
 ---
 
 <footer class="site-footer">
@@ -69,7 +72,7 @@ const grokCurrent = currentPath === GROK_ALTERNATIVE_PATH.replace(/\/+$/, "");
           <a
             href={localeHomePath(locale)}
             hreflang={LOCALE_HREFLANG[locale]}
-            aria-current={locale === currentLocale ? "page" : undefined}
+            aria-current={isCurrentPage(localeHomePath(locale)) ? "page" : undefined}
           >
             {LOCALE_LABELS[locale]}
           </a>
@@ -80,7 +83,7 @@ const grokCurrent = currentPath === GROK_ALTERNATIVE_PATH.replace(/\/+$/, "");
       <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
       <a href={DOCS_URL} target="_blank" rel="noreferrer">{linkLabels.docs}</a>
       <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">{linkLabels.changelog}</a>
-      <a href={GROK_ALTERNATIVE_PATH} aria-current={grokCurrent ? "page" : undefined}>
+      <a href={GROK_ALTERNATIVE_PATH} aria-current={isCurrentPage(GROK_ALTERNATIVE_PATH) ? "page" : undefined}>
         {linkLabels.grokAlternative}
       </a>
       <a href="/about/">{linkLabels.about}</a>

@@ -54,9 +54,15 @@ test.describe("Grok Bot alternative", () => {
     expect(jsonLd).toContain("does not publish its source for you to run");
 
     await expect(page.locator(".site-nav").getByRole("link", { name: "Grok Bot" })).toBeVisible();
+    const footerGrok = page
+      .locator(".site-footer__links")
+      .getByRole("link", { name: "Grok Bot alternative" });
+    await expect(footerGrok).toBeVisible();
+    await expect(footerGrok).toHaveAttribute("aria-current", "page");
     await expect(
-      page.locator(".site-footer__links").getByRole("link", { name: "Grok Bot alternative" }),
-    ).toBeVisible();
+      page.locator(".site-footer__languages").getByRole("link", { name: "English" }),
+    ).not.toHaveAttribute("aria-current", "page");
+    await expect(page.locator("footer [aria-current='page']")).toHaveCount(1);
 
     const docs = page.getByRole("link", { name: "Read the docs" });
     await expect(docs).toHaveCSS("color", "rgb(255, 255, 255)");
@@ -90,6 +96,9 @@ test.describe("Grok Bot alternative", () => {
       "href",
       "/grok-bot-alternative/",
     );
+    await expect(
+      page.locator(".site-footer__languages").getByRole("link", { name: "English" }),
+    ).toHaveAttribute("aria-current", "page");
 
     await captureScreenshot(page, testInfo, "06-marketing-homepage-headings");
   });
