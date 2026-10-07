@@ -1406,6 +1406,8 @@ msgstr "无法打开终端"
 msgid "Could not play a test clip"
 msgstr "无法播放测试片段"
 
+#: src/lib/computer-sandbox.ts
+#: src/lib/user-error.ts
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Auth.tsx
 msgid "Could not reach the server"
@@ -1930,8 +1932,16 @@ msgstr ""
 msgid "Engage when... Ignore..."
 msgstr ""
 
+#: src/lib/user-error.ts
+msgid "Enter a password"
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Enter a username and password"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Enter a valid email"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -3793,6 +3803,10 @@ msgstr ""
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
 msgstr "软件更新"
+
+#: src/lib/user-error.ts
+msgid "Something went wrong. Try again."
+msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Space default"
