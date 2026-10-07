@@ -1,11 +1,8 @@
-import { type MenuAction, MenuView } from "@expo/ui/community/menu";
+import type { MenuAction } from "@expo/ui/community/menu";
+import { MenuView } from "@expo/ui/community/menu";
 import type { ReactNode } from "react";
-import {
-  type ColorSchemeName,
-  type GestureResponderEvent,
-  Platform,
-  Pressable,
-} from "react-native";
+import type { ColorSchemeName, GestureResponderEvent } from "react-native";
+import { Platform, Pressable } from "react-native";
 import type { MessageMenuEntry, MessageMenuSymbol } from "../lib/message-context-menu";
 
 const symbols = {
