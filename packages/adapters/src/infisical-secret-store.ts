@@ -7,6 +7,7 @@ import type {
   SecretStore,
 } from "@rakazo/adapter-kit";
 import { SecretNotFoundError, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
+import { getLogger } from "@rakazo/logging";
 import { credentialDigest } from "./credential-digest.js";
 import { SecretChanges } from "./secret-changes.js";
 
@@ -169,7 +170,9 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
       await this.withCancellation(
         this.delete(ref, { recordId, signal: cleanupSignal }),
         cleanupSignal,
-      ).catch(() => undefined);
+      ).catch(() => {
+        getLogger().warn("Secret cleanup after a failed write did not complete; a key may remain");
+      });
       throw error;
     }
     this.observe(ref, plaintext);
