@@ -37,11 +37,39 @@ describe("Account delete", () => {
     expect(deletion).toContain("await deleteAccount(password)");
     expect(deletion).toContain('router.replace("/sign-in")');
     expect(deletion).toContain('t("Could not delete account")');
+    expect(deletion).toContain("setDeleteError");
     const dialog = sliceBetween(screen, "{deleteOpen ?", "</Modal>");
     expect(dialog).toContain("secureTextEntry");
     expect(dialog).toContain('t("Current password")');
     expect(dialog).toContain('t("Delete")');
     expect(dialog).toContain('accessibilityRole="alert"');
+    expect(dialog).toContain("deleteError");
     expect(dialog).toContain("void handleDeletion(deletePassword)");
+    expect(dialog).toContain('keyboardShouldPersistTaps="handled"');
+    expect(dialog).toContain("<ScrollView");
+    expect(dialog).toContain("styles.dialogAction");
+  });
+
+  it("shows sign-out failures next to Sign out and deletion failures on the delete row", () => {
+    const signOut = sliceBetween(
+      screen,
+      "async function handleSignOut(",
+      "async function updateNotifications(",
+    );
+    expect(signOut).toContain("setSignOutError");
+    expect(signOut).toContain('t("Could not sign out")');
+    expect(signOut).not.toContain("setDeleteError");
+    const signOutControl = sliceBetween(screen, 't("Sign out")', "archivedBots.length");
+    expect(signOutControl).toContain("signOutError");
+    expect(signOutControl).toContain('accessibilityRole="alert"');
+    expect(signOutControl).not.toContain("deleteError");
+    const visible = sliceBetween(screen, "onPress={requestDeletion}", "{deleteOpen ?");
+    expect(visible).toContain("deleteError");
+    expect(visible).not.toContain("signOutError");
+    const actions = sliceBetween(screen, "dialogAction: {", "dialogCancel:");
+    expect(actions).toContain("minHeight: 48");
+    const scroll = sliceBetween(screen, "dialogScroll: {", "dialog: {");
+    expect(scroll).toContain('maxHeight: "100%"');
+    expect(scroll).toContain("flexShrink: 1");
   });
 });

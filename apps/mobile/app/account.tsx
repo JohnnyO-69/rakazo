@@ -78,7 +78,8 @@ export default function Account() {
   const [notificationsReady, setNotificationsReady] = useState(Platform.OS !== "android");
   const [notificationPending, setNotificationPending] = useState(false);
   const [notificationError, setNotificationError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [archivedBots, setArchivedBots] = useState<MobileBot[]>([]);
   const [usage, setUsage] = useState<{
     runs: number;
@@ -157,13 +158,13 @@ export default function Account() {
 
   async function handleSignOut() {
     setPending(true);
-    setError(null);
+    setSignOutError(null);
     try {
       await signOut();
       router.dismissAll();
       router.replace(explicitSignInRoute);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("Could not sign out"));
+      setSignOutError(err instanceof Error ? err.message : t("Could not sign out"));
       setPending(false);
     }
   }
@@ -202,7 +203,7 @@ export default function Account() {
 
   function requestDeletion() {
     if (pending) return;
-    setError(null);
+    setDeleteError(null);
     const prompted = promptAccountDeletion({
       title: t("Delete your account?"),
       message: t(
@@ -246,14 +247,14 @@ export default function Account() {
   async function handleDeletion(password: string) {
     if (!password || pending) return;
     setPending(true);
-    setError(null);
+    setDeleteError(null);
     try {
       await deleteAccount(password);
       setDeleteOpen(false);
       router.dismissAll();
       router.replace("/sign-in");
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("Could not delete account"));
+      setDeleteError(err instanceof Error ? err.message : t("Could not delete account"));
     } finally {
       setPending(false);
     }
@@ -492,14 +493,21 @@ export default function Account() {
           </View>
         ) : null}
 
-        <Pressable
-          accessibilityRole="button"
-          disabled={pending}
-          onPress={() => void handleSignOut()}
-          style={({ pressed }) => [styles.button, pressed && styles.pressed]}
-        >
-          <Text style={styles.buttonLabel}>{t("Sign out")}</Text>
-        </Pressable>
+        <View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={pending}
+            onPress={() => void handleSignOut()}
+            style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+          >
+            <Text style={styles.buttonLabel}>{t("Sign out")}</Text>
+          </Pressable>
+          {signOutError ? (
+            <Text accessibilityRole="alert" style={styles.error}>
+              {signOutError}
+            </Text>
+          ) : null}
+        </View>
 
         {archivedBots.length > 0 ? (
           <View style={styles.archivedSection}>
@@ -554,9 +562,9 @@ export default function Account() {
             <Text style={styles.destructiveTitle}>{t("Delete account")}</Text>
             {pending ? <ActivityIndicator color={mobileTokens().destructive} /> : null}
           </Pressable>
-          {!deleteOpen && error ? (
+          {!deleteOpen && deleteError ? (
             <Text accessibilityRole="alert" style={styles.error}>
-              {error}
+              {deleteError}
             </Text>
           ) : null}
         </View>
@@ -572,7 +580,12 @@ export default function Account() {
               style={StyleSheet.absoluteFill}
               onPress={closeDeletePrompt}
             />
-            <View style={styles.dialog}>
+            <ScrollView
+              bounces={false}
+              contentContainerStyle={styles.dialog}
+              keyboardShouldPersistTaps="handled"
+              style={styles.dialogScroll}
+            >
               <Text style={styles.dialogTitle}>{t("Delete your account?")}</Text>
               <Text style={styles.dialogBody}>
                 {t(
@@ -587,7 +600,7 @@ export default function Account() {
                 editable={!pending}
                 onChangeText={(value) => {
                   setDeletePassword(value);
-                  setError(null);
+                  setDeleteError(null);
                 }}
                 placeholder={t("Current password")}
                 placeholderTextColor={native.tertiaryLabel}
@@ -596,19 +609,24 @@ export default function Account() {
                 textContentType="password"
                 value={deletePassword}
               />
-              {error ? (
+              {deleteError ? (
                 <Text accessibilityRole="alert" style={styles.dialogError}>
-                  {error}
+                  {deleteError}
                 </Text>
               ) : null}
               <View style={styles.dialogActions}>
-                <Pressable accessibilityRole="button" onPress={closeDeletePrompt}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={closeDeletePrompt}
+                  style={styles.dialogAction}
+                >
                   <Text style={styles.dialogCancel}>{t("Cancel")}</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
                   disabled={pending || !deletePassword}
                   onPress={() => void handleDeletion(deletePassword)}
+                  style={styles.dialogAction}
                 >
                   <Text
                     style={[styles.dialogDelete, (pending || !deletePassword) && styles.disabled]}
@@ -617,7 +635,7 @@ export default function Account() {
                   </Text>
                 </Pressable>
               </View>
-            </View>
+            </ScrollView>
           </KeyboardAvoidingView>
         </Modal>
       ) : null}
@@ -849,9 +867,14 @@ function createAccountStyles() {
       padding: 24,
       backgroundColor: "rgba(0, 0, 0, 0.62)",
     },
-    dialog: {
+    dialogScroll: {
+      flexGrow: 0,
+      flexShrink: 1,
+      maxHeight: "100%",
       borderRadius: 14,
       backgroundColor: native.page,
+    },
+    dialog: {
       padding: 18,
       gap: 12,
     },
@@ -880,7 +903,13 @@ function createAccountStyles() {
     dialogActions: {
       flexDirection: "row",
       justifyContent: "flex-end",
-      gap: 20,
+      alignItems: "center",
+      gap: 12,
+    },
+    dialogAction: {
+      minHeight: 48,
+      justifyContent: "center",
+      paddingHorizontal: 8,
     },
     dialogCancel: {
       color: native.label,

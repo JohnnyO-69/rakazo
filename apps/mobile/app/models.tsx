@@ -855,66 +855,73 @@ export default function Models() {
       )}
       {disclosureRow(t("Advanced"), showAdvanced, () => setShowAdvanced((visible) => !visible))}
       {showAdvanced ? (
-        <View style={styles.card}>
-          <View style={styles.modelRow}>
-            <Text style={styles.modelLabel}>{t("Supports thinking")}</Text>
-            <Switch
-              accessibilityLabel={t("Supports thinking")}
-              value={reasoning}
-              onValueChange={(value) => {
-                setReasoning(value);
-                if (!value) setThinkingLevel(null);
-              }}
-              disabled={busy}
-            />
+        <>
+          <View style={styles.card}>
+            <View style={styles.modelRow}>
+              <Text style={styles.modelLabel}>{t("Supports thinking")}</Text>
+              <Switch
+                accessibilityLabel={t("Supports thinking")}
+                value={reasoning}
+                onValueChange={(value) => {
+                  setReasoning(value);
+                  if (!value) setThinkingLevel(null);
+                }}
+                disabled={busy}
+              />
+            </View>
+            {reasoning ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("Reasoning effort")}
+                disabled={busy}
+                onPress={() => {
+                  presentMessageActionSheet({
+                    title: t("Reasoning effort"),
+                    cancel: t("Cancel"),
+                    more: t("More"),
+                    colorScheme,
+                    actions: [
+                      {
+                        text: t("Default"),
+                        onPress: () => setThinkingLevel(null),
+                      },
+                      ...THINKING_LEVEL_OPTIONS.map((level) => ({
+                        text: thinkingLevelLabel(level, t),
+                        onPress: () => setThinkingLevel(level),
+                      })),
+                    ],
+                  });
+                }}
+                style={({ pressed }) => [styles.modelRow, pressed && styles.pressed]}
+              >
+                <Text style={styles.modelLabel}>{t("Reasoning effort")}</Text>
+                <Text style={styles.rowValue}>
+                  {thinkingLevel ? thinkingLevelLabel(thinkingLevel, t) : t("Default")}
+                </Text>
+              </Pressable>
+            ) : null}
+            <View style={[styles.modelRow, styles.singleRow]}>
+              <Text style={styles.modelLabel}>{t("Supports images")}</Text>
+              <Switch
+                accessibilityLabel={t("Supports images")}
+                value={supportsImages}
+                onValueChange={setSupportsImages}
+                disabled={busy}
+              />
+            </View>
           </View>
-          {reasoning ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("Reasoning effort")}
-              disabled={busy}
-              onPress={() => {
-                presentMessageActionSheet({
-                  title: t("Reasoning effort"),
-                  cancel: t("Cancel"),
-                  more: t("More"),
-                  colorScheme,
-                  actions: [
-                    {
-                      text: t("Default"),
-                      onPress: () => setThinkingLevel(null),
-                    },
-                    ...THINKING_LEVEL_OPTIONS.map((level) => ({
-                      text: thinkingLevelLabel(level, t),
-                      onPress: () => setThinkingLevel(level),
-                    })),
-                  ],
-                });
-              }}
-              style={({ pressed }) => [styles.modelRow, pressed && styles.pressed]}
-            >
-              <Text style={styles.modelLabel}>{t("Reasoning effort")}</Text>
-              <Text style={styles.rowValue}>
-                {thinkingLevel ? thinkingLevelLabel(thinkingLevel, t) : t("Default")}
-              </Text>
-            </Pressable>
-          ) : null}
-          <View style={[styles.modelRow, styles.singleRow]}>
-            <Text style={styles.modelLabel}>{t("Supports images")}</Text>
-            <Switch
-              accessibilityLabel={t("Supports images")}
-              value={supportsImages}
-              onValueChange={setSupportsImages}
-              disabled={busy}
-            />
-          </View>
-        </View>
+          {limitField(t("Context limit"), contextWindow, setContextWindow, 7)}
+          {limitField(t("Maximum output tokens"), maxTokens, setMaxTokens, 6)}
+          {supportsImages
+            ? limitField(
+                t("Maximum images per request"),
+                maxImagesPerPrompt,
+                setMaxImagesPerPrompt,
+                4,
+              )
+            : null}
+        </>
       ) : null}
-      {showAdvanced ? limitField(t("Context limit"), contextWindow, setContextWindow, 7) : null}
-      {showAdvanced ? limitField(t("Maximum output tokens"), maxTokens, setMaxTokens, 6) : null}
-      {showAdvanced && supportsImages
-        ? limitField(t("Maximum images per request"), maxImagesPerPrompt, setMaxImagesPerPrompt, 4)
-        : null}
     </>
   ) : null;
 
