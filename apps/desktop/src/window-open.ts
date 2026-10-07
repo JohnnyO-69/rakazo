@@ -18,6 +18,8 @@ export function shouldOpenInAppPopup(
     return false;
   }
 
+  if (childUrl === "about:blank" && frameName === "rakazo-sso-oauth") return true;
+
   const isHttp = target.protocol === "http:" || target.protocol === "https:";
   if (appOrigin !== null && target.origin === appOrigin) return isHttp;
   return target.protocol === "https:" && OAUTH_POPUP_NAMES.has(frameName);

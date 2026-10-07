@@ -22,7 +22,7 @@ function desktopWindow() {
     }
   }
   vi.stubGlobal("BroadcastChannel", FakeChannel);
-  const popup = { closed: false, close: vi.fn() };
+  const popup = { closed: false, close: vi.fn(), location: { href: "about:blank" } };
   const location = {
     href: "https://rakazo.example.test/sign-in",
     origin: "https://rakazo.example.test",
@@ -73,7 +73,8 @@ it.each(["/app", "/onboarding", "/app?settings=account", "/sign-in?error=SSO_UNA
       ["/app", "/onboarding", "/sign-in"],
     );
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(open).toHaveBeenCalledWith(result.data.url, "rakazo-sso-oauth", expect.any(String));
+    expect(open).toHaveBeenCalledWith("about:blank", "rakazo-sso-oauth", expect.any(String));
+    expect(popup.location.href).toBe(result.data.url);
     expect(location.assign).not.toHaveBeenCalled();
     if (callback.includes("?error=")) landing += "&error=SSO_UNAVAILABLE";
     expect(land(landing)).toBe(true);
@@ -110,7 +111,7 @@ it("ignores spoofed messages, mismatched nonces, foreign URLs and unrelated path
   await flow;
 });
 
-it("reports real cancellation after the completion grace period and cleans up", async () => {
+it("bounds a closed popup handle without treating COOP as early cancellation", async () => {
   vi.useFakeTimers();
   const { popup, begin, channels } = desktopWindow();
   const flow = runSsoFlow(begin, ["/app"]);
@@ -133,8 +134,8 @@ it("bounds abandoned desktop SSO attempts", async () => {
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("does not open a popup on server errors or unsafe provider URLs", async () => {
-  const { open, channels } = desktopWindow();
+it("closes the blank popup on server errors or unsafe provider URLs", async () => {
+  const { popup, open, channels } = desktopWindow();
   const failure = { data: null, error: { code: "SSO_UNAVAILABLE" } };
   await expect(runSsoFlow(async () => failure, ["/app"])).resolves.toBe(failure);
   await expect(
@@ -148,7 +149,8 @@ it("does not open a popup on server errors or unsafe provider URLs", async () =>
       throw new Error("unavailable");
     }, ["/app"]),
   ).rejects.toThrow();
-  expect(open).not.toHaveBeenCalled();
+  expect(open).toHaveBeenCalledTimes(3);
+  expect(popup.close).toHaveBeenCalledTimes(3);
   expect(channels.every((channel) => channel.close.mock.calls.length === 1)).toBe(true);
 });
 
@@ -173,3 +175,47 @@ it("only broadcasts well-formed same-origin callback landings", () => {
   }
   expect(channels).toHaveLength(0);
 });
+
+it("opens synchronously before beginning authorization", async () => {
+  const { open, popup } = desktopWindow();
+  await expect(
+    runSsoFlow(async () => {
+      expect(open).toHaveBeenCalledWith("about:blank", "rakazo-sso-oauth", expect.any(String));
+      expect(popup.location.href).toBe("about:blank");
+      return { data: null, error: { code: "SSO_UNAVAILABLE" } };
+    }, ["/app"]),
+  ).resolves.toMatchObject({ error: { code: "SSO_UNAVAILABLE" } });
+});
+
+it.each([false, true])(
+  "retry cancels an old attempt even while begin is pending: %s",
+  async (pending) => {
+    vi.useFakeTimers();
+    const { begin, popup, channels, land, location } = desktopWindow();
+    let finish!: (value: typeof result) => void;
+    const first = runSsoFlow(
+      pending
+        ? () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            })
+        : begin,
+      ["/app"],
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    const second = runSsoFlow(begin, ["/app"]);
+    await expect(first).resolves.toEqual({ data: null, error: null });
+    expect(popup.close).toHaveBeenCalledTimes(1);
+    expect(channels[0]?.close).toHaveBeenCalled();
+    if (pending) finish({ data: { url: "https://stale.example.test/authorize" }, error: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(popup.location.href).toBe(result.data.url);
+    channels[0]?.onmessage?.({
+      data: { type: "sso-complete", nonce: "old", url: "https://rakazo.example.test/app" },
+    });
+    expect(location.assign).not.toHaveBeenCalled();
+    land();
+    await second;
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);

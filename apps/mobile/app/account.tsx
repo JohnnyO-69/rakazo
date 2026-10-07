@@ -89,6 +89,11 @@ export default function Account() {
   const [localeSaving, setLocaleSaving] = useState(false);
   const [localeError, setLocaleError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const deletionDisabled =
+    pending ||
+    (security?.hasPassword
+      ? !deletePassword
+      : !ssoReauthenticated && (!deletionCodeSent || !deletePassword.trim()));
   const [avatarPending, setAvatarPending] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<LiveNotificationSettings>(
@@ -306,7 +311,14 @@ export default function Account() {
     setDeleteError(null);
     try {
       if (hasPassword) await deleteAccount(password);
-      else await deleteAccount(undefined, deletionCodeSent ? password.trim() : undefined);
+      else {
+        const current = await fetchAccountSecurity();
+        setSecurity(current);
+        setSsoReauthenticated(current.freshOidcAuth);
+        const token = deletionCodeSent ? password.trim() : undefined;
+        if (current.hasPassword || (!current.freshOidcAuth && !token)) return;
+        await deleteAccount(undefined, token);
+      }
       setDeleteOpen(false);
       router.dismissAll();
       router.replace("/sign-in");
@@ -698,16 +710,11 @@ export default function Account() {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  disabled={pending || (!deletePassword && !ssoReauthenticated)}
+                  disabled={deletionDisabled}
                   onPress={() => void handleDeletion(deletePassword)}
                   style={styles.dialogAction}
                 >
-                  <Text
-                    style={[
-                      styles.dialogDelete,
-                      (pending || (!deletePassword && !ssoReauthenticated)) && styles.disabled,
-                    ]}
-                  >
+                  <Text style={[styles.dialogDelete, deletionDisabled && styles.disabled]}>
                     {t("Delete")}
                   </Text>
                 </Pressable>

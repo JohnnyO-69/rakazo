@@ -40,15 +40,15 @@ export function AccountAccess({
       active = false;
     };
   }, [attempt, onSecurity]);
-  async function action(run: () => Promise<unknown>) {
-    setPending(true);
+  async function action(run: () => Promise<unknown>, sso = false) {
+    if (!sso) setPending(true);
     setError(null);
     try {
       await run();
     } catch (error) {
       setError(error instanceof Error ? error.message : t`Could not continue`);
     } finally {
-      setPending(false);
+      if (!sso) setPending(false);
     }
   }
   return (
@@ -70,7 +70,7 @@ export function AccountAccess({
                 [window.location.href],
               );
               if (result.error) throw new Error(authErrorText(result.error, t`Could not continue`));
-            })
+            }, true)
           }
         >
           <Trans>Link SSO</Trans>
@@ -122,7 +122,7 @@ export function AccountAccess({
                       );
                       if (result.error)
                         throw new Error(authErrorText(result.error, t`Could not continue`));
-                    })
+                    }, true)
                   }
                 >
                   <Trans>Sign in again</Trans>
@@ -159,11 +159,21 @@ export function AccountAccess({
           )}
           <Button
             variant="destructive"
-            disabled={pending || !security || (security.hasPassword && !password)}
+            disabled={
+              pending ||
+              !security ||
+              (security.hasPassword && !password) ||
+              (!security.hasPassword && !security.freshOidcAuth && !code.trim())
+            }
             onClick={() =>
               void action(async () => {
+                const current = await fetchAccountSecurity();
+                setSecurity(current);
+                onSecurity?.(current);
+                if (!current.hasPassword && !current.freshOidcAuth && !code.trim()) return;
+                if (current.hasPassword && !password) return;
                 const result = await authClient.deleteUser(
-                  security?.hasPassword ? { password } : code ? { token: code.trim() } : {},
+                  current.hasPassword ? { password } : code.trim() ? { token: code.trim() } : {},
                 );
                 if (result.error)
                   throw new Error(authErrorText(result.error, t`Could not continue`));

@@ -52,6 +52,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  vi.restoreAllMocks();
   delete window.rakazoDesktop;
 });
 async function render(mode: "in" | "up" = "in") {
@@ -97,6 +98,7 @@ it("shows both auth choices in mixed mode", async () => {
 });
 
 it("selects a non-redirecting SSO request on desktop", async () => {
+  vi.spyOn(window, "open").mockReturnValue({ close: vi.fn() } as unknown as Window);
   window.rakazoDesktop = {} as NonNullable<Window["rakazoDesktop"]>;
   vi.mocked(fetchAuthCapabilities).mockResolvedValue(capabilities);
   vi.mocked(authClient.signIn.social).mockResolvedValue({
@@ -112,4 +114,17 @@ it("selects a non-redirecting SSO request on desktop", async () => {
   expect(authClient.signIn.social).toHaveBeenCalledWith(
     expect.objectContaining({ provider: "oidc", disableRedirect: true }),
   );
+});
+
+it("keeps SSO available for retry while an authorization request is pending", async () => {
+  vi.mocked(fetchAuthCapabilities).mockResolvedValue(capabilities);
+  vi.mocked(authClient.signIn.social).mockReturnValue(new Promise(() => undefined));
+  await render();
+  const button = Array.from(host.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes("Continue with"),
+  )!;
+  await act(async () => button.click());
+  expect(button.disabled).toBe(false);
+  await act(async () => button.click());
+  expect(authClient.signIn.social).toHaveBeenCalledTimes(2);
 });

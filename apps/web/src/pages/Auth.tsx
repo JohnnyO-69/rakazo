@@ -127,7 +127,6 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
   }
 
   async function signInWithSso() {
-    setPending(true);
     setError(null);
     try {
       const result = await runSsoFlow(
@@ -146,8 +145,6 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
       if (result.error) setError(authErrorText(result.error, t`Could not continue`));
     } catch {
       setError(t`Could not continue`);
-    } finally {
-      setPending(false);
     }
   }
 

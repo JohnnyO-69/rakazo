@@ -1350,13 +1350,18 @@ export async function fetchAccountSecurity(): Promise<AccountSecurity> {
     return legacyAccountSecurity;
   }
   if (!response.ok) throw new Error(t("Could not load sign-in options"));
-  return accountSecuritySchema.parse(body);
+  try {
+    return accountSecuritySchema.parse(body);
+  } catch {
+    throw new Error(t("Could not load sign-in options"));
+  }
 }
 
 export async function requestAccountDeletionCode(): Promise<void> {
   const { response, body } = await fetchMobileJson<unknown>(
     `${currentApiBase()}/api/auth/request-account-deletion`,
     { method: "POST", headers: { origin: "rakazo://", ...(await authHeaders()) } },
+    null,
   );
   if (!response.ok) throw new Error(authErrorText(body, t("Could not continue")));
 }

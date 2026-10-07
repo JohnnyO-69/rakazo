@@ -4,7 +4,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fetchAccountSecurity } from "../lib/account-security";
+import { fetchAccountSecurity, requestAccountDeletionCode } from "../lib/account-security";
 import { authClient } from "../lib/auth";
 import { runSsoFlow } from "../lib/sso-flow";
 import { AccountAccess } from "./AccountAccess";
@@ -107,4 +107,70 @@ it("shows the password deletion path for legacy account security", async () => {
   expect(host.textContent).not.toContain("Link SSO");
   expect(host.textContent).not.toContain("Sign in again");
   expect(host.textContent).not.toContain("Send deletion code");
+});
+
+function deleteButton() {
+  return Array.from(host.querySelectorAll("button")).filter(
+    (button) => button.textContent === "Delete account",
+  )[1]!;
+}
+it("disables passwordless deletion without a proof or nonempty code", async () => {
+  await render();
+  await click("Delete account");
+  expect(deleteButton().disabled).toBe(true);
+});
+it("refreshes an expired proof before submitting and offers reauthentication", async () => {
+  vi.mocked(fetchAccountSecurity)
+    .mockResolvedValueOnce({ ...security, freshOidcAuth: true })
+    .mockResolvedValue(security);
+  await render();
+  await click("Delete account");
+  expect(deleteButton().disabled).toBe(false);
+  await act(async () => deleteButton().click());
+  expect(fetchAccountSecurity).toHaveBeenCalledTimes(2);
+  expect(authClient.deleteUser).not.toHaveBeenCalled();
+  expect(deleteButton().disabled).toBe(true);
+  expect(host.textContent).toContain("Sign in again");
+});
+it("keeps account SSO actions available for retry", async () => {
+  vi.mocked(runSsoFlow).mockReturnValue(new Promise(() => undefined));
+  await render();
+  await click("Link SSO");
+  await click("Link SSO");
+  expect(runSsoFlow).toHaveBeenCalledTimes(2);
+  await click("Delete account");
+  await click("Sign in again");
+  await click("Sign in again");
+  expect(runSsoFlow).toHaveBeenCalledTimes(4);
+});
+
+it("requires a nonempty code and allows it after the proof expires", async () => {
+  vi.mocked(fetchAccountSecurity).mockResolvedValue({ ...security, emailDeletion: true });
+  vi.mocked(requestAccountDeletionCode).mockResolvedValue(undefined);
+  vi.mocked(authClient.deleteUser).mockResolvedValue({
+    data: null,
+    error: {
+      code: "REAUTHENTICATION_REQUIRED",
+      message: "Sign in again",
+      status: 403,
+      statusText: "Forbidden",
+    },
+  });
+  await render();
+  await click("Delete account");
+  await click("Send deletion code");
+  const input = host.querySelector<HTMLInputElement>("#deletion-code")!;
+  async function enter(value: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+  await enter("   ");
+  expect(deleteButton().disabled).toBe(true);
+  await enter(" 123456 ");
+  expect(deleteButton().disabled).toBe(false);
+  await act(async () => deleteButton().click());
+  expect(fetchAccountSecurity).toHaveBeenCalledTimes(2);
+  expect(authClient.deleteUser).toHaveBeenCalledWith({ token: "123456" });
 });

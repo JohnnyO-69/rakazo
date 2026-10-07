@@ -9,6 +9,7 @@ type SsoResult = {
 export const SSO_CALLBACK_PATH = "/sso/callback";
 const SSO_CHANNEL = "rakazo-sso-oauth";
 const SSO_TIMEOUT_MS = 5 * 60_000;
+let cancelActiveAttempt: (() => void) | undefined;
 
 /** The callback runs before session routing, including failed authentication. */
 export function completeSsoCallback(): boolean {
@@ -57,8 +58,24 @@ export async function runSsoFlow(
   const channel = new BroadcastChannel(`${SSO_CHANNEL}:${nonce}`);
   let popup: Window | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancelled = false;
+  let rejectCancellation: (error: Error) => void = () => undefined;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const cancel = () => {
+    cancelled = true;
+    channel.onmessage = null;
+    clearTimeout(timer);
+    popup?.close();
+    rejectCancellation(new Error("SSO attempt replaced"));
+  };
+  cancelActiveAttempt?.();
+  cancelActiveAttempt = cancel;
   try {
-    const result = await begin(true, callbackURL);
+    popup = window.open("about:blank", SSO_CHANNEL, "popup,width=560,height=720");
+    if (!popup) throw new Error(t`Could not continue`);
+    const result = await Promise.race([begin(true, callbackURL), cancellation]);
     if (result.error) return result;
     let target: URL;
     try {
@@ -68,51 +85,51 @@ export async function runSsoFlow(
     }
     if (target.protocol !== "https:" && target.origin !== window.location.origin)
       throw new Error(t`Could not continue`);
-    popup = window.open(target.href, SSO_CHANNEL, "popup,width=560,height=720");
-    if (!popup) throw new Error(t`Could not continue`);
-    await new Promise<void>((resolve, reject) => {
-      channel.onmessage = (event: MessageEvent) => {
-        const message: unknown = event.data;
-        if (!message || typeof message !== "object") return;
-        if (!("nonce" in message) || message.nonce !== nonce) return;
-        if (
-          !("type" in message) ||
-          (message.type !== "sso-complete" && message.type !== "sso-error") ||
-          !("url" in message) ||
-          typeof message.url !== "string"
-        )
-          return;
-        let returned: URL;
-        try {
-          returned = new URL(message.url);
-        } catch {
-          return;
-        }
-        if (
-          returned.origin !== window.location.origin ||
-          !callbacks.some(
-            (callback) =>
-              callback.origin === returned.origin && callback.pathname === returned.pathname,
+    popup.location.href = target.href;
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        channel.onmessage = (event: MessageEvent) => {
+          const message: unknown = event.data;
+          if (!message || typeof message !== "object") return;
+          if (!("nonce" in message) || message.nonce !== nonce) return;
+          if (
+            !("type" in message) ||
+            (message.type !== "sso-complete" && message.type !== "sso-error") ||
+            !("url" in message) ||
+            typeof message.url !== "string"
           )
-        )
-          return;
-        window.location.assign(returned.href);
-        resolve();
-      };
-      // COOP makes closed indistinguishable from cancellation. Give both the
-      // full completion budget; a closed handle is never a success signal.
-      timer = setTimeout(() => {
-        if (popup?.closed) {
-          reject(new Error(t`Could not continue`));
-          return;
-        }
-        timer = setTimeout(() => reject(new Error(t`Could not continue`)), 250);
-      }, SSO_TIMEOUT_MS);
-    });
+            return;
+          let returned: URL;
+          try {
+            returned = new URL(message.url);
+          } catch {
+            return;
+          }
+          if (
+            returned.origin !== window.location.origin ||
+            !callbacks.some(
+              (callback) =>
+                callback.origin === returned.origin && callback.pathname === returned.pathname,
+            )
+          )
+            return;
+          window.location.assign(returned.href);
+          resolve();
+        };
+        // COOP can sever the handle while authentication continues. Retrying
+        // cancels this wait; a closed handle is never a success signal.
+        timer = setTimeout(() => reject(new Error(t`Could not continue`)), SSO_TIMEOUT_MS);
+      }),
+      cancellation,
+    ]);
     return result;
+  } catch (error) {
+    if (cancelled) return { data: null, error: null };
+    throw error;
   } finally {
+    if (cancelActiveAttempt === cancel) cancelActiveAttempt = undefined;
     clearTimeout(timer);
     channel.close();
-    popup?.close();
+    if (!cancelled) popup?.close();
   }
 }

@@ -47,3 +47,13 @@ it("keeps SSO popups sandboxed in the parent session without a privileged preloa
     false,
   );
 });
+
+it("allows only the named SSO blank popup before provider navigation", () => {
+  expect(shouldOpenInAppPopup(appOrigin, "about:blank", "rakazo-sso-oauth")).toBe(true);
+  expect(
+    shouldOpenInAppPopup(appOrigin, "https://provider.example.test/authorize", "rakazo-sso-oauth"),
+  ).toBe(true);
+  for (const name of ["_blank", "rakazo-mcp-oauth", ""])
+    expect(shouldOpenInAppPopup(appOrigin, "about:blank", name)).toBe(false);
+  expect(shouldOpenInAppPopup(appOrigin, "about:blank#unsafe", "rakazo-sso-oauth")).toBe(false);
+});

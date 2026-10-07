@@ -10,7 +10,11 @@ export async function fetchAccountSecurity() {
   // Electron ships this client independently of the connected API version.
   if (response.status === 404) return legacyAccountSecurity;
   if (!response.ok) throw new Error(t`Could not load sign-in options`);
-  return accountSecuritySchema.parse(await readBoundedJsonResponse<unknown>(response, 64 * 1024));
+  try {
+    return accountSecuritySchema.parse(await readBoundedJsonResponse<unknown>(response, 64 * 1024));
+  } catch {
+    throw new Error(t`Could not load sign-in options`);
+  }
 }
 
 export async function requestAccountDeletionCode() {
@@ -18,11 +22,13 @@ export async function requestAccountDeletionCode() {
     method: "POST",
     signal: AbortSignal.timeout(8_000),
   });
-  if (!response.ok)
-    throw new Error(
-      authErrorText(
-        await readBoundedJsonResponse<unknown>(response, 64 * 1024),
-        t`Could not continue`,
-      ),
-    );
+  if (!response.ok) {
+    let body: unknown;
+    try {
+      body = await readBoundedJsonResponse<unknown>(response, 64 * 1024);
+    } catch {
+      // Gateways may return HTML or an empty body.
+    }
+    throw new Error(authErrorText(body, t`Could not continue`));
+  }
 }

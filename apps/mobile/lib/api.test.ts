@@ -22,6 +22,7 @@ import {
   mobileThreadRefreshResult,
   passwordResetCapabilities,
   prependMobileMessagePage,
+  requestAccountDeletionCode,
   requestPasswordReset,
   resetApiBase,
   rpc,
@@ -3073,4 +3074,20 @@ describe("mobile clipboard text", () => {
     expect(selectableMobileMessageText(message)).toBe("    indented\nnext  ");
     expect(copyableMobileMessageText(message)).toBe("indented\nnext");
   });
+});
+
+it.each([502, 429])("localizes non-JSON deletion-code HTTP %s", async (status) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("<html>Gateway error</html>", { status })),
+  );
+  await expect(requestAccountDeletionCode()).rejects.toThrow("Could not continue");
+});
+
+it("localizes non-JSON successful account-security responses", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("<html>Gateway error</html>")),
+  );
+  await expect(fetchAccountSecurity()).rejects.toThrow("Could not load sign-in options");
 });

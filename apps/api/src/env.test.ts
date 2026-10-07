@@ -235,6 +235,14 @@ describe("OIDC environment", () => {
       loadEnv({ ...base, ...oidc, OIDC_ISSUER: "http://identity.example.test" }),
     ).toThrow(/HTTPS/);
   });
+  it.each(["identity.example.test", "/issuer", "https://"])(
+    "reports invalid issuer %s as a configuration error",
+    (issuer) => {
+      expect(() => loadEnv({ ...base, ...oidc, OIDC_ISSUER: issuer })).toThrow(
+        "OIDC_ISSUER must be an HTTPS issuer URL",
+      );
+    },
+  );
   it("guards password-only lockout without contacting discovery", () => {
     expect(() => loadEnv({ ...base, AUTH_PASSWORD_ENABLED: "false" })).toThrow(/requires OIDC/);
     expect(loadEnv({ ...base, ...oidc, AUTH_PASSWORD_ENABLED: "false" }).passwordAuth).toBe(false);

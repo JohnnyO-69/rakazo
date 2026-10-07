@@ -113,9 +113,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     );
   }
   if (issuer) {
-    const url = new URL(issuer);
-    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+    try {
+      const url = new URL(issuer);
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
+        throw new Error();
+    } catch {
       throw new Error("OIDC_ISSUER must be an HTTPS issuer URL");
+    }
   }
   if (source.AUTH_PASSWORD_ENABLED && !["true", "false"].includes(source.AUTH_PASSWORD_ENABLED))
     throw new Error("AUTH_PASSWORD_ENABLED must be true or false");
