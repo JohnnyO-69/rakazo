@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { JobPublisher, SecretStore } from "@rakazo/adapter-kit";
-import { runContinueJob } from "@rakazo/adapter-kit";
+import { runContinueJob, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
@@ -150,7 +150,12 @@ function decryptWebhookSecret(
   };
   entry.plaintext = secrets.load(secret.ciphertext, secret.id).catch((error: unknown) => {
     // Auth and malformed ciphertext stay unusable. Anything else can clear, so retry it.
-    if (!isPermanentDecryptFailure(error) && cache.get(botId) === entry) cache.delete(botId);
+    if (
+      (error instanceof SecretStoreUnavailableError || !isPermanentDecryptFailure(error)) &&
+      cache.get(botId) === entry
+    )
+      cache.delete(botId);
+    if (error instanceof SecretStoreUnavailableError) throw error;
     return null;
   });
   return entry;

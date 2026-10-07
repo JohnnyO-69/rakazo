@@ -81,10 +81,11 @@ import {
   planLiveConnectionSync,
   prepareApiInstall,
   prepareGraphqlInstall,
+  prepareManagedConnectorForTransaction,
+  prepareStoredModelAuth,
   probeOpenAiCompatibleModels,
   provisionComputer,
   queueComputerUpdate,
-  readStoredModelAuth,
   releaseComputerExecutionLease,
   replaceComputer,
   resolveAutoReviewChecker,
@@ -1238,28 +1239,45 @@ export function createRouter(deps: RouterDeps) {
           };
         };
         await withSerializableRetry(async () => {
-          // Warm each candidate's live catalog before opening the serializable
-          // transaction — the in-transaction reads use waitMs 0 so the tx never
-          // waits on network. The warm also kicks a detached credential refresh
-          // for expired bearers so a retried call sees the rotated token.
-          const warm = await loadSpaceModelState(deps.prisma).catch(() => undefined);
-          await Promise.all(
-            (warm?.candidates ?? []).map((candidate) =>
-              readStoredModelAuth(
-                deps.prisma,
-                deps.secrets,
-                context.actor.userId,
-                candidate.secretId,
-                input.provider,
-                input.modelId,
-                codexCatalog,
-                {
-                  onExpiredToken: () =>
-                    refreshExpiredCredential(context.actor, candidate.secretId, input.provider),
-                },
-              ).catch(() => undefined),
+          const preparedState = await loadSpaceModelState(deps.prisma);
+          const preparedAuth = new Map(
+            await Promise.all(
+              preparedState.candidates.map(
+                async (candidate) =>
+                  [
+                    candidate.secretId,
+                    await prepareStoredModelAuth(
+                      deps.prisma,
+                      deps.secrets,
+                      context.actor.userId,
+                      candidate.secretId,
+                      input.provider,
+                      input.modelId,
+                      codexCatalog,
+                      {
+                        onExpiredToken: () =>
+                          refreshExpiredCredential(
+                            context.actor,
+                            candidate.secretId,
+                            input.provider,
+                          ),
+                      },
+                    ),
+                  ] as const,
+              ),
             ),
           );
+          const needsThinking =
+            input.thinkingLevel === undefined
+              ? preparedState.preferences.some(
+                  (preference) =>
+                    preference.modelId === usableModelId(input.modelId) &&
+                    Boolean(preference.thinkingLevel),
+                )
+              : Boolean(input.thinkingLevel);
+          const thinking = needsThinking
+            ? await prepareAllowedThinkingLevels(deps, context.actor, input.provider, input.modelId)
+            : { allowed: undefined, secret: undefined };
           return deps.prisma.$transaction(
             async (tx) => {
               const { preferences, candidates } = await loadSpaceModelState(tx);
@@ -1268,6 +1286,15 @@ export function createRouter(deps: RouterDeps) {
                   message: `No model credential is connected for ${input.provider}.`,
                 });
               }
+              if (thinking.secret) {
+                const current = await tx.secret.findFirst({
+                  where: { id: thinking.secret.id, userId: context.actor.userId, spaceId: null },
+                  select: { ciphertext: true },
+                });
+                if (current?.ciphertext !== thinking.secret.ciphertext) {
+                  throw new ORPCError("CONFLICT", { message: "Model credentials changed; retry." });
+                }
+              }
               const savedModelId = new Map(
                 preferences.map((preference) => [preference.credential.id, preference.modelId]),
               );
@@ -1275,20 +1302,15 @@ export function createRouter(deps: RouterDeps) {
               let authFailure: string | undefined;
               let sawReadable = false;
               for (const candidate of candidates) {
-                const auth = await readStoredModelAuth(
-                  tx,
-                  deps.secrets,
-                  context.actor.userId,
-                  candidate.secretId,
-                  input.provider,
-                  input.modelId,
-                  codexCatalog,
-                  {
-                    waitMs: 0,
-                    onExpiredToken: () =>
-                      refreshExpiredCredential(context.actor, candidate.secretId, input.provider),
-                  },
-                );
+                const prepared = preparedAuth.get(candidate.secretId);
+                const current = await tx.secret.findFirst({
+                  where: { id: candidate.secretId, userId: context.actor.userId, spaceId: null },
+                  select: { id: true, ciphertext: true },
+                });
+                if (!prepared || (current?.ciphertext ?? null) !== prepared.ref) {
+                  throw new ORPCError("CONFLICT", { message: "Model credentials changed; retry." });
+                }
+                const auth = prepared.auth;
                 if (auth.status === "unreadable") continue;
                 sawReadable = true;
                 if (auth.status === "rejected") {
@@ -1324,13 +1346,10 @@ export function createRouter(deps: RouterDeps) {
                     : null;
               }
               if (thinkingLevel) {
-                const allowed = await allowedThinkingLevels(
-                  deps,
-                  context.actor,
-                  input.provider,
-                  input.modelId,
-                );
-                thinkingLevel = clampCatalogThinkingLevel(thinkingLevel, allowed);
+                if (!needsThinking) {
+                  throw new ORPCError("CONFLICT", { message: "Model preferences changed; retry." });
+                }
+                thinkingLevel = clampCatalogThinkingLevel(thinkingLevel, thinking.allowed);
               }
               await selectSpaceModelPreference(
                 tx,
@@ -1342,6 +1361,10 @@ export function createRouter(deps: RouterDeps) {
             },
             { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
           );
+        }).catch((error: unknown) => {
+          if (error instanceof SecretStoreUnavailableError)
+            throw new ORPCError("SERVICE_UNAVAILABLE", { cause: error });
+          throw error;
         });
         return { ok: true as const };
       }),
@@ -4402,6 +4425,13 @@ export function createRouter(deps: RouterDeps) {
             message: `Connector ${existing.connectorId} is not configured`,
           });
         }
+        const prepared =
+          existing.status !== "connected"
+            ? await prepareManagedConnectorForTransaction(connector)
+            : { provider: connector, recheck: undefined };
+        const transactionConnector = prepared.provider;
+        if (!transactionConnector)
+          throw new ORPCError("BAD_REQUEST", { message: "Integration provider is not configured" });
         let row = existing;
         if (existing.status !== "connected") {
           // Hold the provider lock across remote completion, account-id resolution,
@@ -4424,6 +4454,11 @@ export function createRouter(deps: RouterDeps) {
                 },
               });
               if (!current) throw new IsolationError();
+              if (prepared.recheck && !(await prepared.recheck(tx))) {
+                throw new ORPCError("CONFLICT", {
+                  message: "Integration credentials changed; retry.",
+                });
+              }
               if (current.status === "connected") return current;
               if (current.status === "revoked") {
                 // Authorization URLs from a revoke-win begin can still finish
@@ -4453,7 +4488,7 @@ export function createRouter(deps: RouterDeps) {
                 try {
                   if (pendingRef && pendingRef !== current.provider) {
                     const cancelAuthorizationRequest = (
-                      connector as {
+                      transactionConnector as {
                         cancelAuthorizationRequest?: (
                           requestId: string,
                           context: typeof revokedContext,
@@ -4464,7 +4499,7 @@ export function createRouter(deps: RouterDeps) {
                       await cancelAuthorizationRequest(pendingRef, revokedContext);
                     } else {
                       const resolveAccountId = (
-                        connector as {
+                        transactionConnector as {
                           resolveConnectedAccountId?: (
                             userId: string,
                             slug: string,
@@ -4486,12 +4521,12 @@ export function createRouter(deps: RouterDeps) {
                         revokeRef = resolved ?? "";
                       }
                       if (revokeRef) {
-                        await connector.revoke(revokeRef, revokedContext);
+                        await transactionConnector.revoke(revokeRef, revokedContext);
                       }
                     }
                   } else {
                     const revokeUnreferenced = (
-                      connector as {
+                      transactionConnector as {
                         revokeUnreferencedAccounts?: (
                           slug: string,
                           keepAccountIds: string[],
@@ -4542,12 +4577,15 @@ export function createRouter(deps: RouterDeps) {
               if (input.code) {
                 const state = current.providerRef ?? current.provider;
                 try {
-                  await connector.complete({ state, code: input.code }, adapterContext);
+                  await transactionConnector.complete({ state, code: input.code }, adapterContext);
                 } catch (error) {
                   throw new ORPCError("BAD_REQUEST", { message: sanitizeComposioError(error) });
                 }
               }
-              const ready = await connector.connectionReady(adapterContext, current.provider);
+              const ready = await transactionConnector.connectionReady(
+                adapterContext,
+                current.provider,
+              );
               if (!ready) return current;
 
               // Browser OAuth stores a connection-request id in providerRef from
@@ -4555,7 +4593,7 @@ export function createRouter(deps: RouterDeps) {
               // right remote authorization. Prefer an account id not already used
               // by a sibling row for the same provider.
               const resolveAccountId = (
-                connector as {
+                transactionConnector as {
                   resolveConnectedAccountId?: (
                     userId: string,
                     slug: string,
@@ -4570,7 +4608,7 @@ export function createRouter(deps: RouterDeps) {
                 }
               ).resolveConnectedAccountId;
               const fallbackAccountId = (
-                connector as {
+                transactionConnector as {
                   connectedAccountId?: (
                     userId: string,
                     slug: string,
@@ -4717,6 +4755,33 @@ export function createRouter(deps: RouterDeps) {
           connectionRef: string;
           accountSpecific: boolean;
         };
+        const snapshot = await deps.prisma.connection.findFirst({
+          where: {
+            id: input.connectionId,
+            spaceId: context.actor.spaceId,
+            userId: context.actor.userId,
+          },
+        });
+        const needsProvider =
+          snapshot &&
+          ["connected", "pending", "error"].includes(snapshot.status) &&
+          (!snapshot.providerRef || snapshot.providerRef === snapshot.provider) &&
+          (await deps.prisma.connection.count({
+            where: {
+              spaceId: context.actor.spaceId,
+              userId: context.actor.userId,
+              connectorId: snapshot.connectorId,
+              provider: snapshot.provider,
+              id: { not: snapshot.id },
+              status: { in: ["connected", "pending"] },
+            },
+          })) === 0;
+        const configured = needsProvider
+          ? deps.connectors.managed(snapshot.connectorId)
+          : undefined;
+        const prepared = configured
+          ? await prepareManagedConnectorForTransaction(configured)
+          : undefined;
         const outcome = await deps.prisma.$transaction(
           async (tx) => {
             const row = await tx.connection.findFirst({
@@ -4787,7 +4852,17 @@ export function createRouter(deps: RouterDeps) {
             // still holding the begin/revoke lock so a new authorization cannot be
             // created and then wiped by Pipedream's slug-scoped DELETE.
             if (!accountSpecific) {
-              const connector = deps.connectors.managed(row.connectorId);
+              if (
+                !needsProvider ||
+                row.connectorId !== snapshot?.connectorId ||
+                row.provider !== snapshot?.provider ||
+                (prepared?.recheck && !(await prepared.recheck(tx)))
+              ) {
+                throw new ORPCError("CONFLICT", {
+                  message: "Integration credentials changed; retry.",
+                });
+              }
+              const connector = prepared?.provider;
               if (!connector) {
                 throw new ORPCError("BAD_REQUEST", {
                   message: `Connector ${row.connectorId} is not configured`,
@@ -5841,17 +5916,20 @@ async function modelSetup(deps: RouterDeps, actor: Actor) {
  * `thinkingLevels`; unknown catalog ids return undefined (no check). OpenAI-compatible
  * connections only advertise levels when the stored endpoint's saved model matches.
  */
-async function allowedThinkingLevels(
+async function prepareAllowedThinkingLevels(
   deps: RouterDeps,
   actor: Actor,
   provider: string,
   modelId: string,
-): Promise<string[] | undefined> {
+): Promise<{ allowed: string[] | undefined; secret?: { id: string; ciphertext: string } }> {
   if (provider !== OPENAI_COMPATIBLE_PROVIDER_ID) {
-    return listPiCatalog().find((item) => item.provider === provider && item.id === modelId)
-      ?.thinkingLevels;
+    return {
+      allowed: listPiCatalog().find((item) => item.provider === provider && item.id === modelId)
+        ?.thinkingLevels,
+    };
   }
   let allowed: string[] | undefined = ["off"];
+  let savedSecret: { id: string; ciphertext: string } | undefined;
   const credential = await findModelCredential(deps.prisma, actor, provider);
   if (credential && credential.defaultModel === modelId) {
     const secret = await deps.prisma.secret.findFirst({
@@ -5859,6 +5937,7 @@ async function allowedThinkingLevels(
       select: { ciphertext: true },
     });
     if (secret) {
+      savedSecret = { id: credential.secretId, ciphertext: secret.ciphertext };
       try {
         allowed =
           modelCredentialDto(
@@ -5870,7 +5949,13 @@ async function allowedThinkingLevels(
       }
     }
   }
-  return allowed;
+  return { allowed, secret: savedSecret };
+}
+
+async function allowedThinkingLevels(
+  ...args: Parameters<typeof prepareAllowedThinkingLevels>
+): Promise<string[] | undefined> {
+  return (await prepareAllowedThinkingLevels(...args)).allowed;
 }
 
 async function computerStatus(

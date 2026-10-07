@@ -56,10 +56,16 @@ export class IntegrationProviderSettings {
   }
 
   async resolve(id: IntegrationProviderId): Promise<ManagedConnectorProvider | undefined> {
+    return (await this.prepare(id)).provider;
+  }
+
+  async prepare(
+    id: IntegrationProviderId,
+  ): Promise<{ provider: ManagedConnectorProvider | undefined; ref: string | null }> {
     const row = await this.prisma.integrationProviderConfig.findUnique({ where: { id } });
     if (!row) {
       this.cache.delete(id);
-      return this.fallbacks[id];
+      return { provider: this.fallbacks[id], ref: null };
     }
     let invalidated = false;
     const unsubscribe =
@@ -68,16 +74,17 @@ export class IntegrationProviderSettings {
       }) ?? (() => {});
     try {
       const plaintext = await this.secrets.load(row.ciphertext, `integration-provider:${id}`);
-      if (invalidated) return await this.resolve(id);
+      if (invalidated) return await this.prepare(id);
       const cached = this.cache.get(id);
       const digest = credentialDigest(plaintext);
-      if (cached?.ciphertext === row.ciphertext && cached.digest === digest) return cached.adapter;
+      if (cached?.ciphertext === row.ciphertext && cached.digest === digest)
+        return { provider: cached.adapter, ref: row.ciphertext };
       const config = IntegrationProviderConfigSchema.parse(JSON.parse(plaintext));
       if (config.provider !== id)
         throw new Error("Integration provider configuration does not match");
       const adapter = this.create(config);
       this.cache.set(id, { ciphertext: row.ciphertext, digest, adapter });
-      return adapter;
+      return { provider: adapter, ref: row.ciphertext };
     } finally {
       unsubscribe();
     }
@@ -125,7 +132,23 @@ class ConfiguredIntegrationProvider implements ManagedConnectorProvider {
   constructor(
     private readonly id: IntegrationProviderId,
     private readonly settings: IntegrationProviderSettings,
+    private readonly prepared?: ManagedConnectorProvider,
   ) {}
+  async prepareForTransaction() {
+    const prepared = await this.settings.prepare(this.id);
+    return {
+      provider: prepared.provider
+        ? new ConfiguredIntegrationProvider(this.id, this.settings, prepared.provider)
+        : undefined,
+      recheck: async (client: Pick<PrismaClient, "integrationProviderConfig">) => {
+        const current = await client.integrationProviderConfig.findUnique({
+          where: { id: this.id },
+          select: { ciphertext: true },
+        });
+        return (current?.ciphertext ?? null) === prepared.ref;
+      },
+    };
+  }
   describe() {
     return {
       id: this.id,
@@ -134,19 +157,22 @@ class ConfiguredIntegrationProvider implements ManagedConnectorProvider {
       capabilities: { discover: true, oauth: true, secretsBrokered: true },
     };
   }
+  private async resolve() {
+    return this.prepared ?? this.settings.resolve(this.id);
+  }
   private async required() {
-    const provider = await this.settings.resolve(this.id);
+    const provider = await this.resolve();
     if (!provider) throw new Error("Set up an integration provider in Integrations first");
     return provider;
   }
   async catalog(context: AdapterContext, query?: string) {
-    return (await this.settings.resolve(this.id))?.catalog(context, query) ?? [];
+    return (await this.resolve())?.catalog(context, query) ?? [];
   }
   async discoverTools(context: AdapterContext) {
-    return (await this.settings.resolve(this.id))?.discoverTools(context) ?? [];
+    return (await this.resolve())?.discoverTools(context) ?? [];
   }
   async listConnectedExternalIds(context: AdapterContext) {
-    return (await this.settings.resolve(this.id))?.listConnectedExternalIds(context) ?? [];
+    return (await this.resolve())?.listConnectedExternalIds(context) ?? [];
   }
   async connectionReady(context: AdapterContext, externalId: string) {
     return (await this.required()).connectionReady(context, externalId);
@@ -169,4 +195,10 @@ class ConfiguredIntegrationProvider implements ManagedConnectorProvider {
   async *execute(call: ConnectorCall, context: AdapterContext) {
     yield* (await this.required()).execute(call, context);
   }
+}
+
+export async function prepareManagedConnectorForTransaction(connector: ManagedConnectorProvider) {
+  return connector instanceof ConfiguredIntegrationProvider
+    ? connector.prepareForTransaction()
+    : { provider: connector, recheck: undefined };
 }

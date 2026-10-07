@@ -249,15 +249,8 @@ export type StoredModelAuthRead =
   | { status: "unreadable" }
   | { status: "rejected"; message: string };
 
-/**
- * Load a stored credential and check whether it can call this catalog model.
- * When `live` is given, the backend's per-account catalog can lift a static
- * OAuth exclusion for the credential's own account (e.g. Codex Spark). Pass
- * `liveOpts.waitMs: 0` where a catalog fetch must not block (inside a
- * transaction) and `liveOpts.onExpiredToken` to kick a detached refresh when
- * the stored bearer has expired.
- */
-export async function readStoredModelAuth(
+/** Load credential auth outside transactions; retain the ref for a transactional recheck. */
+export async function prepareStoredModelAuth(
   prisma: Pick<PrismaClient, "secret">,
   secretStore: Pick<SecretStore, "load">,
   userId: string,
@@ -266,34 +259,43 @@ export async function readStoredModelAuth(
   modelId: string,
   live?: CodexLiveCatalog,
   liveOpts?: CodexLiveReadOptions,
-): Promise<StoredModelAuthRead> {
+): Promise<{ ref: string | null; auth: StoredModelAuthRead }> {
   const secret = await prisma.secret.findFirst({
     where: { id: secretId, userId, spaceId: null },
     select: { id: true, ciphertext: true },
   });
-  if (!secret) return { status: "unreadable" };
+  if (!secret) return { ref: null, auth: { status: "unreadable" } };
   let plaintext: string;
   try {
     plaintext = await secretStore.load(secret.ciphertext, secret.id);
   } catch (error) {
     if (error instanceof SecretStoreUnavailableError) throw error;
-    return { status: "unreadable" };
+    return { ref: secret.ciphertext, auth: { status: "unreadable" } };
   }
   let message: string | undefined;
   try {
     message = validateModelAuthAvailability(provider, modelId, plaintext);
   } catch {
     // A secret that decrypts but does not parse is as unreadable as a corrupt one.
-    return { status: "unreadable" };
+    return { ref: secret.ciphertext, auth: { status: "unreadable" } };
   }
   // validateModelAuthAvailability already parsed the secret without throwing.
   if (
     message &&
     (await codexLiveListsModel(live, userId, parseModelSecret(plaintext), modelId, liveOpts))
   ) {
-    return { status: "ready" };
+    return { ref: secret.ciphertext, auth: { status: "ready" } };
   }
-  return message ? { status: "rejected", message } : { status: "ready" };
+  return {
+    ref: secret.ciphertext,
+    auth: message ? { status: "rejected", message } : { status: "ready" },
+  };
+}
+
+export async function readStoredModelAuth(
+  ...args: Parameters<typeof prepareStoredModelAuth>
+): Promise<StoredModelAuthRead> {
+  return (await prepareStoredModelAuth(...args)).auth;
 }
 
 /** Readable rejection when a stored credential cannot call this catalog model. */

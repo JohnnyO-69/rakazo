@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import {
   ComposedSecretStore,
   EncryptedSecretStore,
@@ -633,6 +634,36 @@ describe("GitHub event HTTP route", () => {
 });
 
 describe("webhook secret decryption", () => {
+  it.each(["webhook", "github"])(
+    "returns 503 during a store outage and retries %s",
+    async (route) => {
+      const load = vi
+        .fn()
+        .mockRejectedValueOnce(new SecretStoreUnavailableError())
+        .mockResolvedValue(SECRET);
+      const deps = createDeps({ load });
+      const app = mount(deps);
+      const raw = JSON.stringify({ event: "ping" });
+      const request = () =>
+        app.request(`/api/v1/bots/bot-1/${route}`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${SECRET}`,
+            "x-hub-signature-256": `sha256=${createHmac("sha256", SECRET).update(raw).digest("hex")}`,
+          },
+          body: raw,
+        });
+      const outage = await request();
+      expect(outage.status).toBe(503);
+      await expect(outage.json()).resolves.toEqual({ error: "Service unavailable" });
+      expect(deps.sendUserMessage).not.toHaveBeenCalled();
+      expect((await request()).status).toBe(200);
+      expect(load).toHaveBeenCalledTimes(2);
+      expect((await request()).status).toBe(200);
+      expect(load).toHaveBeenCalledTimes(2);
+    },
+  );
+
   function signedGithubDelivery(raw: string, secret: string) {
     return {
       method: "POST" as const,
