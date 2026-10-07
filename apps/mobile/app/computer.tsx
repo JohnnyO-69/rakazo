@@ -14,10 +14,10 @@ import { ComputerModePicker } from "../components/computer-mode-picker";
 import { GlassIconButton } from "../components/glass-icon-button";
 import { NativeActionButton } from "../components/native-action-button";
 import { currentApiBase, rpc } from "../lib/api";
+import type { ComputerStatus } from "../lib/computer";
 import {
   COMPUTER_HEARTBEAT_MS,
   COMPUTER_LIFECYCLE_TIMEOUT_MS,
-  type ComputerStatus,
   computerLabel,
   controlLabel,
   embeddableScreenUrl,

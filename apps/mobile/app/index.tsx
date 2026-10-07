@@ -1,23 +1,11 @@
 import { MenuView } from "@expo/ui/community/menu";
-import {
-  normalizeCreateBotProfile,
-  type RunActivityRow,
-  type SearchHit,
-  type SpaceBot,
-  type SpaceGroup,
-} from "@rakazo/contracts";
+import type { RunActivityRow, SearchHit, SpaceBot, SpaceGroup } from "@rakazo/contracts";
+import { normalizeCreateBotProfile } from "@rakazo/contracts";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import { botColors } from "@rakazo/ui-tokens";
 import { Redirect, useFocusEffect, useNavigation, useRouter } from "expo-router";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -43,15 +31,17 @@ import {
   formatActivityRelativeTime,
 } from "../lib/activity";
 import { loadActivityMode, saveActivityMode } from "../lib/activity-mode";
+import type {
+  MobileBot,
+  MobileBotSection,
+  MobileGroup,
+  MobileMe,
+  MobileSpace,
+  MobileSpaceNavigation,
+} from "../lib/api";
 import {
   currentApiBase,
   loadSessionToken,
-  type MobileBot,
-  type MobileBotSection,
-  type MobileGroup,
-  type MobileMe,
-  type MobileSpace,
-  type MobileSpaceNavigation,
   rpc,
   selectedSpaceId,
   selectInitialSpace,
@@ -62,10 +52,9 @@ import { mobileBotAvatarPresentation } from "../lib/bot-avatar";
 import { allowFocusPrompt, scheduleFocusPrompt } from "../lib/focus-prompt";
 import { t, useI18n } from "../lib/i18n";
 import { botTag, filterBots, formatThreadTime, userInitials } from "../lib/inbox";
+import type { InboxSpace, InboxSpaceItem } from "../lib/inbox-spaces";
 import {
   canDeleteInboxSpace,
-  type InboxSpace,
-  type InboxSpaceItem,
   inboxNeedsCreateHint,
   removeInboxSpace,
   retryInboxSpaceFallback,

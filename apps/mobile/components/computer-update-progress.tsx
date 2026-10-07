@@ -1,4 +1,5 @@
-import { COMPUTER_UPDATE_STAGES, type ComputerUpdate } from "@rakazo/contracts";
+import type { ComputerUpdate } from "@rakazo/contracts";
+import { COMPUTER_UPDATE_STAGES } from "@rakazo/contracts";
 import { computerUpdateNeedsAttention, computerUpdateStages } from "@rakazo/core";
 import { usePathname } from "expo-router";
 import { useEffect, useState, useSyncExternalStore } from "react";

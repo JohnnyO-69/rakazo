@@ -68,15 +68,15 @@ export function ComputerMaintenanceActions({
     }
   }
 
-  function openResetConfirm() {
+  function openConfirm(action: "reset" | "recover") {
     setError(null);
     setMenuOpen(false);
-    setConfirmAction("reset");
+    setConfirmAction(action);
   }
 
   // Escape closes the dialog inside the popup, so Shell's Escape handler does not also
   // close the computer overlay.
-  const resetDialog = (
+  const confirmationDialog = (
     <AlertDialog
       open={confirmAction !== null}
       onOpenChange={(open) => {
@@ -153,11 +153,7 @@ export function ComputerMaintenanceActions({
               disabled={busy || pending !== null}
               aria-label={t`Recover computer`}
               className="flex flex-col items-start"
-              onClick={() => {
-                setMenuOpen(false);
-                setError(null);
-                setConfirmAction("recover");
-              }}
+              onClick={() => openConfirm("recover")}
             >
               <span>
                 {pending === "recover" ? (
@@ -176,7 +172,7 @@ export function ComputerMaintenanceActions({
               aria-label={t`Reset computer`}
               className="flex flex-col items-start"
               disabled={busy || pending !== null}
-              onClick={openResetConfirm}
+              onClick={() => openConfirm("reset")}
             >
               <span>
                 {pending === "reset" ? <Trans>Resetting…</Trans> : <Trans>Reset computer</Trans>}
@@ -205,7 +201,7 @@ export function ComputerMaintenanceActions({
           {error ? <p className="px-1.5 py-1 text-[12.5px] text-destructive">{error}</p> : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      {resetDialog}
+      {confirmationDialog}
     </>
   );
 }

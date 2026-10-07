@@ -20,11 +20,11 @@ import { SandboxedHtmlPreview } from "../components/sandboxed-html-preview";
 import { formatActivityRelativeTime } from "../lib/activity";
 import { mobileTokens } from "../lib/appearance";
 import { shareLocalFile, writeArtifactCacheFile } from "../lib/artifact-open";
+import type { MobileArtifactWithContent } from "../lib/artifacts";
 import {
   artifactThreadTarget,
   getArtifactById,
   listArtifactVersions,
-  type MobileArtifactWithContent,
   removeArtifact,
 } from "../lib/artifacts";
 import { useFloatingHeaderInset } from "../lib/floating-header";

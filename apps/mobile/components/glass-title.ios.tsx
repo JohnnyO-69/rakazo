@@ -31,7 +31,6 @@ export function GlassTitle({ title }: { title: string }) {
   );
 }
 
-/** Shared native-stack chrome; scroll views adjust their content inset automatically. */
 export function floatingHeaderOptions() {
   if (!iosAtLeast(26)) return {};
   return {

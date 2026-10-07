@@ -720,11 +720,6 @@ function createAccountStyles() {
       color: native.secondaryLabel,
       fontSize: 15,
     },
-    sectionTitle: {
-      color: native.secondaryLabel,
-      fontSize: 14,
-      fontWeight: "600",
-    },
     settingsButton: {
       minHeight: 62,
       borderRadius: 14,

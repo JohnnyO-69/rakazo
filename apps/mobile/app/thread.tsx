@@ -6,20 +6,16 @@ import type {
   Connection,
   ConnectionCatalogItem,
   MessageBlock,
+  MessageReaction,
   Routine,
 } from "@rakazo/contracts";
-import {
-  canReactToThreadMessage,
-  MESSAGE_REACTIONS,
-  type MessageReaction,
-} from "@rakazo/contracts";
-import type { ThreadItem } from "@rakazo/core";
+import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
+import type { ComposerMention, SlashActionId, ThreadItem } from "@rakazo/core";
 import {
   abortableDelay,
   appendNewerThreadPage,
   attachmentsForThread,
   buildComposerMentionOptions,
-  type ComposerMention,
   cloudAgentHttpsUrl,
   formatFileSize,
   formatMessageTime,
@@ -37,7 +33,6 @@ import {
   resolveComposerSendPlan,
   resolvePersonaColorDef,
   SLASH_ACTIONS,
-  type SlashActionId,
   selectedAskActionLabel,
   serializeComposerPrompt,
   threadWindowMessages,
@@ -64,6 +59,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { NativeScrollEvent, NativeSyntheticEvent, TextProps } from "react-native";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -73,15 +69,12 @@ import {
   Image,
   Linking,
   Modal,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  type TextProps,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -97,10 +90,8 @@ import { GlassSurface } from "../components/glass-surface";
 import type { ImageArtifactPreviewTarget } from "../components/image-artifact-viewer";
 import { InlineImageAttachment } from "../components/inline-image-attachment";
 import { McpApprovalCard } from "../components/McpApprovalCard";
-import {
-  MarkdownArtifactPreview,
-  type MarkdownArtifactPreviewTarget,
-} from "../components/markdown-artifact-preview";
+import type { MarkdownArtifactPreviewTarget } from "../components/markdown-artifact-preview";
+import { MarkdownArtifactPreview } from "../components/markdown-artifact-preview";
 import { MessageContextMenu } from "../components/message-context-menu";
 import { NativeActionButton } from "../components/native-action-button";
 import { NativeSymbol } from "../components/native-symbol";
@@ -108,17 +99,19 @@ import { SelectTextSheet } from "../components/select-text-sheet";
 import { trailingHeaderOptions } from "../components/sheet-header";
 import { VoiceChatCard } from "../components/VoiceChatCard";
 import { WorkingIndicator } from "../components/WorkingIndicator";
+import type {
+  MobileBot,
+  MobileGroup,
+  MobileMessage,
+  MobileMessagePage,
+  MobileSnapshot,
+} from "../lib/api";
 import {
   applyMobileThreadEvent,
   blockText,
   copyableMobileMessageText,
   currentApiBase,
   loadSessionToken,
-  type MobileBot,
-  type MobileGroup,
-  type MobileMessage,
-  type MobileMessagePage,
-  type MobileSnapshot,
   mergeMobileSnapshot,
   messagingProviderLabel,
   mobileThreadRefreshResult,
@@ -130,7 +123,8 @@ import {
   subscribeThread,
 } from "../lib/api";
 import { mobileTokens } from "../lib/appearance";
-import { type MobileArtifactTarget, openMobileArtifact } from "../lib/artifact-open";
+import type { MobileArtifactTarget } from "../lib/artifact-open";
+import { openMobileArtifact } from "../lib/artifact-open";
 import { nextAutoSpeakAction } from "../lib/auto-speak";
 import { confirmDeleteBot, restoreArchivedBot } from "../lib/bot-lifecycle";
 import { setCallProviderTranscribe, startCall, useCallSession } from "../lib/call-session";
@@ -163,12 +157,8 @@ import {
   threadSpaceRequest,
   threadSpaceSwitchResult,
 } from "../lib/notification-open";
-import {
-  type PickedAttachment,
-  pickDocuments,
-  pickFromLibrary,
-  takePhoto,
-} from "../lib/pick-attachments";
+import type { PickedAttachment } from "../lib/pick-attachments";
+import { pickDocuments, pickFromLibrary, takePhoto } from "../lib/pick-attachments";
 import { threadRefreshDelayMs } from "../lib/refresh";
 import {
   getCachedResponseStreamingEnabled,
@@ -177,11 +167,8 @@ import {
 import { selectableTextFromMarkdown } from "../lib/selectable-text";
 import { ThreadJumpAnchor } from "../lib/thread-jump";
 import { ThreadReadOnlyContext } from "../lib/thread-read-only";
-import {
-  type ThreadScrollAction,
-  ThreadScrollBehavior,
-  type ThreadScrollState,
-} from "../lib/thread-scroll";
+import type { ThreadScrollAction, ThreadScrollState } from "../lib/thread-scroll";
+import { ThreadScrollBehavior } from "../lib/thread-scroll";
 import { errorText } from "../lib/user-error";
 import { speakQueue, speakText } from "../lib/voice";
 import { probeProviderTranscribe, resolveVoiceCallPlan } from "../lib/voice-call-entry";
@@ -2877,7 +2864,6 @@ function Thread() {
           ) : null}
         </View>
       </View>
-
       <Modal
         visible={botActionsOpen}
         transparent

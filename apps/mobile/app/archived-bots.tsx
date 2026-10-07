@@ -58,7 +58,6 @@ export default function ArchivedBots() {
   }
 
   function viewChat(bot: MobileBot) {
-    // Older servers exclude archived bots. Restoring is explicit, never a tap side effect.
     Alert.alert(
       t("Restore to view chat?"),
       t("Archived chats are unavailable until the bot is restored."),

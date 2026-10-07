@@ -30,7 +30,6 @@ export function confirmDeleteBot(bot: { id: string; name: string }, onDeleted: (
   );
 }
 
-/** Restoring must finish before callers remove a row or open its writable conversation. */
 export async function restoreArchivedBot(botId: string): Promise<void> {
   await rpc("bots/restore", { botId });
 }
