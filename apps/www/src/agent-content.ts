@@ -77,7 +77,7 @@ You are responsible for your account and for actions your bots take on your beha
 
 Paid plans renew automatically until cancelled and are charged through Stripe. Cancel at any time from billing settings or by emailing [hello@rakazo.com](mailto:hello@rakazo.com); access continues until the end of the paid period. Payments are non-refundable and not prorated except where required by law. Charges made in error are refunded when reported within 30 days. Consumers in the EU and UK can withdraw from a new subscription within 14 days and are refunded less the value of the Service already provided.
 
-The Service is provided as is. Our liability is limited to the greater of what you paid us in the previous 12 months or US$100, except where the law does not allow a limit. New York law governs these terms.
+The Service is provided as is. Our liability is limited to the greater of what you paid us in the previous 12 months or US$100, except where the law does not allow a limit. Delaware law governs these terms.
 
 Read the [complete terms](https://rakazo.com/terms/) for acceptable use, termination and data deletion, disclaimers, indemnity, app store terms, changes, and contact details.
 `;
