@@ -34,7 +34,7 @@ async function fixture(auth = destination.auth) {
       traceId: "test",
       signal: new AbortController().signal,
     },
-    "secret-1",
+    { recordId: "secret-1" },
   );
   const row = { ...scope, ...destination, auth, ...encrypted };
   const findFirst = vi.fn(async ({ where }) =>
@@ -182,7 +182,7 @@ describe("authenticated secret requests", () => {
     const encrypted = await secretStore.put(
       secret,
       { ...scope, operationId: "test", traceId: "test", signal: new AbortController().signal },
-      "secret-2",
+      { recordId: "secret-2" },
     );
     const row = {
       ...scope,
@@ -226,7 +226,7 @@ describe("authenticated secret requests", () => {
     const encrypted = await secretStore.put(
       secret,
       { ...scope, operationId: "test", traceId: "test", signal: new AbortController().signal },
-      "secret-3",
+      { recordId: "secret-3" },
     );
     const row = {
       ...scope,
@@ -675,7 +675,7 @@ describe("saved website logins", () => {
     const encrypted = await secretStore.put(
       plaintext,
       { ...scope, operationId: "test", traceId: "test", signal: new AbortController().signal },
-      "login-1",
+      { recordId: "login-1" },
     );
     const row = { ...scope, ...login, origin, auth, ...encrypted };
     const findFirst = vi.fn(async ({ where }) =>

@@ -79,8 +79,10 @@ function botSecretDeps(seed: Row[] = []) {
   };
   prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) => fn(prisma));
   const secrets = {
-    put: vi.fn(async (_plaintext: string, _context: unknown, id: string) => ({
-      ciphertext: `enc:${id}`,
+    put: vi.fn(async (_plaintext: string, _context: unknown, options: { recordId: string }) => ({
+      id: options.recordId,
+      ref: `enc:${options.recordId}`,
+      ciphertext: `enc:${options.recordId}`,
     })),
     load: vi.fn(),
   };
@@ -208,7 +210,7 @@ describe("botSecrets router", () => {
     expect(allowed.secrets.put).toHaveBeenCalledWith(
       FAKE_VALUE,
       expect.anything(),
-      expect.any(String),
+      expect.objectContaining({ recordId: expect.any(String) }),
     );
     expect(allowed.rows).toHaveLength(1);
     expect(allowed.rows[0]).toMatchObject({ userId: "user-1", spaceId: "space-1", botId: "bot-1" });

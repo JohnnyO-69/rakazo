@@ -1,9 +1,8 @@
-import type { AdapterContext, ManagedConnectorProvider } from "@rakazo/adapter-kit";
+import type { AdapterContext, ManagedConnectorProvider, SecretStore } from "@rakazo/adapter-kit";
 import { SecretAskPurpose } from "@rakazo/contracts";
 import type { PrismaClient, RunSecretWriter } from "@rakazo/db";
 import { type ApprovalPausedToolResult, resolveDuplicateEffectGate } from "./approval-effect.js";
 import { storeBotSecret } from "./bot-secrets.js";
-import type { EncryptedSecretStore } from "./secrets.js";
 
 export function runSecretKind(runId: string): string {
   return `run-secret:${runId}`;
@@ -109,7 +108,7 @@ export async function reconcileManagedConnection(
   return "pending";
 }
 
-export function createRunSecretWriter(secretStore: EncryptedSecretStore): RunSecretWriter {
+export function createRunSecretWriter(secretStore: SecretStore): RunSecretWriter {
   return {
     async store({ runId, userId, spaceId, botId, credential, plaintext, tx }) {
       if (credential) {
@@ -122,13 +121,17 @@ export function createRunSecretWriter(secretStore: EncryptedSecretStore): RunSec
         });
         return;
       }
-      const stored = await secretStore.put(plaintext, {
-        operationId: runId,
-        traceId: runId,
-        spaceId,
-        userId,
-        signal: new AbortController().signal,
-      });
+      const stored = await secretStore.put(
+        plaintext,
+        {
+          operationId: runId,
+          traceId: runId,
+          spaceId,
+          userId,
+          signal: new AbortController().signal,
+        },
+        { ephemeral: true },
+      );
       await tx.secret.create({
         data: {
           id: stored.id,

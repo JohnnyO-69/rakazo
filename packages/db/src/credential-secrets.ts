@@ -56,7 +56,10 @@ export async function retireModelCredential(
     userId: string;
     credentialId: string;
     secretId?: string;
-    matchesFailedSecret?: (secret: { id: string; ciphertext: string }) => boolean;
+    matchesFailedSecret?: (secret: {
+      id: string;
+      ciphertext: string;
+    }) => boolean | Promise<boolean>;
   },
 ): Promise<boolean> {
   if (!input.credentialId) return false;
@@ -72,7 +75,7 @@ export async function retireModelCredential(
             where: { id: credential.secretId },
             select: { id: true, ciphertext: true },
           });
-          if (secret && !input.matchesFailedSecret(secret)) return false;
+          if (secret && !(await input.matchesFailedSecret(secret))) return false;
         }
         await tx.spaceModelPreference.deleteMany({
           where: { userId: input.userId, credentialId: credential.id },

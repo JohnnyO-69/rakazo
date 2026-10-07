@@ -8,6 +8,7 @@ import type {
   JobPublisher,
   MemoryStore,
   SandboxProvider,
+  SecretStore,
 } from "@rakazo/adapter-kit";
 import {
   computerControlExpireJobKey,
@@ -23,7 +24,6 @@ import type {
   ComposioProvider,
   ComputerExecutionLease,
   ConnectorRegistry,
-  EncryptedSecretStore,
   IntegrationProviderSettings,
   MemoryProviderResolver,
   PiOAuthLogins,
@@ -520,7 +520,7 @@ export interface RouterDeps {
   memory: MemoryStore;
   memoryProviders: MemoryProviderResolver;
   home: AgentHomeStore;
-  secrets: EncryptedSecretStore;
+  secrets: SecretStore;
   oauthLogins: PiOAuthLogins;
   /** Live Codex catalog seam; defaults to the shared per-process cache. */
   codexCatalog?: CodexLiveCatalog;
@@ -1063,22 +1063,27 @@ export function createRouter(deps: RouterDeps) {
             })
           : [];
         const ciphertextById = new Map(secrets.map((secret) => [secret.id, secret.ciphertext]));
-        return rows.map((row) => {
-          const preference = row.preferences[0];
-          const selected = {
-            ...row,
-            isDefault: preference?.isDefault ?? false,
-            defaultModel: preference?.modelId ?? null,
-            thinkingLevel: preference?.thinkingLevel ?? null,
-          };
-          const ciphertext = ciphertextById.get(row.secretId);
-          if (!ciphertext) return modelCredentialDto(selected);
-          try {
-            return modelCredentialDto(selected, deps.secrets.load(ciphertext, row.secretId));
-          } catch {
-            return modelCredentialDto(selected);
-          }
-        });
+        return Promise.all(
+          rows.map(async (row) => {
+            const preference = row.preferences[0];
+            const selected = {
+              ...row,
+              isDefault: preference?.isDefault ?? false,
+              defaultModel: preference?.modelId ?? null,
+              thinkingLevel: preference?.thinkingLevel ?? null,
+            };
+            const ciphertext = ciphertextById.get(row.secretId);
+            if (!ciphertext) return modelCredentialDto(selected);
+            try {
+              return modelCredentialDto(
+                selected,
+                await deps.secrets.load(ciphertext, row.secretId),
+              );
+            } catch {
+              return modelCredentialDto(selected);
+            }
+          }),
+        );
       }),
       connect: authed.models.connect.handler(async ({ context, input }) => {
         let plaintext: string;
@@ -1093,7 +1098,7 @@ export function createRouter(deps: RouterDeps) {
             });
             if (secret) {
               try {
-                previousPlaintext = deps.secrets.load(secret.ciphertext, credential.secretId);
+                previousPlaintext = await deps.secrets.load(secret.ciphertext, credential.secretId);
               } catch (error) {
                 // Explicit key replacement must still succeed when the prior
                 // ciphertext is unreadable. For OpenAI-compatible connections,
@@ -1528,7 +1533,7 @@ export function createRouter(deps: RouterDeps) {
                     allowed =
                       modelCredentialDto(
                         credential,
-                        deps.secrets.load(secret.ciphertext, credential.secretId),
+                        await deps.secrets.load(secret.ciphertext, credential.secretId),
                       ).thinkingLevels ?? allowed;
                   } catch {
                     // Unreadable connections must not advertise reasoning support.
@@ -3610,12 +3615,14 @@ export function createRouter(deps: RouterDeps) {
               })
             : [];
           const ciphertextById = new Map(secrets.map((secret) => [secret.id, secret.ciphertext]));
-          return rows.map((row) =>
-            mcpServerDto(
-              row,
-              mcpOAuth.statusForCiphertext(
-                row.secretId ? ciphertextById.get(row.secretId) : undefined,
-                row.secretId ?? undefined,
+          return Promise.all(
+            rows.map(async (row) =>
+              mcpServerDto(
+                row,
+                await mcpOAuth.statusForCiphertext(
+                  row.secretId ? ciphertextById.get(row.secretId) : undefined,
+                  row.secretId ?? undefined,
+                ),
               ),
             ),
           );
@@ -3695,7 +3702,7 @@ export function createRouter(deps: RouterDeps) {
             if (existingSecret) {
               try {
                 const value = JSON.parse(
-                  deps.secrets.load(existingSecret.ciphertext, existingSecret.id),
+                  await deps.secrets.load(existingSecret.ciphertext, existingSecret.id),
                 );
                 if (value && typeof value === "object" && !Array.isArray(value))
                   existingMaterial = value as Record<string, unknown>;
@@ -5823,8 +5830,10 @@ async function allowedThinkingLevels(
     if (secret) {
       try {
         allowed =
-          modelCredentialDto(credential, deps.secrets.load(secret.ciphertext, credential.secretId))
-            .thinkingLevels ?? allowed;
+          modelCredentialDto(
+            credential,
+            await deps.secrets.load(secret.ciphertext, credential.secretId),
+          ).thinkingLevels ?? allowed;
       } catch {
         // Unreadable connections must not advertise reasoning support.
       }

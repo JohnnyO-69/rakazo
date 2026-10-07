@@ -1,4 +1,5 @@
-import type { AgentRunRequest } from "@rakazo/adapter-kit";
+import type { AgentRunRequest, SecretStore } from "@rakazo/adapter-kit";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import { usableModelId } from "@rakazo/contracts";
 import {
@@ -19,7 +20,6 @@ import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { listPiCatalog, scriptedCatalogEntry } from "./pi-models.js";
 import { parseModelSecret } from "./pi-oauth.js";
 import { OPENAI_COMPATIBLE_PROVIDER_ID } from "./pi-openai-compatible-provider.js";
-import type { EncryptedSecretStore } from "./secrets.js";
 
 type ModelCredential = Awaited<ReturnType<typeof findDefaultModelCredential>>;
 
@@ -72,7 +72,7 @@ export type SpaceCatalogAuth = {
  */
 export async function modelCredentialAuthKindsForSpace(
   prisma: PrismaClient,
-  secretStore: Pick<EncryptedSecretStore, "load">,
+  secretStore: Pick<SecretStore, "load">,
   scope: Pick<Actor, "userId" | "spaceId">,
 ): Promise<SpaceCatalogAuth> {
   const [credentials, preferences] = await Promise.all([
@@ -157,21 +157,21 @@ export async function modelCredentialAuthKindsForSpace(
     select: { id: true, ciphertext: true },
   });
   const ciphertextById = new Map(secrets.map((secret) => [secret.id, secret.ciphertext]));
-  // Every catalog model of a connected provider shares one secret, and each decrypt runs a
-  // synchronous scrypt, so decrypt each secret once rather than once per model.
-  const kindBySecretId = new Map<string, ModelCredentialAuthKind | undefined>();
-  const decryptKind = (secretId: string): ModelCredentialAuthKind | undefined => {
+  // Every catalog model of a provider shares one secret; load each once per operation.
+  const kindBySecretId = new Map<string, Promise<ModelCredentialAuthKind | undefined>>();
+  const decryptKind = async (secretId: string): Promise<ModelCredentialAuthKind | undefined> => {
     const ciphertext = ciphertextById.get(secretId);
     if (!ciphertext) return undefined;
     try {
-      return modelCredentialAuthKindFromPlaintext(secretStore.load(ciphertext, secretId));
-    } catch {
+      return modelCredentialAuthKindFromPlaintext(await secretStore.load(ciphertext, secretId));
+    } catch (error) {
+      if (error instanceof SecretStoreUnavailableError) throw error;
       return undefined;
     }
   };
-  const readKind = (secretId: string): ModelCredentialAuthKind | undefined => {
+  const readKind = (secretId: string): Promise<ModelCredentialAuthKind | undefined> => {
     if (!kindBySecretId.has(secretId)) kindBySecretId.set(secretId, decryptKind(secretId));
-    return kindBySecretId.get(secretId);
+    return kindBySecretId.get(secretId)!;
   };
 
   const auth: SpaceCatalogAuth = {
@@ -181,7 +181,7 @@ export async function modelCredentialAuthKindsForSpace(
     secretIdByModel: {},
   };
   for (const selection of selections) {
-    const kind = readKind(selection.secretId);
+    const kind = await readKind(selection.secretId);
     if (selection.modelSpecific) {
       const models = auth.byModel[selection.provider] ?? {};
       models[selection.modelId] = kind ?? "disconnected";
@@ -259,7 +259,7 @@ export type StoredModelAuthRead =
  */
 export async function readStoredModelAuth(
   prisma: Pick<PrismaClient, "secret">,
-  secretStore: Pick<EncryptedSecretStore, "load">,
+  secretStore: Pick<SecretStore, "load">,
   userId: string,
   secretId: string,
   provider: string,
@@ -274,8 +274,9 @@ export async function readStoredModelAuth(
   if (!secret) return { status: "unreadable" };
   let plaintext: string;
   try {
-    plaintext = secretStore.load(secret.ciphertext, secret.id);
-  } catch {
+    plaintext = await secretStore.load(secret.ciphertext, secret.id);
+  } catch (error) {
+    if (error instanceof SecretStoreUnavailableError) throw error;
     return { status: "unreadable" };
   }
   let message: string | undefined;
@@ -298,7 +299,7 @@ export async function readStoredModelAuth(
 /** Readable rejection when a stored credential cannot call this catalog model. */
 export async function validateStoredModelAuth(
   prisma: Pick<PrismaClient, "secret">,
-  secretStore: Pick<EncryptedSecretStore, "load">,
+  secretStore: Pick<SecretStore, "load">,
   userId: string,
   secretId: string,
   provider: string,

@@ -1,11 +1,12 @@
 import { ORPCError } from "@orpc/server";
-import type { EncryptedSecretStore } from "@rakazo/adapters";
+import type { SecretStore } from "@rakazo/adapter-kit";
+
 import type { Actor } from "@rakazo/contracts";
 import { Prisma, type PrismaClient, withTransactionRetry } from "@rakazo/db";
 
 type AgentSecretDeps = {
   prisma: PrismaClient;
-  secrets: Pick<EncryptedSecretStore, "put">;
+  secrets: Pick<SecretStore, "put">;
 };
 
 function agentSecretDto(row: { id: string; name: string; createdAt: Date; updatedAt: Date }) {

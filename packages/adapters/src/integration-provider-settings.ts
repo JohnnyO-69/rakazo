@@ -1,4 +1,9 @@
-import type { AdapterContext, ConnectorCall, ManagedConnectorProvider } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  ConnectorCall,
+  ManagedConnectorProvider,
+  SecretStore,
+} from "@rakazo/adapter-kit";
 import {
   type IntegrationProviderConfig,
   IntegrationProviderConfigSchema,
@@ -8,7 +13,6 @@ import {
 import type { PrismaClient } from "@rakazo/db";
 import { ComposioConnector } from "./composio-connector.js";
 import { PipedreamConnector } from "./pipedream-connector.js";
-import type { EncryptedSecretStore } from "./secrets.js";
 
 /** Resolve persisted credentials on every operation so API and workers observe changes.
  * Cache adapters by ciphertext to preserve sessions without retaining old credentials. */
@@ -20,13 +24,17 @@ export class IntegrationProviderSettings {
 
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly secrets: EncryptedSecretStore,
+    private readonly secrets: SecretStore,
     private readonly identitySecret: string,
     private readonly fallbacks: Partial<
       Record<IntegrationProviderId, ManagedConnectorProvider>
     > = {},
     private readonly factory?: (config: IntegrationProviderConfig) => ManagedConnectorProvider,
-  ) {}
+  ) {
+    this.secrets.onChange?.((ref) => {
+      for (const [id, entry] of this.cache) if (entry.ciphertext === ref) this.cache.delete(id);
+    });
+  }
 
   private create(config: IntegrationProviderConfig): ManagedConnectorProvider {
     if (this.factory) return this.factory(config);
@@ -52,16 +60,25 @@ export class IntegrationProviderSettings {
       this.cache.delete(id);
       return this.fallbacks[id];
     }
-    const cached = this.cache.get(id);
-    if (cached?.ciphertext === row.ciphertext) return cached.adapter;
-    const config = IntegrationProviderConfigSchema.parse(
-      JSON.parse(this.secrets.load(row.ciphertext, `integration-provider:${id}`)),
-    );
-    if (config.provider !== id)
-      throw new Error("Integration provider configuration does not match");
-    const adapter = this.create(config);
-    this.cache.set(id, { ciphertext: row.ciphertext, adapter });
-    return adapter;
+    let invalidated = false;
+    const unsubscribe =
+      this.secrets.onChange?.((ref) => {
+        if (ref === row.ciphertext) invalidated = true;
+      }) ?? (() => {});
+    try {
+      const plaintext = await this.secrets.load(row.ciphertext, `integration-provider:${id}`);
+      if (invalidated) return await this.resolve(id);
+      const cached = this.cache.get(id);
+      if (cached?.ciphertext === row.ciphertext) return cached.adapter;
+      const config = IntegrationProviderConfigSchema.parse(JSON.parse(plaintext));
+      if (config.provider !== id)
+        throw new Error("Integration provider configuration does not match");
+      const adapter = this.create(config);
+      this.cache.set(id, { ciphertext: row.ciphertext, adapter });
+      return adapter;
+    } finally {
+      unsubscribe();
+    }
   }
 
   async save(config: IntegrationProviderConfig, context: AdapterContext): Promise<void> {
@@ -73,17 +90,17 @@ export class IntegrationProviderSettings {
       // Provider errors can contain credentials or account details.
       throw new Error("Could not verify these credentials");
     }
-    const stored = await this.secrets.put(
-      JSON.stringify(config),
-      context,
-      `integration-provider:${config.provider}`,
-    );
+    const stored = await this.secrets.put(JSON.stringify(config), context, {
+      recordId: `integration-provider:${config.provider}`,
+    });
     await this.prisma.integrationProviderConfig.upsert({
       where: { id: config.provider },
       create: { id: config.provider, ciphertext: stored.ciphertext },
       update: { ciphertext: stored.ciphertext },
     });
-    this.cache.set(config.provider, { ciphertext: stored.ciphertext, adapter });
+    // The store may have expired or invalidated this ref while persistence waited.
+    // Re-resolve through it before retaining any provider credentials.
+    this.cache.delete(config.provider);
   }
 
   providers(): ManagedConnectorProvider[] {

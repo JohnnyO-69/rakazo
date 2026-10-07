@@ -10,6 +10,8 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { SecretStore } from "@rakazo/adapter-kit";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { isLocalMcpHost } from "@rakazo/contracts";
 import { readBoundedResponseBytes } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
@@ -18,7 +20,6 @@ import { sanitizeConnectorError } from "./connector-safety.js";
 import { secureFetch, validateUrl, withEndpointOriginFallback } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
-import type { EncryptedSecretStore } from "./secrets.js";
 
 type OAuthState = {
   tokens?: OAuthTokens;
@@ -464,7 +465,7 @@ export class McpOAuthBroker {
 
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly secrets: EncryptedSecretStore,
+    private readonly secrets: SecretStore,
     private readonly network: RemoteTransportDependencies = {},
     private readonly allowPrivateEndpoint = false,
   ) {}
@@ -478,11 +479,11 @@ export class McpOAuthBroker {
     return material.oauth ? "reconnect" : "none";
   }
 
-  statusForCiphertext(
+  async statusForCiphertext(
     ciphertext: string | undefined,
     recordId: string | undefined,
-  ): "none" | "connected" | "reconnect" {
-    const material = ciphertext && recordId ? this.read(ciphertext, recordId) : {};
+  ): Promise<"none" | "connected" | "reconnect"> {
+    const material = ciphertext && recordId ? await this.read(ciphertext, recordId) : {};
     if (material.oauth?.tokens) return "connected";
     return material.oauth ? "reconnect" : "none";
   }
@@ -583,7 +584,7 @@ export class McpOAuthBroker {
         botId: "mcp",
         signal: new AbortController().signal,
       },
-      sessionId,
+      { recordId: sessionId, ephemeral: true },
     );
     await this.prisma.mcpOAuthSession.create({
       data: {
@@ -655,7 +656,7 @@ export class McpOAuthBroker {
       if (!server?.endpoint) throw new Error("MCP OAuth session is invalid or expired");
       const context = { spaceId: input.spaceId, userId: input.userId };
       const loaded = {
-        material: this.read(session.oauthCiphertext, session.id),
+        material: await this.read(session.oauthCiphertext, session.id),
         ...(server.secretId ? { secretId: server.secretId } : {}),
       };
       pending = {
@@ -736,7 +737,7 @@ export class McpOAuthBroker {
       where: { id: server.secretId, spaceId: input.spaceId, userId: input.userId },
     });
     if (!row) return;
-    const material = this.read(row.ciphertext, row.id);
+    const material = await this.read(row.ciphertext, row.id);
     delete material.oauth;
     await this.replaceMaterial(server.id, material, input, true);
   }
@@ -750,7 +751,7 @@ export class McpOAuthBroker {
       where: { id: server.secretId, spaceId: context.spaceId, userId: context.userId },
     });
     return row
-      ? { material: this.read(row.ciphertext, row.id), secretId: row.id }
+      ? { material: await this.read(row.ciphertext, row.id), secretId: row.id }
       : { material: {} };
   }
 
@@ -804,7 +805,7 @@ export class McpOAuthBroker {
           })
         : null;
       const nextMaterial = currentSecret
-        ? this.read(currentSecret.ciphertext, currentSecret.id)
+        ? await this.read(currentSecret.ciphertext, currentSecret.id)
         : {};
       if (material.oauth) nextMaterial.oauth = structuredClone(material.oauth);
       else delete nextMaterial.oauth;
@@ -849,11 +850,12 @@ export class McpOAuthBroker {
     });
   }
 
-  private read(ciphertext: string, recordId: string): OAuthMaterial {
+  private async read(ciphertext: string, recordId: string): Promise<OAuthMaterial> {
     try {
-      const value = JSON.parse(this.secrets.load(ciphertext, recordId));
+      const value = JSON.parse(await this.secrets.load(ciphertext, recordId));
       return value && typeof value === "object" ? (value as OAuthMaterial) : {};
-    } catch {
+    } catch (error) {
+      if (error instanceof SecretStoreUnavailableError) throw error;
       return {};
     }
   }

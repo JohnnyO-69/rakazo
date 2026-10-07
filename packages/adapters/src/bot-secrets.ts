@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { SecretStore } from "@rakazo/adapter-kit";
 import type { BotSecretDestination } from "@rakazo/contracts";
 import {
   BotSecretAuth,
@@ -12,7 +13,7 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { combineSignals, redactConnectorPayload } from "./connector-safety.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createPrivateNetworkFetch, createSafeRemoteFetch } from "./remote-mcp.js";
-import type { EncryptedSecretStore } from "./secrets.js";
+
 import { readBodyCapped, withAbort } from "./web-ssrf.js";
 
 export type BotSecretScope = { userId: string; spaceId: string; botId: string };
@@ -236,7 +237,7 @@ export async function findBotSecret(prisma: PrismaClient, scope: BotSecretScope,
 
 export async function storeBotSecret(input: {
   tx: Prisma.TransactionClient;
-  secretStore: EncryptedSecretStore;
+  secretStore: SecretStore;
   scope: BotSecretScope;
   destination: BotSecretDestination;
   plaintext: string;
@@ -267,7 +268,7 @@ export async function storeBotSecret(input: {
       spaceId: scope.spaceId,
       signal: new AbortController().signal,
     },
-    id,
+    { recordId: id },
   );
   if (existing) {
     await tx.botSecret.update({ where: { id }, data: { ciphertext: encrypted.ciphertext } });
@@ -321,7 +322,7 @@ export async function forgetBotSecret(prisma: PrismaClient, scope: BotSecretScop
 /** Credentials are resolved only inside this destination-bound HTTP boundary. */
 export async function requestWithBotSecret(input: {
   prisma: PrismaClient;
-  secretStore: EncryptedSecretStore;
+  secretStore: SecretStore;
   scope: BotSecretScope;
   request: unknown;
   signal: AbortSignal;
@@ -341,7 +342,10 @@ export async function requestWithBotSecret(input: {
   if (url.origin !== destination.origin || url.username || url.password || url.hash) {
     return { error: "This credential cannot be sent to that destination." };
   }
-  const plaintext = input.secretStore.load(row.ciphertext, row.id);
+  const plaintext = await input.secretStore.load(row.ciphertext, {
+    recordId: row.id,
+    signal: input.signal,
+  });
   const headers = new Headers({ accept: "application/json", "content-type": request.contentType });
   const { name: headerName, value: headerValue } = credentialHeader(destination, plaintext);
   const redactions = [
@@ -413,7 +417,7 @@ const MIN_REDACTED_USERNAME = 6;
  */
 export async function resolveLoginFill(input: {
   prisma: PrismaClient;
-  secretStore: EncryptedSecretStore;
+  secretStore: SecretStore;
   scope: BotSecretScope;
   name: string;
   field: LoginField;
@@ -439,7 +443,7 @@ export async function resolveLoginFill(input: {
   if (destination.origin !== storedOrigin.origin) {
     return { error: "Website logins can only be filled on an HTTPS origin." };
   }
-  const login = decodeLoginSecret(input.secretStore.load(row.ciphertext, row.id));
+  const login = decodeLoginSecret(await input.secretStore.load(row.ciphertext, row.id));
   return {
     text: login[input.field],
     origin: destination.origin,
