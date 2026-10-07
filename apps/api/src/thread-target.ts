@@ -284,11 +284,12 @@ export async function resolveThreadTarget(
   prisma: PrismaClient,
   actor: Actor,
   input: { botId?: string; groupId?: string },
+  options: { includeArchived?: boolean } = {},
 ): Promise<ThreadTarget> {
   const repos = createRepos(prisma);
   const groupRepos = createGroupRepos(prisma);
   if (input.botId) {
-    const bot = await repos.getBot(actor, input.botId);
+    const bot = await repos.getBot(actor, input.botId, options);
     if (!bot.thread) throw new IsolationError();
     return {
       kind: "bot",
