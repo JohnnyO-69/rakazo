@@ -415,21 +415,21 @@ export const ALTERNATIVES: readonly Alternative[] = [
     otherName: "Hermes Agent",
     intro: [
       "Hermes Agent is Nous Research's open source AI agent, released under the MIT license. You can run it on your own machine. The project site also offers optional Nous Portal credits and cloud hosting.",
-      "The main difference is simplicity. Rakazo follows the same shape as Grok Bot: after the app is running, it is a chat, and you set up a bot and manage its work there. Hermes's quickstart is a command-line setup: an installer, a setup wizard, a model command, config files, and a separate messaging gateway when you want the agent always on.",
+      "The main difference is simplicity. Like Grok Bot, Rakazo is just chat: you set up the bot and manage it from that chat. Hermes's quickstart is a command-line setup: an installer, a setup wizard, a model command, config files, and a separate messaging gateway when you want the agent always on.",
       "Both are open source and can run on hardware you control. This comparison uses each project's public docs. It is not a measured benchmark.",
     ],
     sections: [
       {
         heading: "Setup",
         paragraphs: [
-          "Rakazo's self-host path is the published Docker installer, or the desktop app starting that stack on this computer. You create an account and connect a model. From there the web, desktop, and mobile apps are a chat. A new bot interviews you about the work. Routines are readable Markdown.",
+          "Rakazo's self-host path is the published Docker installer, or the desktop app starting that stack on this computer. You create an account and connect a model. From there it is just chat, on the web, desktop, and mobile apps. A new bot interviews you about the work, and you manage the bot from that chat. Routines are readable Markdown.",
           "Hermes's quickstart starts with the Hermes Desktop installer on macOS or Windows, or a shell install (`install.sh` on Linux, macOS, and WSL2; a PowerShell script on Windows). `hermes setup` then offers Quick Setup (Nous Portal, one OAuth login), Full Setup (every provider, tool, and option), or Blank Slate (a minimal agent you opt into). The guide calls `hermes model` the important next step. Secrets go in `~/.hermes/.env` and other settings in `~/.hermes/config.yaml`, edited with `hermes config`. The first chat is `hermes` or `hermes --tui`. An always-on bot is another step: `hermes gateway setup` for Telegram, Discord, Slack, WhatsApp, Signal, Email, and other platforms, then a gateway process you start or install as a service.",
         ],
       },
       {
         heading: "Day-to-day management",
         paragraphs: [
-          "In Rakazo you keep talking to the bot in the same app. Schedules, memory, and approval boundaries stay with that bot. Optional connectors can attach Slack, WhatsApp, Telegram, iMessage via Sendblue, and Feishu/Lark. They are not required to use the product.",
+          "Day to day, you manage Rakazo from the same chat. Schedules, memory, and approval boundaries stay with that bot. Optional connectors can attach Slack, WhatsApp, Telegram, iMessage via Sendblue, and Feishu/Lark. They are not required to use the product.",
           "Hermes's quickstart sends a broken or changing setup through `hermes doctor`, `hermes model`, `hermes setup`, `hermes sessions list`, and `hermes gateway status`. Tool access is `hermes tools`. Cron, skills, and MCP servers are further configuration on top of the CLI and the gateway.",
         ],
       },
@@ -438,14 +438,14 @@ export const ALTERNATIVES: readonly Alternative[] = [
       {
         topic: "Setup",
         rakazo:
-          "Docker installer or the desktop app's local stack, then an account and a model. After that the product is a chat: a new bot interviews you, and you manage it there.",
+          "Docker installer or the desktop app's local stack, then an account and a model. After that Rakazo is just chat: a new bot interviews you, and you manage it from the chat.",
         other:
           "Desktop installer or a shell script, then `hermes setup` (Quick Setup, Full Setup, or Blank Slate) and `hermes model`. Config is `~/.hermes/config.yaml` and `~/.hermes/.env`. A terminal chat comes before `hermes gateway setup` for messaging platforms.",
       },
       {
         topic: "Day-to-day management",
         rakazo:
-          "The same chat on the web, desktop, and mobile apps. Routines are readable Markdown and can run on a schedule. A bot can pause for approval at a boundary you set.",
+          "You manage the bot from the same chat on the web, desktop, and mobile apps. Routines are readable Markdown and can run on a schedule. A bot can pause for approval at a boundary you set.",
         other:
           "The quickstart's recovery commands are `hermes doctor`, `hermes model`, `hermes setup`, and `hermes gateway status`. `hermes tools` changes tool access. The gateway is a process you keep running for chat apps.",
       },
@@ -507,7 +507,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
       {
         question: "Is Rakazo simpler to set up than Hermes Agent?",
         answer:
-          "The documented paths are different. Rakazo's self-host guide is a Docker installer, or the desktop app starting that stack, then an account and a model. After that you work in chat. Hermes's quickstart is an installer, `hermes setup`, `hermes model`, config files under `~/.hermes/`, a terminal chat, and `hermes gateway setup` if you want messaging apps. Hermes can be a short path when you use Quick Setup with Nous Portal. The ongoing surface is still the CLI, the config files, and the gateway.",
+          "The documented paths are different. Rakazo's self-host guide is a Docker installer, or the desktop app starting that stack, then an account and a model. After that Rakazo is just chat, and you manage the bot from that chat. Hermes's quickstart is an installer, `hermes setup`, `hermes model`, config files under `~/.hermes/`, a terminal chat, and `hermes gateway setup` if you want messaging apps. Hermes can be a short path when you use Quick Setup with Nous Portal. The ongoing surface is still the CLI, the config files, and the gateway.",
       },
       {
         question: "Is Rakazo a drop-in replacement for Hermes Agent?",

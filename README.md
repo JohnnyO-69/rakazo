@@ -16,8 +16,8 @@ Rakazo is in beta. Learn more at [rakazo.com](https://rakazo.com).
 
 ## How Rakazo compares
 
-Once Rakazo is running, it follows the same simple shape as Grok Bot: the app is a chat, and you
-set up a bot and manage its work there. Muse, Dots, and Instinct are hosted assistants. OpenClaw
+Once Rakazo is running, it is just chat, like Grok Bot: you set up a bot and manage it from that
+chat. Muse, Dots, and Instinct are hosted assistants. OpenClaw
 and Hermes Agent are also open source agents you can run yourself; their docs describe a
 command-line setup, a config file, and a gateway you keep running.
 
