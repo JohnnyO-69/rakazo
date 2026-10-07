@@ -450,10 +450,11 @@ function formatOAuthRejection(
   secrets: string[],
 ): string | undefined {
   if (sdk.includes("Raw body:")) return undefined;
-  if (sanitizeConnectorError(rejection.description, secrets).trim() !== sdk.trim()) {
-    return undefined;
-  }
-  const description = rejection.description.replace(/\s+/g, " ").trim().slice(0, 300);
+  // Redact the whole description first. A later cut can land inside a secret, and
+  // the redactor only matches the complete value.
+  const cleaned = sanitizeConnectorError(rejection.description, secrets);
+  if (cleaned.trim() !== sdk.trim()) return undefined;
+  const description = cleaned.replace(/\s+/g, " ").trim().slice(0, 300);
   const detail = description ? `${rejection.code}: ${description}` : rejection.code;
   return sanitizeConnectorError(`HTTP ${rejection.status} ${detail}`, secrets);
 }

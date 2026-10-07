@@ -680,6 +680,26 @@ describe("MCP OAuth", () => {
     expect(error.message).not.toContain("tail-marker");
   });
 
+  it("redacts a secret that crosses the caller-facing description cut", async () => {
+    const secret = "cross-boundary-secret-value";
+    const error = await rejectedOAuthBegin(
+      () =>
+        Response.json(
+          {
+            error: "registration_not_supported",
+            error_description: `${"a".repeat(290)}${secret}`,
+          },
+          { status: 403 },
+        ),
+      secret,
+    );
+
+    expect(error.message).toBe(
+      `Could not start MCP OAuth: HTTP 403 registration_not_supported: ${"a".repeat(290)}[redacted]`,
+    );
+    expect(error.message).not.toContain(secret.slice(0, 10));
+  });
+
   it("stops reading an oversized OAuth error body", async () => {
     const totalBytes = 128 * 1_024;
     const chunkBytes = 1_024;
