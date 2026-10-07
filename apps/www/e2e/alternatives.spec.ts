@@ -46,6 +46,12 @@ test.describe("alternatives", () => {
       );
     }
 
+    await expect(page.locator("ul.alt-index")).toHaveCSS("padding-left", "0px");
+    await expect(page.getByRole("link", { name: "Self-hosting guide" })).toHaveCSS(
+      "color",
+      "rgb(255, 255, 255)",
+    );
+
     await captureScreenshot(page, testInfo, "05-alternatives-hub");
 
     await page.goto("/");
@@ -93,7 +99,14 @@ test.describe("alternatives", () => {
       await expect(table.getByRole("columnheader", { name: alternative.otherName })).toBeVisible();
       await expect(page.getByRole("heading", { name: "Why open source and self-hosted" })).toBeVisible();
       await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Self-hosting guide" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Self-hosting guide" })).toHaveCSS(
+        "color",
+        "rgb(255, 255, 255)",
+      );
+      const sources = page.locator("ul.source-list");
+      await expect(sources).toHaveCSS("display", "flex");
+      await expect(sources).toHaveCSS("font-size", "14px");
+      await expect(page.locator("p.alt-note").first()).toHaveCSS("font-size", "14.5px");
 
       const structuredData = JSON.parse(
         (await page.locator('script[type="application/ld+json"]').textContent()) ?? "{}",
