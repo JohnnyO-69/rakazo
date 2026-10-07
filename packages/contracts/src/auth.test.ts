@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { authCapabilitiesSchema, legacyAuthCapabilitiesSchema } from "./auth.js";
+import {
+  accountSecuritySchema,
+  authCapabilitiesSchema,
+  legacyAuthCapabilitiesSchema,
+} from "./auth.js";
 
 it("requires explicit password and SSO capabilities", () => {
   expect(authCapabilitiesSchema.safeParse({ passwordReset: false, resetUrl: null }).success).toBe(
@@ -28,4 +32,22 @@ it("only accepts complete legacy capabilities without partial SSO fields", () =>
   ]) {
     expect(legacyAuthCapabilitiesSchema.safeParse(value).success).toBe(false);
   }
+});
+
+it("accepts older account security and explicit password-change policy", () => {
+  const security = {
+    hasPassword: true,
+    freshOidcAuth: false,
+    ssoLinked: false,
+    emailDeletion: true,
+    sso: null,
+  };
+  expect(accountSecuritySchema.parse(security).passwordChangeEnabled).not.toBe(false);
+  expect(
+    accountSecuritySchema.parse({ ...security, passwordChangeEnabled: false })
+      .passwordChangeEnabled,
+  ).toBe(false);
+  expect(
+    accountSecuritySchema.safeParse({ ...security, passwordChangeEnabled: "false" }).success,
+  ).toBe(false);
 });

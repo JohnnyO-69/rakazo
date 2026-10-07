@@ -106,7 +106,10 @@ export function GeneralSettingsPanels({
         <AccountAccess onSecurity={setAccountSecurity} />
       </section>
 
-      {accountSecurity?.hasPassword !== false ? <ChangePasswordSection email={email} /> : null}
+      {accountSecurity?.hasPassword !== false &&
+      accountSecurity?.passwordChangeEnabled !== false ? (
+        <ChangePasswordSection email={email} />
+      ) : null}
 
       {messagingEnabled && onOpenMessaging ? (
         <section className="rounded-xl border border-border px-4 py-4">

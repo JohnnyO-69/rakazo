@@ -83,6 +83,7 @@ export default function Account() {
   const [me, setMe] = useState<MobileMe | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [security, setSecurity] = useState<AccountSecurity | null>(null);
+  const canChangePassword = security?.hasPassword && security.passwordChangeEnabled !== false;
   const [deletionCodeSent, setDeletionCodeSent] = useState(false);
   const [ssoReauthenticated, setSsoReauthenticated] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
@@ -346,7 +347,7 @@ export default function Account() {
           {focus !== "usage" ? usageBlock : null}
         </SettingsGroup>
 
-        {(security?.sso && !security.ssoLinked) || security?.hasPassword ? (
+        {(security?.sso && !security.ssoLinked) || canChangePassword ? (
           <SettingsGroup>
             {security?.sso && !security.ssoLinked ? (
               <SettingsRow
@@ -362,7 +363,7 @@ export default function Account() {
                 }
               />
             ) : null}
-            {security?.hasPassword ? (
+            {canChangePassword ? (
               <SettingsRow
                 accessibilityRole="button"
                 chevron="right"

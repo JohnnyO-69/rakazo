@@ -16,6 +16,8 @@ export type AuthCapabilities = z.infer<typeof authCapabilitiesSchema>;
 
 export const accountSecuritySchema = z.object({
   hasPassword: z.boolean(),
+  // Older servers omit this field; clients treat omission as enabled.
+  passwordChangeEnabled: z.boolean().optional(),
   freshOidcAuth: z.boolean(),
   ssoLinked: z.boolean(),
   emailDeletion: z.boolean(),
@@ -32,6 +34,7 @@ export const legacyAuthCapabilitiesSchema = authCapabilitiesSchema
 /** Pre-SSO servers only had credential accounts and password-protected deletion. */
 export const legacyAccountSecurity: AccountSecurity = {
   hasPassword: true,
+  passwordChangeEnabled: true,
   freshOidcAuth: false,
   ssoLinked: false,
   emailDeletion: false,

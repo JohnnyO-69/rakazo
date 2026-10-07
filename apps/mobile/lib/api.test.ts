@@ -180,6 +180,7 @@ describe("mobile API authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchAccountSecurity()).resolves.toEqual({
       hasPassword: true,
+      passwordChangeEnabled: true,
       freshOidcAuth: false,
       ssoLinked: false,
       emailDeletion: false,

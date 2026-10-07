@@ -359,7 +359,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     plugins: [
       bearer(),
       expo(),
-      accountSecurity(env.email, env.oidc?.name, env.oidc?.issuer),
+      accountSecurity(env.email, env.oidc?.name, env.oidc?.issuer, env.passwordAuth !== false),
       ...(discovery ? [discovery.plugin] : []),
       organization({
         allowUserToCreateOrganization: false,

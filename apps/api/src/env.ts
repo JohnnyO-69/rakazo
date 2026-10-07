@@ -123,13 +123,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       throw new Error("OIDC_ISSUER must be an HTTPS issuer URL");
     }
   }
-  if (source.AUTH_PASSWORD_ENABLED && !["true", "false"].includes(source.AUTH_PASSWORD_ENABLED))
-    throw new Error("AUTH_PASSWORD_ENABLED must be true or false");
-  if (
-    source.OIDC_ALLOW_SIGNUP_BYPASS &&
-    !["true", "false"].includes(source.OIDC_ALLOW_SIGNUP_BYPASS)
-  )
-    throw new Error("OIDC_ALLOW_SIGNUP_BYPASS must be true or false");
+  for (const key of ["AUTH_PASSWORD_ENABLED", "OIDC_ALLOW_SIGNUP_BYPASS"]) {
+    const value = source[key];
+    if (value && !["true", "false"].includes(value))
+      throw new Error(`${key} must be true or false`);
+  }
   const passwordAuth = source.AUTH_PASSWORD_ENABLED !== "false";
   if (!passwordAuth && !issuer)
     throw new Error("AUTH_PASSWORD_ENABLED=false requires OIDC configuration");

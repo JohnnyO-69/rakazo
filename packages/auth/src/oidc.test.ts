@@ -596,17 +596,36 @@ describe("SSO-only account deletion", () => {
     expect((await request("/delete-user", { token: otherCode })).status).not.toBe(200);
     expect(rows("user")).toHaveLength(2);
   });
-  it("keeps the password requirement for credential accounts", async () => {
-    setup();
-    await request("/sign-up/email", {
-      email: "local@example.test",
-      password: "test-password-123",
-      name: "Local",
-    });
-    expect((await request("/delete-user", {})).status).toBe(400);
-    expect((await request("/delete-user", { password: "wrong-password" })).status).toBe(400);
-    expect((await request("/delete-user", { password: "test-password-123" })).status).toBe(200);
-  });
+  it.each([true, false])(
+    "keeps password deletion for credential accounts (password auth: %s)",
+    async (passwordAuth) => {
+      setup();
+      await request("/sign-up/email", {
+        email: "local@example.test",
+        password: "test-password-123",
+        name: "Local",
+      });
+      setup({ passwordAuth });
+      expect(await (await request("/account-security")).json()).toMatchObject({
+        hasPassword: true,
+        passwordChangeEnabled: passwordAuth,
+      });
+      if (!passwordAuth) {
+        expect(
+          (
+            await request("/change-password", {
+              currentPassword: "test-password-123",
+              newPassword: "new-password-123",
+            })
+          ).status,
+        ).toBe(403);
+      }
+      expect((await request("/request-account-deletion", {})).status).toBe(400);
+      expect((await request("/delete-user", {})).status).toBe(400);
+      expect((await request("/delete-user", { password: "wrong-password" })).status).toBe(400);
+      expect((await request("/delete-user", { password: "test-password-123" })).status).toBe(200);
+    },
+  );
 });
 
 it("counts only stored OIDC subjects bound to the current issuer", () => {

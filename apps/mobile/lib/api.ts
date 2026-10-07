@@ -1346,9 +1346,7 @@ export async function fetchAccountSecurity(): Promise<AccountSecurity> {
     null,
   );
   // Older servers support password accounts and the original change/delete endpoints.
-  if (response.status === 404) {
-    return legacyAccountSecurity;
-  }
+  if (response.status === 404) return legacyAccountSecurity;
   if (!response.ok) throw new Error(t("Could not load sign-in options"));
   try {
     return accountSecuritySchema.parse(body);

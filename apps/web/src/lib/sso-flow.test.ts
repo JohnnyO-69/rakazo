@@ -111,26 +111,19 @@ it("ignores spoofed messages, mismatched nonces, foreign URLs and unrelated path
   await flow;
 });
 
-it("bounds a closed popup handle without treating COOP as early cancellation", async () => {
+it.each([false, true])("bounds abandoned desktop SSO with a closed handle: %s", async (closed) => {
   vi.useFakeTimers();
-  const { popup, begin, channels } = desktopWindow();
-  const flow = runSsoFlow(begin, ["/app"]);
-  const failure = expect(flow).rejects.toThrow("Could not continue");
-  await vi.advanceTimersByTimeAsync(250);
-  popup.closed = true;
-  await vi.advanceTimersByTimeAsync(5 * 60_000);
-  await failure;
-  expect(channels[0]?.close).toHaveBeenCalled();
-  expect(vi.getTimerCount()).toBe(0);
-});
-
-it("bounds abandoned desktop SSO attempts", async () => {
-  vi.useFakeTimers();
-  const { popup, begin } = desktopWindow();
+  const { popup, begin, channels, location } = desktopWindow();
   const failure = expect(runSsoFlow(begin, ["/app"])).rejects.toThrow("Could not continue");
-  await vi.advanceTimersByTimeAsync(5 * 60_000 + 250);
+  await vi.advanceTimersByTimeAsync(250);
+  popup.closed = closed;
+  await vi.advanceTimersByTimeAsync(5 * 60_000 - 251);
+  expect(popup.close).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
   await failure;
-  expect(popup.close).toHaveBeenCalled();
+  expect(popup.close).toHaveBeenCalledOnce();
+  expect(channels[0]?.close).toHaveBeenCalledOnce();
+  expect(location.assign).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
 
@@ -219,3 +212,35 @@ it.each([false, true])(
     expect(vi.getTimerCount()).toBe(0);
   },
 );
+
+it("times out a never-resolving begin and cleans up the blank popup", async () => {
+  vi.useFakeTimers();
+  const { popup, channels, location } = desktopWindow();
+  const flow = runSsoFlow(() => new Promise(() => undefined), ["/app"]);
+  const failure = expect(flow).rejects.toThrow("Could not continue");
+  await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+  expect(popup.close).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  await failure;
+  expect(popup.close).toHaveBeenCalledOnce();
+  expect(channels[0]?.close).toHaveBeenCalledOnce();
+  expect(channels[0]?.onmessage).toBeNull();
+  expect(location.assign).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("includes authorization time in the callback deadline", async () => {
+  vi.useFakeTimers();
+  const { popup } = desktopWindow();
+  const flow = runSsoFlow(
+    () => new Promise((resolve) => setTimeout(() => resolve(result), 60_000)),
+    ["/app"],
+  );
+  const failure = expect(flow).rejects.toThrow("Could not continue");
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(popup.location.href).toBe(result.data.url);
+  await vi.advanceTimersByTimeAsync(4 * 60_000);
+  await failure;
+  expect(popup.close).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+});

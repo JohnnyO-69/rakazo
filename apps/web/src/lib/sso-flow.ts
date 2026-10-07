@@ -75,7 +75,10 @@ export async function runSsoFlow(
   try {
     popup = window.open("about:blank", SSO_CHANNEL, "popup,width=560,height=720");
     if (!popup) throw new Error(t`Could not continue`);
-    const result = await Promise.race([begin(true, callbackURL), cancellation]);
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(t`Could not continue`)), SSO_TIMEOUT_MS);
+    });
+    const result = await Promise.race([begin(true, callbackURL), cancellation, timeout]);
     if (result.error) return result;
     let target: URL;
     try {
@@ -86,8 +89,10 @@ export async function runSsoFlow(
     if (target.protocol !== "https:" && target.origin !== window.location.origin)
       throw new Error(t`Could not continue`);
     popup.location.href = target.href;
+    // COOP can sever the handle while authentication continues. Retrying
+    // cancels this wait; a closed handle is never a success signal.
     await Promise.race([
-      new Promise<void>((resolve, reject) => {
+      new Promise<void>((resolve) => {
         channel.onmessage = (event: MessageEvent) => {
           const message: unknown = event.data;
           if (!message || typeof message !== "object") return;
@@ -116,11 +121,9 @@ export async function runSsoFlow(
           window.location.assign(returned.href);
           resolve();
         };
-        // COOP can sever the handle while authentication continues. Retrying
-        // cancels this wait; a closed handle is never a success signal.
-        timer = setTimeout(() => reject(new Error(t`Could not continue`)), SSO_TIMEOUT_MS);
       }),
       cancellation,
+      timeout,
     ]);
     return result;
   } catch (error) {
@@ -129,6 +132,7 @@ export async function runSsoFlow(
   } finally {
     if (cancelActiveAttempt === cancel) cancelActiveAttempt = undefined;
     clearTimeout(timer);
+    channel.onmessage = null;
     channel.close();
     if (!cancelled) popup?.close();
   }

@@ -142,3 +142,20 @@ it("does not submit whitespace as a deletion code after expiry", async () => {
   await h.submit("   ");
   expect(h.deleteAccount).not.toHaveBeenCalled();
 });
+
+it.each([undefined, true, false])(
+  "mobile respects password-change policy (%s) while retaining password deletion",
+  (enabled) => {
+    const expression = screen.match(/const canChangePassword = ([^;]+);/)![1]!;
+    const canChange = new Function("security", `return ${expression}`);
+    expect(canChange({ hasPassword: true, passwordChangeEnabled: enabled })).toBe(
+      enabled !== false,
+    );
+    expect(canChange({ hasPassword: false, passwordChangeEnabled: enabled })).toBe(false);
+    const action = screen.indexOf('title={t("Change password")}');
+    expect(
+      screen.slice(screen.lastIndexOf("{", screen.lastIndexOf("<SettingsRow", action)), action),
+    ).toContain("canChangePassword");
+    expect(deletionHandler).toContain("hasPassword = security?.hasPassword === true");
+  },
+);

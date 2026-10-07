@@ -9,6 +9,7 @@ it("falls back to password account controls on an older server's 404", async () 
   );
   await expect(fetchAccountSecurity()).resolves.toEqual({
     hasPassword: true,
+    passwordChangeEnabled: true,
     freshOidcAuth: false,
     ssoLinked: false,
     emailDeletion: false,
