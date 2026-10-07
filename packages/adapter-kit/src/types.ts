@@ -927,7 +927,12 @@ export interface AutoReviewResult {
 }
 
 /** Provider-neutral subscription state. Vendor-specific states map onto these. */
-export type BillingSubscriptionStatus = "trialing" | "active" | "past_due" | "incomplete" | "canceled";
+export type BillingSubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "incomplete"
+  | "canceled";
 
 export interface BillingPrice {
   /** Minor currency units, e.g. cents. */
