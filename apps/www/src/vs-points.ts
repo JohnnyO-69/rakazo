@@ -32,6 +32,10 @@ export const VS_CARDS: Record<string, VsPoints> = {
     rakazo: ["You host it", "You bring the model", "Apache-2.0"],
     other: ["Hosted assistant", "Text or call", "Not self-hosted"],
   },
+  "hark-alternative": {
+    rakazo: ["You host it", "You bring the model", "Apache-2.0"],
+    other: ["Hark hosts it", "Free, with paid usage tiers", "Not self-hosted"],
+  },
 };
 
 export function vsCard(slug: string): VsPoints | undefined {
