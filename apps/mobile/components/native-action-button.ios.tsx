@@ -8,12 +8,8 @@ import {
   tint,
 } from "@expo/ui/swift-ui/modifiers";
 import { useMobileTokens, useResolvedAppearance } from "../lib/native";
-import {
-  type ActionProminence,
-  actionFills,
-  iosAtLeast,
-  type NativeActionButtonProps,
-} from "../lib/native-controls";
+import type { ActionProminence, NativeActionButtonProps } from "../lib/native-controls";
+import { actionFills, iosAtLeast } from "../lib/native-controls";
 
 /** SwiftUI button. Glass styles need iOS 26; older iOS uses the bordered system styles. */
 export function NativeActionButton({

@@ -1,5 +1,5 @@
 import { Stack, useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeActionButton } from "../components/native-action-button";
@@ -25,8 +25,18 @@ export default function ServerScreen() {
   const [draft, setDraft] = useState(current);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const active = useRef(true);
+  const saving = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      active.current = false;
+    };
+  }, []);
 
   function close() {
+    if (!active.current) return;
+    active.current = false;
     if (router.canGoBack()) router.back();
     else router.replace("/sign-in");
   }
@@ -35,10 +45,13 @@ export default function ServerScreen() {
   const warning = parsedDraft.ok ? apiBaseWarning(parsedDraft.url) : null;
 
   async function save() {
+    if (saving.current) return;
+    saving.current = true;
     setPending(true);
     setError(null);
     try {
       const probed = await probeApiBase(draft);
+      if (!active.current) return;
       if (!probed.ok) {
         setError(probed.error);
         return;
@@ -50,21 +63,26 @@ export default function ServerScreen() {
       }
       close();
     } finally {
+      saving.current = false;
       setPending(false);
     }
   }
 
   async function restoreDefault() {
+    if (saving.current) return;
+    saving.current = true;
     setPending(true);
     setError(null);
     try {
       const saved = await resetApiBase();
+      if (!active.current) return;
       if (!saved.ok) {
         setError(saved.error);
         return;
       }
       close();
     } finally {
+      saving.current = false;
       setPending(false);
     }
   }

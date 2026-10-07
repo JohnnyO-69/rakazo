@@ -1,4 +1,5 @@
-import { type ColorValue, Platform, type StyleProp, type ViewStyle } from "react-native";
+import type { ColorValue, StyleProp, ViewStyle } from "react-native";
+import { Platform } from "react-native";
 
 /** True on iOS at this major version or newer. Android and older iOS stay on the plain controls. */
 export function iosAtLeast(major: number) {

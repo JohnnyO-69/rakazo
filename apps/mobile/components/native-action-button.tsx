@@ -1,11 +1,8 @@
 import { ActivityIndicator, Pressable, Text } from "react-native";
 import type { mobileTokens } from "../lib/appearance";
 import { native, useMobileTokens } from "../lib/native";
-import {
-  type ActionProminence,
-  actionFills,
-  type NativeActionButtonProps,
-} from "../lib/native-controls";
+import type { ActionProminence, NativeActionButtonProps } from "../lib/native-controls";
+import { actionFills } from "../lib/native-controls";
 
 /** Android (and non-iOS) form buttons. iOS uses the SwiftUI button in the platform file. */
 export function NativeActionButton({
