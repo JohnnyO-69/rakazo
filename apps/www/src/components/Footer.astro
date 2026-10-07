@@ -8,6 +8,7 @@ import {
   localeHomePath,
   type Locale,
 } from "../i18n/locales";
+import { GROK_ALTERNATIVE_PATH } from "../grok-alternative";
 import { CHANGELOG_URL, DOCS_URL, GITHUB_URL, INBOX_ZERO_URL } from "../site";
 import Logo from "./Logo.astro";
 
@@ -25,6 +26,7 @@ type Props = {
     support: string;
     privacy: string;
     terms: string;
+    grokAlternative: string;
   };
 };
 
@@ -45,6 +47,7 @@ const {
     support: "Support",
     privacy: "Privacy",
     terms: "Terms",
+    grokAlternative: "Grok Bot alternative",
   },
 } = Astro.props;
 
@@ -84,6 +87,9 @@ function isCurrentPage(href: string): boolean {
       <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">{linkLabels.changelog}</a>
       <a href="/alternatives/" aria-current={isCurrentPage("/alternatives/") ? "page" : undefined}>
         {linkLabels.alternatives}
+      </a>
+      <a href={GROK_ALTERNATIVE_PATH} aria-current={isCurrentPage(GROK_ALTERNATIVE_PATH) ? "page" : undefined}>
+        {linkLabels.grokAlternative}
       </a>
       <a href="/about/">{linkLabels.about}</a>
       <a href="/support/">{linkLabels.support}</a>
