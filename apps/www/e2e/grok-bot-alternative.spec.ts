@@ -1,4 +1,5 @@
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 
 async function captureScreenshot(page: Page, testInfo: TestInfo, name: string) {
   const screenshotPath = testInfo.outputPath(`${name}.png`);
@@ -57,7 +58,18 @@ test.describe("Grok Bot alternative", () => {
       page.locator(".site-footer__links").getByRole("link", { name: "Grok Bot alternative" }),
     ).toBeVisible();
 
+    const docs = page.getByRole("link", { name: "Read the docs" });
+    await expect(docs).toHaveCSS("color", "rgb(255, 255, 255)");
+    const sources = page.locator("ul.source-list");
+    await expect(sources).toHaveCSS("display", "flex");
+    await expect(sources).toHaveCSS("font-size", "14px");
+    await expect(sources.getByRole("link", { name: "Grok Bot overview" })).toBeVisible();
+
     await captureScreenshot(page, testInfo, "05-grok-bot-alternative");
+
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(docs).toHaveCSS("color", "rgb(255, 255, 255)");
+    await captureScreenshot(page, testInfo, "05-grok-bot-alternative-dark");
   });
 
   test("homepage headings name the open source alternative", async ({ page }, testInfo) => {

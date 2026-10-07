@@ -67,11 +67,11 @@ curl -fsSLO https://raw.githubusercontent.com/elie222/rakazo/main/infra/compose/
 bash install-images.sh`;
 
 export const SELF_HOST_LEAD =
-  "Published images need Docker Engine, the Compose plugin, curl, and OpenSSL.";
+  "Published images need Docker Engine 26+ (API 1.45+ for bot home volume subpaths), the Compose plugin, curl, and OpenSSL.";
 
 export const SELF_HOST_AFTER = [
-  "Open http://127.0.0.1:5173, create an account, and connect a model. Local Docker computers are on by default.",
-  "The same installer runs on a server you control. Put HTTPS in front of the app before anyone else can reach it. The desktop app can install the stack on this computer, or connect to an instance you already run.",
+  "On this computer, open http://127.0.0.1:5173, create an account, and connect a model. That address is only on the machine running Rakazo. Local Docker computers are on by default.",
+  "On a server, run the installer with --prepare-only, set the public HTTPS origin, and create the owner account before anyone else can reach it. The self-hosting guide covers that setup. The desktop app can install the stack on this computer, or connect to an instance you already run.",
 ] as const;
 
 export const GROK_ALTERNATIVE_FAQ = [

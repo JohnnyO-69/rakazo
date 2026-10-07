@@ -34,3 +34,11 @@ describe("homepage headings", () => {
     expect(copy.footer.links.grokAlternative).toBe("Grok Bot alternative");
   });
 });
+
+describe("self-host quick start", () => {
+  it("names the Docker minimum and keeps remote setup private until the owner exists", async () => {
+    expect(GROK_ALTERNATIVE_MARKDOWN).toContain("Docker Engine 26+");
+    expect(GROK_ALTERNATIVE_MARKDOWN).toContain("--prepare-only");
+    expect(GROK_ALTERNATIVE_MARKDOWN).toContain("only on the machine running Rakazo");
+  });
+});

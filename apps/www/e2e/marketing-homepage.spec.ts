@@ -91,11 +91,16 @@ test.describe("marketing homepage", () => {
 
 test.describe("marketing not-found page", () => {
   test("is noindex with no canonical or og:url", async ({ page }) => {
-    await page.goto("/this-page-does-not-exist/");
+    const response = await page.goto("/this-page-does-not-exist/");
     await page.waitForLoadState("load");
 
+    expect(response?.status()).toBe(404);
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
     await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
     await expect(page.locator('meta[property="og:url"]')).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Home", exact: true })).toHaveCSS(
+      "color",
+      "rgb(255, 255, 255)",
+    );
   });
 });
