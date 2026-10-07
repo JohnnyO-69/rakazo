@@ -1,3 +1,5 @@
+import type { MenuAction } from "@expo/ui/community/menu";
+import { MenuView } from "@expo/ui/community/menu";
 import { ChatMarkdown, LinkifiedText } from "@rakazo/chat-ui/native";
 import type {
   AgentSkillCatalogEntry,
@@ -90,6 +92,7 @@ import { AskActions } from "../components/AskActions";
 import { BotAvatar } from "../components/bot-avatar";
 import { ChoiceCard } from "../components/ChoiceCard";
 import { ComputerCard } from "../components/ComputerCard";
+import { GlassSurface } from "../components/glass-surface";
 import type { ImageArtifactPreviewTarget } from "../components/image-artifact-viewer";
 import { InlineImageAttachment } from "../components/inline-image-attachment";
 import { McpApprovalCard } from "../components/McpApprovalCard";
@@ -98,6 +101,7 @@ import {
   type MarkdownArtifactPreviewTarget,
 } from "../components/markdown-artifact-preview";
 import { MessageContextMenu } from "../components/message-context-menu";
+import { NativeActionButton } from "../components/native-action-button";
 import { NativeSymbol } from "../components/native-symbol";
 import { SelectTextSheet } from "../components/select-text-sheet";
 import { VoiceChatCard } from "../components/VoiceChatCard";
@@ -168,11 +172,13 @@ import {
   subscribeResponseStreaming,
 } from "../lib/response-streaming";
 import { selectableTextFromMarkdown } from "../lib/selectable-text";
+import { ThreadJumpAnchor } from "../lib/thread-jump";
 import {
   type ThreadScrollAction,
   ThreadScrollBehavior,
   type ThreadScrollState,
 } from "../lib/thread-scroll";
+import { errorText } from "../lib/user-error";
 import { speakQueue, speakText } from "../lib/voice";
 import { probeProviderTranscribe, resolveVoiceCallPlan } from "../lib/voice-call-entry";
 
@@ -325,6 +331,8 @@ function createThreadHeaderStyles() {
       paddingStart: 6,
       paddingEnd: 14,
       borderRadius: 999,
+    },
+    titleCapsuleFill: {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: tokens.border,
       backgroundColor: tokens.card,
@@ -333,6 +341,17 @@ function createThreadHeaderStyles() {
       color: tokens.foreground,
       fontSize: 18,
       fontWeight: "600",
+    },
+    circleButton: {
+      flex: 1,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    composerFill: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: tokens.border,
+      backgroundColor: tokens.card,
     },
     headerFade: {
       position: "absolute",
@@ -396,6 +415,7 @@ function Thread() {
     probeSeq?: number;
   } | null>(null);
   const jumpScrollTarget = useRef<string | null>(null);
+  const jumpAnchor = useRef(new ThreadJumpAnchor());
   const activeBotId = useRef(botId);
   activeBotId.current = botId;
   const activeGroupId = useRef(groupId);
@@ -416,6 +436,7 @@ function Thread() {
     expandedHistoryThread.current = null;
     pinnedAroundRef.current = null;
     jumpScrollTarget.current = null;
+    jumpAnchor.current.release();
     joinPinnedAfterLayout.current = null;
     loadingOlderContent.current = false;
     setThreadScrollState(scrollBehavior.current.state());
@@ -741,20 +762,21 @@ function Thread() {
             if (!botId || inGroup) return;
             router.push({ pathname: "/bot-settings", params: { botId } });
           }}
-          style={styles.titleCapsule}
         >
-          {!inGroup && currentBot ? (
-            <BotAvatar
-              color={currentBot.color}
-              identity={currentBot.id}
-              size={28}
-              status={currentBotStatus}
-              muted={!currentBot.notifyOnFinish}
-            />
-          ) : null}
-          <Text numberOfLines={1} style={styles.title}>
-            {displayName || t("Thread")}
-          </Text>
+          <GlassSurface style={styles.titleCapsule} fallbackStyle={styles.titleCapsuleFill}>
+            {!inGroup && currentBot ? (
+              <BotAvatar
+                color={currentBot.color}
+                identity={currentBot.id}
+                size={28}
+                status={currentBotStatus}
+                muted={!currentBot.notifyOnFinish}
+              />
+            ) : null}
+            <Text numberOfLines={1} style={styles.title}>
+              {displayName || t("Thread")}
+            </Text>
+          </GlassSurface>
         </Pressable>
       ),
       headerRight: () =>
@@ -827,9 +849,7 @@ function Thread() {
             : snapRef.current,
         );
       })
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : t("Could not clear conversation")),
-      );
+      .catch((err: unknown) => setError(errorText(err, t("Could not clear conversation"))));
   }
 
   const botActions = [
@@ -870,10 +890,7 @@ function Thread() {
         void rpc("bots/archive", { botId })
           .then(leaveBot)
           .catch((error) =>
-            Alert.alert(
-              t("Could not archive bot"),
-              error instanceof Error ? error.message : t("Try again."),
-            ),
+            Alert.alert(t("Could not archive bot"), errorText(error, t("Try again."))),
           ),
     },
     {
@@ -965,6 +982,7 @@ function Thread() {
           newerCursor: opened.newerCursor,
         }
       : null;
+    jumpAnchor.current.begin(targetInPage ? target.messageId : null);
     jumpScrollTarget.current = targetInPage ? target.messageId : null;
     newerLoadFailed.current = false;
     joinPinnedAfterLayout.current = null;
@@ -1033,7 +1051,7 @@ function Thread() {
     } catch (err) {
       if (epoch !== historyEpoch.current || pinnedAroundRef.current !== pinned) return;
       newerLoadFailed.current = true;
-      setError(err instanceof Error ? err.message : t("Could not open message"));
+      setError(errorText(err, t("Could not open message")));
     } finally {
       loadingNewerContent.current = false;
       setLoadingNewer(false);
@@ -1046,6 +1064,7 @@ function Thread() {
     pinnedAroundRef.current = null;
     joinPinnedAfterLayout.current = null;
     jumpScrollTarget.current = null;
+    jumpAnchor.current.release();
     expandedHistoryThread.current = null;
     // The live list mounts at the latest message.
     scrollBehavior.current.jumpToLatest();
@@ -1077,7 +1096,7 @@ function Thread() {
       commitSnap(prependMobileMessagePage(snapRef.current, page));
     } catch (err) {
       loadingOlderContent.current = false;
-      setError(err instanceof Error ? err.message : t("Could not load earlier messages"));
+      setError(errorText(err, t("Could not load earlier messages")));
     } finally {
       setLoadingOlder(false);
     }
@@ -1166,6 +1185,7 @@ function Thread() {
     if (!messageId) {
       pinnedAroundRef.current = null;
       jumpScrollTarget.current = null;
+      jumpAnchor.current.release();
     }
     expandedHistoryThread.current = null;
     historyEpoch.current += 1;
@@ -1176,13 +1196,13 @@ function Thread() {
       // Pending search jumps load the around-page separately; avoid replacing it with latest.
       const next = messageId
         ? await rpc<MobileSnapshot>("threads/get", groupId ? { groupId } : { botId: botId! }).catch(
-            (err: Error) => {
-              setError(err.message);
+            (err: unknown) => {
+              setError(errorText(err));
               return null;
             },
           )
-        : await refresh().catch((err: Error) => {
-            setError(err.message);
+        : await refresh().catch((err: unknown) => {
+            setError(errorText(err));
             return null;
           });
       if (abort.signal.aborted) return;
@@ -1214,6 +1234,8 @@ function Thread() {
                 if (event.type === "thread.cleared") {
                   expandedHistoryThread.current = null;
                   pinnedAroundRef.current = null;
+                  jumpScrollTarget.current = null;
+                  jumpAnchor.current.release();
                   historyEpoch.current += 1;
                 }
                 commitSnap(applyMobileThreadEvent(snapRef.current, event));
@@ -1281,10 +1303,23 @@ function Thread() {
   }, [botId, groupId, navigation, snap?.run?.status]);
 
   useEffect(() => {
-    if ((!botId && !groupId) || !messageId) return;
+    if (!botId && !groupId) return;
+    // A conversation hit is the thread itself: stay on the live tail, not an older page.
+    if (!messageId) {
+      const pinned = pinnedAroundRef.current != null || jumpAnchor.current.holds();
+      jumpAnchor.current.release();
+      jumpScrollTarget.current = null;
+      pinnedAroundRef.current = null;
+      if (pinned) {
+        expandedHistoryThread.current = null;
+        commitSnap(snapRef.current);
+      }
+      return;
+    }
+    jumpAnchor.current.begin(messageId);
     void applyMessageJump(groupId ? { groupId, messageId } : { botId: botId!, messageId }).catch(
       (err) => {
-        setError(err instanceof Error ? err.message : t("Could not open message"));
+        setError(errorText(err, t("Could not open message")));
       },
     );
   }, [botId, groupId, messageId]);
@@ -1360,8 +1395,6 @@ function Thread() {
     width: 36,
     height: 28,
     borderRadius: 14,
-    marginBottom: 8,
-    backgroundColor: tokens.primary,
     alignItems: "center",
     justifyContent: "center",
   } as const;
@@ -1495,9 +1528,9 @@ function Thread() {
       }
     } catch (err) {
       if (reroutedToGroup && groupTarget) {
-        setError(err instanceof Error ? err.message : t("Failed to send message"));
+        setError(errorText(err, t("Failed to send message")));
       } else if (isCurrentTarget(botTarget, groupTarget)) {
-        setError(err instanceof Error ? err.message : t("Failed to send message"));
+        setError(errorText(err, t("Failed to send message")));
       }
     } finally {
       setSending(false);
@@ -1517,7 +1550,7 @@ function Thread() {
       );
     } catch (err) {
       if (isCurrentTarget(targetBotId, targetGroupId)) {
-        setError(err instanceof Error ? err.message : t("Failed to stop work"));
+        setError(errorText(err, t("Failed to stop work")));
       }
       setSending(false);
       return;
@@ -1526,7 +1559,7 @@ function Thread() {
       await refresh();
     } catch (err) {
       if (isCurrentTarget(targetBotId, targetGroupId)) {
-        const detail = err instanceof Error ? err.message : t("Failed to refresh");
+        const detail = errorText(err, t("Failed to refresh"));
         setError(t("Work stopped, but the thread could not refresh: {detail}", { detail }));
       }
     } finally {
@@ -1591,7 +1624,7 @@ function Thread() {
             Alert.alert(t("Could not speak"), t("Add a voice provider in Voice settings."));
         })
         .catch((err: unknown) =>
-          Alert.alert(t("Could not speak"), err instanceof Error ? err.message : t("Try again.")),
+          Alert.alert(t("Could not speak"), errorText(err, t("Try again."))),
         );
     },
     [botId, displayName, mentionBots, snap?.members, visibleMessages],
@@ -1644,16 +1677,16 @@ function Thread() {
     }
   }
 
-  function showAttachMenu() {
-    Alert.alert(t("Attach"), undefined, [
-      {
-        text: t("Photo library"),
-        onPress: () => void addAttachments(pickFromLibrary),
-      },
-      { text: t("Camera"), onPress: () => void addAttachments(takePhoto) },
-      { text: t("File"), onPress: () => void addAttachments(pickDocuments) },
-      { text: t("Cancel"), style: "cancel" },
-    ]);
+  const attachActions: MenuAction[] = [
+    { id: "library", title: t("Photo library"), image: "photo.on.rectangle" },
+    { id: "camera", title: t("Camera"), image: "camera" },
+    { id: "file", title: t("File"), image: "doc" },
+  ];
+
+  function attachFrom(source: string) {
+    if (source === "library") void addAttachments(pickFromLibrary);
+    else if (source === "camera") void addAttachments(takePhoto);
+    else if (source === "file") void addAttachments(pickDocuments);
   }
 
   async function addAttachments(
@@ -1719,7 +1752,28 @@ function Thread() {
     return viewport > 0 && content - viewport - offset <= 80;
   }
 
+  function scrollPinnedTo(offset: number) {
+    pinnedScroll.current?.scrollTo({ y: offset, animated: false });
+    pinnedScrollMetrics.current.offset = offset;
+  }
+
   function loadNewerNearEnd() {
+    // Wait until the matched row has a real offset. Prefetching from the top
+    // of the page changes the content size and lands back on an older reply.
+    // A hit that is not drawn (filtered out of the transcript) must not hold
+    // that wait, or newer pages never load.
+    const targetId = jumpScrollTarget.current ?? pinnedAroundRef.current?.messageId;
+    const targetDrawn =
+      targetId != null &&
+      threadWindowMessages(visibleMessages, pinnedNewerCursor).some(
+        (message) => message.id === targetId,
+      );
+    if (jumpAnchor.current.holds() && !targetDrawn) {
+      jumpAnchor.current.release();
+      jumpScrollTarget.current = null;
+    } else if (jumpAnchor.current.blocksPaging(targetDrawn, headerHeight + 24)) {
+      return;
+    }
     const { offset, viewport, content } = pinnedScrollMetrics.current;
     // Fetch the next page while a screen of this one is still left to read; a page shorter
     // than the screen never scrolls, so layout and content changes check too.
@@ -1757,7 +1811,7 @@ function Thread() {
       });
     } catch (err) {
       if (!isCurrentTarget(targetBotId, targetGroupId)) return;
-      setError(err instanceof Error ? err.message : t("Could not update reaction"));
+      setError(errorText(err, t("Could not update reaction")));
     }
   }
 
@@ -1865,7 +1919,10 @@ function Thread() {
     };
   }
 
-  function renderMessageRow(message: MobileMessage, options?: { enableJump?: boolean }) {
+  function renderMessageRow(
+    message: MobileMessage,
+    options?: { enableJump?: boolean; index?: number },
+  ) {
     const { actionProps, menu, onMenuAction } = messageActionProps(message);
     const messageReactions = reactionView.reactions.get(message.id);
     const activityBotId =
@@ -1886,13 +1943,18 @@ function Thread() {
         onLayout={
           options?.enableJump
             ? (event) => {
-                if (jumpScrollTarget.current !== message.id) return;
                 // Opaque header used to own this space; clear the transparent bar + fade.
-                const y = Math.max(0, event.nativeEvent.layout.y - (headerHeight + 24));
+                const offset = jumpAnchor.current.onMessageLayout(
+                  message.id,
+                  event.nativeEvent.layout.y,
+                  options.index ?? 0,
+                  headerHeight + 24,
+                );
+                if (offset == null) return;
+                scrollPinnedTo(offset);
                 requestAnimationFrame(() => {
-                  if (jumpScrollTarget.current !== message.id) return;
-                  pinnedScroll.current?.scrollTo({ y, animated: true });
-                  jumpScrollTarget.current = null;
+                  const again = jumpAnchor.current.align(headerHeight + 24);
+                  if (again != null) scrollPinnedTo(again);
                 });
               }
             : undefined
@@ -2104,10 +2166,16 @@ function Thread() {
             }}
             onContentSizeChange={(_, height) => {
               pinnedScrollMetrics.current.content = height;
+              const jumpOffset = jumpAnchor.current.align(headerHeight + 24);
+              if (jumpOffset != null) scrollPinnedTo(jumpOffset);
               const armedAt = joinPinnedAfterLayout.current;
               if (armedAt != null && height !== armedAt) {
                 joinPinnedAfterLayout.current = null;
-                if (pinnedAroundRef.current?.newerCursor == null && pinnedNearEnd()) {
+                if (
+                  !jumpAnchor.current.holds() &&
+                  pinnedAroundRef.current?.newerCursor == null &&
+                  pinnedNearEnd()
+                ) {
                   showLatest();
                   return;
                 }
@@ -2125,13 +2193,16 @@ function Thread() {
             }}
             onScrollBeginDrag={() => {
               newerLoadFailed.current = false;
+              if (!jumpAnchor.current.holds()) return;
+              jumpAnchor.current.release();
+              jumpScrollTarget.current = null;
             }}
             onScrollEndDrag={updatePinnedScroll}
             onMomentumScrollEnd={updatePinnedScroll}
           >
             {loadEarlierControl}
-            {threadWindowMessages(visibleMessages, pinnedNewerCursor).map((message) =>
-              renderMessageRow(message, { enableJump: true }),
+            {threadWindowMessages(visibleMessages, pinnedNewerCursor).map((message, index) =>
+              renderMessageRow(message, { enableJump: true, index }),
             )}
             {pinnedNewerCursor === null ? (
               workingFooter
@@ -2214,33 +2285,37 @@ function Thread() {
               bottom: 12,
               width: 42,
               height: 42,
-              borderRadius: 21,
-              borderWidth: 1,
-              borderColor: native.fillPressed,
-              backgroundColor: native.fill,
-              alignItems: "center",
-              justifyContent: "center",
             }}
           >
-            <NativeSymbol
-              ios="arrow.down"
-              android="arrow-down"
-              size={18}
-              color={tokens.foreground}
-            />
-            {threadScrollState.unread ? (
-              <View
-                style={{
-                  position: "absolute",
-                  top: 3,
-                  right: 3,
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: tokens.primary,
-                }}
+            <GlassSurface
+              shape="circle"
+              style={styles.circleButton}
+              fallbackStyle={{
+                borderWidth: 1,
+                borderColor: native.fillPressed,
+                backgroundColor: native.fill,
+              }}
+            >
+              <NativeSymbol
+                ios="arrow.down"
+                android="arrow-down"
+                size={18}
+                color={tokens.foreground}
               />
-            ) : null}
+              {threadScrollState.unread ? (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 3,
+                    right: 3,
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: tokens.primary,
+                  }}
+                />
+              ) : null}
+            </GlassSurface>
           </Pressable>
         ) : null}
       </View>
@@ -2256,18 +2331,25 @@ function Thread() {
         {/* Fades messages out above the composer, like the header fade. */}
         <View pointerEvents="none" style={styles.composerFade} />
         {replyTarget ? (
-          <View
+          <GlassSurface
             style={{
               marginTop: 12,
+              borderRadius: 999,
+              paddingStart: 16,
+              paddingEnd: 10,
+              paddingVertical: 8,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+            }}
+            fallbackStyle={{
               borderRadius: 14,
               borderWidth: 1,
               borderColor: tokens.border,
               backgroundColor: tokens.card,
-              paddingHorizontal: 12,
+              paddingStart: 12,
+              paddingEnd: 12,
               paddingVertical: 10,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
             }}
           >
             <View style={{ flex: 1 }}>
@@ -2279,15 +2361,22 @@ function Thread() {
               </Text>
             </View>
             <Pressable
+              accessibilityRole="button"
               accessibilityLabel={t("Cancel reply")}
+              hitSlop={8}
               onPress={() => {
                 setReplyTarget(null);
                 setReplyQuote(null);
               }}
             >
-              <Text style={{ color: tokens.mutedForeground }}>✕</Text>
+              <NativeSymbol
+                ios="xmark.circle.fill"
+                android="close-circle"
+                size={20}
+                color={tokens.mutedForeground}
+              />
             </Pressable>
-          </View>
+          </GlassSurface>
         ) : null}
         {attachmentNotice ? (
           <Text style={{ color: tokens.warning, marginTop: 12, fontSize: 13 }}>
@@ -2324,7 +2413,12 @@ function Thread() {
                     style={{ width: 28, height: 28, borderRadius: 6 }}
                   />
                 ) : (
-                  <Text style={{ color: tokens.foreground }}>📎</Text>
+                  <NativeSymbol
+                    ios="paperclip"
+                    android="attach"
+                    size={16}
+                    color={tokens.mutedForeground}
+                  />
                 )}
                 <Text style={{ color: tokens.foreground, maxWidth: 140 }} numberOfLines={1}>
                   {attachment.name}
@@ -2466,35 +2560,38 @@ function Thread() {
           </ScrollView>
         ) : null}
         <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 8 }}>
-          <Pressable
-            accessibilityLabel={t("Attach file")}
-            onPress={showAttachMenu}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: tokens.card,
-              borderWidth: StyleSheet.hairlineWidth,
-              borderColor: tokens.border,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+          <MenuView
+            actions={attachActions}
+            colorScheme={colorScheme}
+            onPressAction={(event) => attachFrom(event.nativeEvent.event)}
           >
-            <NativeSymbol ios="plus" android="add" size={18} color={tokens.mutedForeground} />
-          </Pressable>
-          <View
+            <View
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={t("Attach file")}
+              style={{ width: 44, height: 44 }}
+            >
+              <GlassSurface
+                shape="circle"
+                style={styles.circleButton}
+                fallbackStyle={styles.composerFill}
+              >
+                <NativeSymbol ios="plus" android="add" size={18} color={tokens.mutedForeground} />
+              </GlassSurface>
+            </View>
+          </MenuView>
+          <GlassSurface
+            shape="roundedRectangle"
             style={{
               flex: 1,
               minHeight: 44,
               borderRadius: 22,
-              backgroundColor: tokens.card,
-              borderWidth: StyleSheet.hairlineWidth,
-              borderColor: tokens.border,
               flexDirection: "row",
               alignItems: "flex-end",
               paddingStart: 16,
               paddingEnd: 4,
             }}
+            fallbackStyle={styles.composerFill}
           >
             <View
               style={{
@@ -2643,14 +2740,20 @@ function Thread() {
                 accessibilityLabel={t("Call")}
                 hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                 onPress={() => void startVoiceCall()}
-                style={composerPillStyle}
+                style={{ marginBottom: 8 }}
               >
-                <NativeSymbol
-                  ios="waveform"
-                  android="pulse-outline"
-                  size={15}
-                  color={tokens.primaryForeground}
-                />
+                <GlassSurface
+                  tint={tokens.primary}
+                  style={composerPillStyle}
+                  fallbackStyle={{ backgroundColor: tokens.primary }}
+                >
+                  <NativeSymbol
+                    ios="waveform"
+                    android="pulse-outline"
+                    size={15}
+                    color={tokens.primaryForeground}
+                  />
+                </GlassSurface>
               </Pressable>
             ) : (
               <Pressable
@@ -2659,34 +2762,37 @@ function Thread() {
                 disabled={sending || !canSend}
                 hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                 onPress={() => void send()}
-                style={[composerPillStyle, { opacity: sending || !canSend ? 0.5 : 1 }]}
+                style={{ marginBottom: 8, opacity: sending || !canSend ? 0.5 : 1 }}
               >
-                <NativeSymbol
-                  ios="arrow.up"
-                  android="arrow-up"
-                  size={15}
-                  color={tokens.primaryForeground}
-                />
+                <GlassSurface
+                  tint={tokens.primary}
+                  style={composerPillStyle}
+                  fallbackStyle={{ backgroundColor: tokens.primary }}
+                >
+                  <NativeSymbol
+                    ios="arrow.up"
+                    android="arrow-up"
+                    size={15}
+                    color={tokens.primaryForeground}
+                  />
+                </GlassSurface>
               </Pressable>
             )}
-          </View>
+          </GlassSurface>
           {working ? (
             <Pressable
               accessibilityLabel={t("Stop")}
               disabled={sending}
               onPress={() => void stop()}
-              style={{
-                borderColor: tokens.border,
-                borderWidth: 1,
-                borderRadius: 22,
-                width: 44,
-                height: 44,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: sending ? 0.5 : 1,
-              }}
+              style={{ width: 44, height: 44, opacity: sending ? 0.5 : 1 }}
             >
-              <NativeSymbol ios="stop.fill" android="stop" size={15} color={tokens.foreground} />
+              <GlassSurface
+                shape="circle"
+                style={styles.circleButton}
+                fallbackStyle={{ borderColor: tokens.border, borderWidth: 1 }}
+              >
+                <NativeSymbol ios="stop.fill" android="stop" size={15} color={tokens.foreground} />
+              </GlassSurface>
             </Pressable>
           ) : null}
         </View>
@@ -2866,26 +2972,14 @@ function QuoteSheet({
             paddingBottom: 12,
           }}
         >
-          <Pressable accessibilityRole="button" onPress={onCancel} hitSlop={8}>
-            <Text style={{ color: tokens.mutedForeground, fontSize: 17 }}>{t("Cancel")}</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !excerpt }}
+          <NativeActionButton label={t("Cancel")} onPress={onCancel} prominence="plain" />
+          <NativeActionButton
             disabled={!excerpt}
+            fill={false}
+            label={t("Quote")}
             onPress={() => onQuote(excerpt)}
-            hitSlop={8}
-          >
-            <Text
-              style={{
-                color: excerpt ? tokens.primary : tokens.mutedForeground,
-                fontSize: 17,
-                fontWeight: "600",
-              }}
-            >
-              {t("Quote")}
-            </Text>
-          </Pressable>
+            prominence={excerpt ? "primary" : "plain"}
+          />
         </View>
         <ScrollView style={{ flex: 1, paddingHorizontal: 20 }}>
           {segments.map((text, index) => (
@@ -3566,10 +3660,7 @@ const MessageBubble = memo(function MessageBubble({
                         attachment.name ?? t("Image"),
                         attachment.mimeType ?? "image/png",
                       ).catch((err) =>
-                        Alert.alert(
-                          t("Could not open image"),
-                          err instanceof Error ? err.message : t("Try again."),
-                        ),
+                        Alert.alert(t("Could not open image"), errorText(err, t("Try again."))),
                       )
                     : undefined
                 }
@@ -3602,10 +3693,7 @@ const MessageBubble = memo(function MessageBubble({
                         attachment.name ?? t("File"),
                         attachment.mimeType ?? "text/plain",
                       ).catch((err) =>
-                        Alert.alert(
-                          t("Could not open file"),
-                          err instanceof Error ? err.message : t("Try again."),
-                        ),
+                        Alert.alert(t("Could not open file"), errorText(err, t("Try again."))),
                       )
                   : undefined
               }
@@ -3815,9 +3903,17 @@ function AgentEventLabel({
       accessibilityLabel={expanded ? t("Hide {label}", { label }) : t("Show {label}", { label })}
       style={{ width: "100%", paddingVertical: 4, alignItems: "center" }}
     >
-      <Text style={{ color: tokens.mutedForeground, fontSize: 13.5, textAlign: "center" }}>
-        ↔ {label}
-      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <NativeSymbol
+          ios="arrow.left.arrow.right"
+          android="swap-horizontal"
+          size={12}
+          color={tokens.mutedForeground}
+        />
+        <Text style={{ color: tokens.mutedForeground, fontSize: 13.5, textAlign: "center" }}>
+          {label}
+        </Text>
+      </View>
       {expanded && detail ? (
         <View
           style={{
@@ -3869,7 +3965,6 @@ function AskBlock({
         ? t("API key")
         : t("Code");
   const submitLabel = secretInput ? t("Save") : t("Send answer");
-  const submittingLabel = secretInput ? t("Saving…") : t("Sending…");
 
   async function submit() {
     if (submitting) return;
@@ -3882,7 +3977,9 @@ function AskBlock({
     try {
       await onAnswer(submitValue, submitUsername);
     } catch (cause) {
-      setError(!secretInput && cause instanceof Error ? cause.message : t("Could not send answer"));
+      setError(
+        secretInput ? t("Could not send answer") : errorText(cause, t("Could not send answer")),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -3952,24 +4049,14 @@ function AskBlock({
             onSubmitEditing={() => void submit()}
             style={[askInputStyles.field, { borderColor: tokens.border, color: tokens.foreground }]}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={submitLabel}
-            disabled={incomplete || submitting}
+          <NativeActionButton
+            label={submitLabel}
+            disabled={incomplete}
+            busy={submitting}
+            fill={false}
             onPress={() => void submit()}
-            style={{
-              alignSelf: "flex-end",
-              borderRadius: 999,
-              backgroundColor: tokens.foreground,
-              opacity: incomplete || submitting ? 0.5 : 1,
-              paddingHorizontal: 16,
-              paddingVertical: 9,
-            }}
-          >
-            <Text style={{ color: tokens.primaryForeground, fontWeight: "600" }}>
-              {submitting ? submittingLabel : submitLabel}
-            </Text>
-          </Pressable>
+            style={{ alignSelf: "flex-end" }}
+          />
         </>
       ) : (
         <Text style={{ color: tokens.mutedForeground, fontSize: 13.5 }}>
