@@ -1,5 +1,6 @@
 -- CreateTable
 CREATE TABLE "billing_accounts" (
+    "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "customerId" TEXT NOT NULL,
     "subscriptionId" TEXT,
@@ -16,8 +17,11 @@ CREATE TABLE "billing_accounts" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "billing_accounts_pkey" PRIMARY KEY ("organizationId")
+    CONSTRAINT "billing_accounts_pkey" PRIMARY KEY ("id")
 );
+
+-- CreateIndex
+CREATE UNIQUE INDEX "billing_accounts_organizationId_key" ON "billing_accounts"("organizationId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "billing_accounts_customerId_key" ON "billing_accounts"("customerId");
