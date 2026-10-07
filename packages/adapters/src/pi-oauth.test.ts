@@ -878,7 +878,7 @@ describe("oauthCredentialAccountId", () => {
   });
 });
 
-describe("matchesFailedOAuthSecret", async () => {
+describe("matchesFailedOAuthSecret", () => {
   const failed = { access: "old-access", refresh: "old-refresh", expires: 1 };
   const load = (ciphertext: string) => ciphertext;
   const predicate = () => matchesFailedOAuthSecret(load, failed);

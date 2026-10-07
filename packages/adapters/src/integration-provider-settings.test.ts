@@ -120,7 +120,11 @@ describe("integration credentials with Infisical", () => {
   it("reloads external rotation and does not retain credentials expired during a slow save", async () => {
     vi.useFakeTimers();
     const fake = infisicalFake();
-    const store = new InfisicalSecretStore({ ...fake.options, cacheTtlMs: 100 });
+    const store = new InfisicalSecretStore({
+      ...fake.options,
+      cacheTtlMs: 100,
+      cacheMaxEntries: 1,
+    });
     await store.start();
     let row: { id: string; ciphertext: string } | undefined;
     let release!: () => void;
@@ -174,6 +178,8 @@ describe("integration credentials with Infisical", () => {
       await settings.resolve("composio");
       expect(factory).toHaveBeenCalledTimes(calls);
       expect(changed).not.toHaveBeenCalled();
+      await store.put("unrelated", context);
+      changed.mockClear();
       fake.values.set(
         row!.ciphertext.split(":").at(-1)!,
         JSON.stringify({ provider: "composio", apiKey: "fake-again" }),
@@ -181,7 +187,7 @@ describe("integration credentials with Infisical", () => {
       await vi.advanceTimersByTimeAsync(100);
       await settings.resolve("composio");
       expect(factory).toHaveBeenLastCalledWith({ provider: "composio", apiKey: "fake-again" });
-      expect(changed).toHaveBeenCalledExactlyOnceWith(row!.ciphertext);
+      expect(changed).not.toHaveBeenCalled();
     } finally {
       release();
       await store.close();

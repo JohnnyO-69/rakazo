@@ -12,6 +12,7 @@ import {
 } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { ComposioConnector } from "./composio-connector.js";
+import { credentialDigest } from "./credential-digest.js";
 import { PipedreamConnector } from "./pipedream-connector.js";
 
 /** Resolve persisted credentials on every operation so API and workers observe changes.
@@ -19,7 +20,7 @@ import { PipedreamConnector } from "./pipedream-connector.js";
 export class IntegrationProviderSettings {
   private readonly cache = new Map<
     string,
-    { ciphertext: string; adapter: ManagedConnectorProvider }
+    { ciphertext: string; digest: string; adapter: ManagedConnectorProvider }
   >();
 
   constructor(
@@ -69,12 +70,13 @@ export class IntegrationProviderSettings {
       const plaintext = await this.secrets.load(row.ciphertext, `integration-provider:${id}`);
       if (invalidated) return await this.resolve(id);
       const cached = this.cache.get(id);
-      if (cached?.ciphertext === row.ciphertext) return cached.adapter;
+      const digest = credentialDigest(plaintext);
+      if (cached?.ciphertext === row.ciphertext && cached.digest === digest) return cached.adapter;
       const config = IntegrationProviderConfigSchema.parse(JSON.parse(plaintext));
       if (config.provider !== id)
         throw new Error("Integration provider configuration does not match");
       const adapter = this.create(config);
-      this.cache.set(id, { ciphertext: row.ciphertext, adapter });
+      this.cache.set(id, { ciphertext: row.ciphertext, digest, adapter });
       return adapter;
     } finally {
       unsubscribe();

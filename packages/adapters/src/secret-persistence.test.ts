@@ -1,5 +1,6 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
+import { withTransactionRetry } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import { withSecretPersistence } from "./secret-persistence.js";
@@ -186,6 +187,37 @@ describe("secret persistence cleanup", () => {
       expect(fake.values.size).toBe(1);
       await prisma.secret.deleteMany({ where: { id: "row" } });
       expect(fake.values.size).toBe(0);
+    } finally {
+      await store.close();
+    }
+  });
+  it("cleans the losing retry write while the committed fresh key remains loadable", async () => {
+    const fake = infisicalFake();
+    const store = new InfisicalSecretStore(fake.options);
+    const db = database();
+    const prisma = withSecretPersistence(db.prisma, store);
+    let attempts = 0;
+    try {
+      await withTransactionRetry(async () => {
+        const stored = await store.put("fake", context, { recordId: "row" });
+        await prisma.$transaction(async (tx) => {
+          await tx.secret.create({
+            data: {
+              id: stored.id,
+              ciphertext: stored.ref,
+              userId: "user",
+              spaceId: "space",
+              kind: "agent-environment",
+            },
+          });
+          if (++attempts === 1) throw { code: "P2034" };
+        });
+      });
+      expect(attempts).toBe(2);
+      expect(fake.values.size).toBe(1);
+      await expect(store.load(db.tables.get("secret")![0]!.ciphertext!, "row")).resolves.toBe(
+        "fake",
+      );
     } finally {
       await store.close();
     }

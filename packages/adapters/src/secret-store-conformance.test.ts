@@ -222,7 +222,7 @@ describe("Infisical lifecycle and REST", () => {
     );
     await store.close();
   });
-  it("fans out invalidation and never caches an invalidated in-flight read", async () => {
+  it("fans out invalidation across stores", async () => {
     const fake = infisicalFake();
     const fanout = new InMemoryRealtimeFanout();
     const remote = new InfisicalSecretStore(fake.options);
@@ -271,11 +271,10 @@ describe("Infisical lifecycle and REST", () => {
       await fanout.close();
     }
   });
-  it("propagates aborts to fetch and enforces timeouts", async () => {
+  it("propagates caller aborts to fetch", async () => {
     const fake = infisicalFake();
     const store = new InfisicalSecretStore({ ...fake.options, timeoutMs: 10 });
     await store.start();
-    fake.options.fetch = undefined;
     const controller = new AbortController();
     fake.gate = () =>
       new Promise((resolve) => {
@@ -429,6 +428,111 @@ describe("Infisical lifecycle and REST", () => {
     } finally {
       await store.close();
     }
+  });
+  it("cleans a key created before a cancelled POST response with a fresh signal", async () => {
+    const fake = infisicalFake();
+    const controller = new AbortController();
+    let cleanupSignal: AbortSignal | undefined;
+    const fetcher: typeof fetch = async (input, init) => {
+      const response = await fake.fetcher(input, init);
+      if (init?.method === "POST" && String(input).includes("/secrets/")) {
+        controller.abort();
+        throw controller.signal.reason;
+      }
+      if (init?.method === "DELETE") cleanupSignal = init.signal as AbortSignal;
+      return response;
+    };
+    const store = new InfisicalSecretStore({ ...fake.options, fetch: fetcher });
+    try {
+      await expect(
+        store.put("fake", { ...secretTestContext, signal: controller.signal }),
+      ).rejects.toThrow();
+      expect(fake.values.size).toBe(0);
+      expect(cleanupSignal).toBeDefined();
+      expect(cleanupSignal?.aborted).toBe(false);
+    } finally {
+      await store.close();
+    }
+  });
+  it("shares overlapping reads so an older response cannot overwrite a newer read", async () => {
+    const fake = infisicalFake();
+    const writer = new InfisicalSecretStore(fake.options);
+    const record = await writer.put("before", secretTestContext);
+    await writer.close();
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reading = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let gets = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      const response = await fake.fetcher(input, init);
+      if (init?.method === "GET" && ++gets === 1) {
+        started();
+        await gate;
+      }
+      return response;
+    };
+    const store = new InfisicalSecretStore({ ...fake.options, fetch: fetcher });
+    await store.start();
+    const changed = vi.fn();
+    store.onChange(changed);
+    try {
+      const older = store.load(record.ref, record.id);
+      await reading;
+      fake.values.set(record.ref.split(":").at(-1)!, "after");
+      store.invalidate(record.ref);
+      changed.mockClear();
+      const newer = store.load(record.ref, record.id);
+      expect(gets).toBe(1);
+      release();
+      await expect(Promise.all([older, newer])).resolves.toEqual(["after", "after"]);
+      await expect(store.load(record.ref, record.id)).resolves.toBe("after");
+      expect(gets).toBe(2);
+      expect(changed).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await store.close();
+    }
+  });
+  it.each(["http://localhost", "http://127.2.3.4", "http://[::1]", "https://secrets.example.test"])(
+    "allows secure or loopback URL %s",
+    (baseUrl) => {
+      expect(
+        secretStoreOptionsFromEnv({
+          SECRET_STORE: "infisical",
+          INFISICAL_URL: baseUrl,
+          INFISICAL_CLIENT_ID: "fake",
+          INFISICAL_CLIENT_SECRET: "fake",
+          INFISICAL_PROJECT_ID: "fake",
+          INFISICAL_ENVIRONMENT: "test",
+          INFISICAL_FOLDER: "/",
+        })?.baseUrl,
+      ).toBe(baseUrl);
+    },
+  );
+  it.each([
+    "http://secrets.example.test",
+    "http://infisical",
+    "http://192.168.1.2",
+    "http://localhost.example.test",
+  ])("requires explicit insecure HTTP opt-in for %s", (baseUrl) => {
+    const env = {
+      SECRET_STORE: "infisical",
+      INFISICAL_URL: baseUrl,
+      INFISICAL_CLIENT_ID: "fake",
+      INFISICAL_CLIENT_SECRET: "fake",
+      INFISICAL_PROJECT_ID: "fake",
+      INFISICAL_ENVIRONMENT: "test",
+      INFISICAL_FOLDER: "/",
+    };
+    expect(() => secretStoreOptionsFromEnv(env)).toThrow("requires HTTPS");
+    expect(
+      secretStoreOptionsFromEnv({ ...env, INFISICAL_ALLOW_INSECURE_HTTP: "true" })?.baseUrl,
+    ).toBe(baseUrl);
   });
   it("validates remote env only when selected", () => {
     expect(createSecretStore("key", { INFISICAL_URL: "bad" }).describe().id).toBe("app-encrypted");

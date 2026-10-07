@@ -315,7 +315,6 @@ import {
   updateScratchpadItemFromTool,
 } from "./scratchpad-tools.js";
 import { inferScript } from "./scripted-runtime.js";
-
 import {
   isRunningShellCommand,
   observeShellCommand,

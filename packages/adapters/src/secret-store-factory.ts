@@ -38,6 +38,12 @@ export function secretStoreOptionsFromEnv(
     url.hash
   )
     throw new Error("Invalid INFISICAL_URL");
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname === "[::1]" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(url.hostname);
+  if (url.protocol === "http:" && !loopback && source.INFISICAL_ALLOW_INSECURE_HTTP !== "true")
+    throw new Error("INFISICAL_URL requires HTTPS or INFISICAL_ALLOW_INSECURE_HTTP=true");
   const folder = required("INFISICAL_FOLDER");
   if (!folder.startsWith("/")) throw new Error("INFISICAL_FOLDER must start with /");
   return {

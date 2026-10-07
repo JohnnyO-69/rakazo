@@ -17,6 +17,7 @@ import {
   routineWakeupJob,
   runContinueJob,
   runJobKey,
+  SecretStoreUnavailableError,
 } from "@rakazo/adapter-kit";
 import type {
   CloudAgentConnection,
@@ -1079,7 +1080,9 @@ export function createRouter(deps: RouterDeps) {
                 selected,
                 await deps.secrets.load(ciphertext, row.secretId),
               );
-            } catch {
+            } catch (error) {
+              if (error instanceof SecretStoreUnavailableError)
+                throw new ORPCError("SERVICE_UNAVAILABLE", { cause: error });
               return modelCredentialDto(selected);
             }
           }),

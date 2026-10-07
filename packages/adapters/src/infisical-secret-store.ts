@@ -1,7 +1,3 @@
-import { SecretNotFoundError, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
-
-export { SecretNotFoundError, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
-
 import { createHash, randomUUID } from "node:crypto";
 import type {
   AdapterContext,
@@ -10,7 +6,11 @@ import type {
   SecretRecord,
   SecretStore,
 } from "@rakazo/adapter-kit";
+import { SecretNotFoundError, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
+import { credentialDigest } from "./credential-digest.js";
 import { SecretChanges } from "./secret-changes.js";
+
+export { SecretNotFoundError, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 
 export const INFISICAL_REF_PREFIX = "infisical:v1:";
 export interface InfisicalSecretStoreOptions {
@@ -36,6 +36,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
   private login?: Promise<string>;
   private readonly cache = new Map<string, CacheEntry>();
   private readonly lastSeen = new Map<string, string>();
+  private readonly pendingReads = new Map<string, Promise<string>>();
   private readonly reads = new Map<string, Set<{ invalidated: boolean }>>();
   private readonly lifetime = new AbortController();
   private degraded = false;
@@ -95,7 +96,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
     this.cache.delete(ref);
   }
   private observe(ref: string, value: string): boolean {
-    const digest = createHash("sha256").update(value).digest("hex");
+    const digest = credentialDigest(value);
     const previous = this.lastSeen.get(ref);
     this.lastSeen.delete(ref);
     while (this.lastSeen.size >= (this.options.cacheMaxEntries ?? 256)) {
@@ -155,19 +156,29 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
     const recordId = options.recordId ?? randomUUID();
     const key = `rakazo_${createHash("sha256").update(recordId).digest("hex").slice(0, 24)}_${randomUUID()}`;
     const ref = INFISICAL_REF_PREFIX + key;
-    await this.request(
-      `/api/v3/secrets/raw/${key}`,
-      "POST",
-      { ...this.scope(), secretValue: plaintext },
-      context.signal,
-    );
+    try {
+      await this.request(
+        `/api/v3/secrets/raw/${key}`,
+        "POST",
+        { ...this.scope(), secretValue: plaintext },
+        context.signal,
+      );
+    } catch (error) {
+      // The unique key may have been created before the response was lost.
+      const cleanupSignal = AbortSignal.timeout(2_000);
+      await this.withCancellation(
+        this.delete(ref, { recordId, signal: cleanupSignal }),
+        cleanupSignal,
+      ).catch(() => undefined);
+      throw error;
+    }
     this.observe(ref, plaintext);
     this.remember(ref, plaintext);
     this.changed(ref);
     return { id: recordId, ref, ciphertext: ref };
   }
   async load(ref: string, context: SecretContext): Promise<string> {
-    const key = this.key(ref, context);
+    this.key(ref, context);
     const signal = typeof context === "string" ? undefined : context.signal;
     signal?.throwIfAborted();
     if (this.closed) throw new SecretStoreUnavailableError();
@@ -183,6 +194,19 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
       return cached.value;
     }
     if (cached) this.dropCached(ref);
+    let pending = this.pendingReads.get(ref);
+    if (!pending) {
+      pending = this.loadFresh(ref, context);
+      this.pendingReads.set(ref, pending);
+      const release = () => {
+        if (this.pendingReads.get(ref) === pending) this.pendingReads.delete(ref);
+      };
+      void pending.then(release, release);
+    }
+    return this.withCancellation(pending, signal);
+  }
+  private async loadFresh(ref: string, context: SecretContext): Promise<string> {
+    const key = this.key(ref, context);
     const query = new URLSearchParams({
       ...this.scope(),
       expandSecretReferences: "false",
@@ -194,12 +218,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
     this.reads.set(ref, reads);
     let value: string;
     try {
-      const result = await this.request(
-        `/api/v3/secrets/raw/${key}?${query}`,
-        "GET",
-        undefined,
-        signal,
-      );
+      const result = await this.request(`/api/v3/secrets/raw/${key}?${query}`, "GET");
       if (typeof result?.secret?.secretValue !== "string") {
         this.degraded = true;
         throw new SecretStoreUnavailableError();
@@ -210,7 +229,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
       if (!reads.size) this.reads.delete(ref);
     }
     if (this.closed) throw new SecretStoreUnavailableError();
-    if (read.invalidated) return this.load(ref, context);
+    if (read.invalidated) return this.loadFresh(ref, context);
     const rotated = this.observe(ref, value);
     this.remember(ref, value);
     if (rotated) this.changed(ref);
@@ -263,7 +282,7 @@ export class InfisicalSecretStore extends SecretChanges implements SecretStore {
       if (this.closed) throw new SecretStoreUnavailableError();
       this.token = { value: result.accessToken, expires: this.now() + result.expiresIn * 1000 };
       this.degraded = false;
-      return result.accessToken as string;
+      return result.accessToken;
     })();
     this.login = pending;
     try {

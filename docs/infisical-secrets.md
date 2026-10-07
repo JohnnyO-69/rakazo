@@ -10,12 +10,18 @@ To use Infisical, set the same configuration on API and worker:
 ```dotenv
 SECRET_STORE=infisical
 INFISICAL_URL=https://secrets.example.test
+INFISICAL_ALLOW_INSECURE_HTTP=false
 INFISICAL_CLIENT_ID=replace-with-machine-identity-client-id
 INFISICAL_CLIENT_SECRET=replace-with-machine-identity-client-secret
 INFISICAL_PROJECT_ID=replace-with-project-id
 INFISICAL_ENVIRONMENT=production
 INFISICAL_FOLDER=/rakazo
 ```
+
+`INFISICAL_URL` requires HTTPS except for loopback hosts (`localhost`,
+`127.0.0.0/8`, `::1`). Explicitly set `INFISICAL_ALLOW_INSECURE_HTTP=true` for
+trusted HTTP deployments, including in-cluster Compose service names. This sends
+authentication and secrets without transport encryption.
 
 Create that folder first. Give a universal-auth machine identity read, create,
 and delete permissions only in this project, environment, and folder. Use a
@@ -34,12 +40,18 @@ read detects a changed value and notifies consumers. Long-lived holders re-valid
 credentials on reuse (webhook plaintext has its own 30-second cache). External
 rotation means editing the value of the referenced key. Allow up to the cache TTL
 plus the next use for rotation to apply. MCP revalidation failures retain existing
-live sessions during an outage and retry on their next use. Already-running
+live sessions only during typed store outages and retry on their next use. Missing
+credentials evict those sessions. MCP and integration settings compare fresh reads
+with a digest of their held credentials even after store digest eviction. Already-running
 operations may have used credentials loaded before rotation. Shutdown clears
 caches and cancels requests. Writes and reads have bounded retries and timeouts.
+Concurrent remote reads share one request; caller cancellation cancels only that
+caller’s wait.
 
 Secret replacement, row deletion, and parent deletion explicitly clean up unused
 remote refs after the database commit. Rollbacks clean up unique new writes.
+Agent secret transaction retries write a fresh remote key per attempt. Failed
+remote writes attempt deletion with an independent two-second cleanup deadline.
 Cleanup is best effort and failures produce redacted warnings. Retry failed
 cleanup before revoking machine-identity access; there is no age-based pruning.
 A process crash between the external write and database persistence can leave an
@@ -49,7 +61,8 @@ unreferenced key; reconcile such keys against database refs during maintenance.
 
 API and worker start even if Infisical login fails. Encrypted refs continue to
 work. Uncached Infisical reads fail with `SECRET_STORE_UNAVAILABLE`; subsequent
-operations retry login and reads. Cached plaintext is discarded at expiry even
+operations retry login and reads. Model credential settings return HTTP 503 for
+store outages, preserving the distinction from missing credentials. Cached plaintext is discarded at expiry even
 through an outage. API liveness remains available; `/ready` returns 503 with
 `degraded: true`, and `/internal/health` reports secret-store status. Worker startup
 logs degraded storage. A successful later request restores healthy status.
@@ -63,7 +76,7 @@ pnpm --filter @rakazo/api secrets:infisical --dry-run
 pnpm --filter @rakazo/api secrets:infisical
 ```
 
-The CLI covers credential rows, bot secrets, and integration provider settings.
+The CLI loads the root `.env` before reading configuration. It covers credential rows, bot secrets, and integration provider settings.
 It leaves short-lived run secrets local. It verifies existing refs before
 skipping them, compares the original ref during database updates, and deletes
 new orphan writes on a failed update. Concurrent edits win. Persisted refs are

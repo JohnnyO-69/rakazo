@@ -1,6 +1,5 @@
 import type { DurableMemoryScope, SecretStore, SemanticMemoryProvider } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
-
 import {
   classifySerenityConnectionSettings,
   createSerenityProvider,

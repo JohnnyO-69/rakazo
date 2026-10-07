@@ -1,5 +1,6 @@
 import { createRouterClient } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import {
   COMPUTER_SCREEN_UNAVAILABLE,
   CodexCatalogCache,
@@ -49,6 +50,26 @@ describe("account preferences", () => {
     } satisfies Actor;
     return { update, deps, actor, handler: new RPCHandler(createRouter(deps)) };
   }
+
+  it("reports model credential store outages as service unavailable", async () => {
+    const { deps, actor } = preferencesDeps("robot");
+    Object.assign(deps.prisma, {
+      userModelCredential: {
+        findMany: vi.fn(async () => [{ secretId: "secret", preferences: [] }]),
+      },
+      secret: { findMany: vi.fn(async () => [{ id: "secret", ciphertext: "ref" }]) },
+    });
+    deps.secrets = {
+      load: vi.fn(async () => {
+        throw new SecretStoreUnavailableError();
+      }),
+    } as never;
+    const client = createRouterClient(createRouter(deps), { context: { actor } as never });
+    await expect(client.models.credentials()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+      status: 503,
+    });
+  });
 
   it("keeps an unconfigured catalog offline unless explicitly requested", async () => {
     const { actor, deps } = preferencesDeps("robot");

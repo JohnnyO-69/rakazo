@@ -1,8 +1,8 @@
 import { ORPCError } from "@orpc/server";
 import type { SecretStore } from "@rakazo/adapter-kit";
-
 import type { Actor } from "@rakazo/contracts";
-import { Prisma, type PrismaClient, withTransactionRetry } from "@rakazo/db";
+import type { PrismaClient } from "@rakazo/db";
+import { Prisma, withTransactionRetry } from "@rakazo/db";
 
 type AgentSecretDeps = {
   prisma: PrismaClient;
@@ -44,16 +44,15 @@ export async function putAgentSecret(
   signal = new AbortController().signal,
 ) {
   await requireSpaceOwner(deps.prisma, actor);
-  const stored = await deps.secrets.put(input.value, {
-    operationId: `agent-secret:${input.name}`,
-    traceId: `agent-secret:${input.name}`,
-    spaceId: actor.spaceId,
-    userId: actor.userId,
-    signal,
-  });
-
-  const row = await withTransactionRetry(() =>
-    deps.prisma.$transaction(
+  const row = await withTransactionRetry(async () => {
+    const stored = await deps.secrets.put(input.value, {
+      operationId: `agent-secret:${input.name}`,
+      traceId: `agent-secret:${input.name}`,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      signal,
+    });
+    return deps.prisma.$transaction(
       async (tx) => {
         const existing = await tx.agentSecret.findUnique({
           where: { spaceId_name: { spaceId: actor.spaceId, name: input.name } },
@@ -89,8 +88,8 @@ export async function putAgentSecret(
         return updated;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    ),
-  );
+    );
+  });
   return agentSecretDto(row);
 }
 

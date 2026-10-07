@@ -13,7 +13,6 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { combineSignals, redactConnectorPayload } from "./connector-safety.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createPrivateNetworkFetch, createSafeRemoteFetch } from "./remote-mcp.js";
-
 import { readBodyCapped, withAbort } from "./web-ssrf.js";
 
 export type BotSecretScope = { userId: string; spaceId: string; botId: string };
@@ -342,9 +341,11 @@ export async function requestWithBotSecret(input: {
   if (url.origin !== destination.origin || url.username || url.password || url.hash) {
     return { error: "This credential cannot be sent to that destination." };
   }
+  const controller = new AbortController();
+  const signal = combineSignals(input.signal, controller.signal, AbortSignal.timeout(30_000));
   const plaintext = await input.secretStore.load(row.ciphertext, {
     recordId: row.id,
-    signal: input.signal,
+    signal,
   });
   const headers = new Headers({ accept: "application/json", "content-type": request.contentType });
   const { name: headerName, value: headerValue } = credentialHeader(destination, plaintext);
@@ -358,8 +359,6 @@ export async function requestWithBotSecret(input: {
     ]),
   ].filter(Boolean);
   input.registerRedactions?.(redactions);
-  const controller = new AbortController();
-  const signal = combineSignals(input.signal, controller.signal, AbortSignal.timeout(30_000));
   // The safe fetch refuses plain-HTTP and private hosts outright. A credential
   // saved under the owner's private-HTTP opt-in was validated against exactly
   // those rules at save time, and the request URL is pinned to its origin, so

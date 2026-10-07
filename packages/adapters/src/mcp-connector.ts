@@ -6,11 +6,13 @@ import type {
   ConnectorTool,
   SecretStore,
 } from "@rakazo/adapter-kit";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { isLocalMcpHost } from "@rakazo/contracts";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { catalogToolPrefix } from "./approval-effect.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
+import { credentialDigest } from "./credential-digest.js";
 import { appendToolCompletionAudit } from "./executor.js";
 import {
   CATALOG_EXECUTE,
@@ -31,6 +33,7 @@ type SessionEntry = {
   session: McpSession;
   revision: number;
   material: OAuthMaterial;
+  digest?: string;
   ref?: string;
 };
 type PendingSession = {
@@ -326,12 +329,17 @@ export class McpConnector implements ConnectorProvider {
     if (existing && existing.revision === server.revision) {
       if (existing.ref && server.secretId) {
         try {
-          await this.secrets.load(existing.ref, {
+          const plaintext = await this.secrets.load(existing.ref, {
             recordId: server.secretId,
             signal: context.signal,
           });
-        } catch {
+          if (credentialDigest(plaintext) !== existing.digest) await this.evict(sessionKey);
+        } catch (error) {
           context.signal.throwIfAborted();
+          if (!(error instanceof SecretStoreUnavailableError)) {
+            await this.evict(sessionKey);
+            throw error;
+          }
           // Keep live sessions usable during a store outage. Never log the error:
           // provider errors can contain credential values or private response data.
           getLogger().warn("MCP secret revalidation failed; retaining the live session");
@@ -353,12 +361,12 @@ export class McpConnector implements ConnectorProvider {
     const promise = this.connectSession(server, context, (ref) => {
       const entry = this.connecting.get(sessionKey);
       if (entry) entry.ref = ref;
-    }).then(async ({ session, material, ref }) => {
+    }).then(async ({ session, material, ref, digest }) => {
       if (this.connecting.get(sessionKey)?.invalidated) {
         await session.close();
         throw new Error("Secret changed during MCP connection; retry");
       }
-      this.sessions.set(sessionKey, { session, revision: server.revision, material, ref });
+      this.sessions.set(sessionKey, { session, revision: server.revision, material, ref, digest });
       return session;
     });
     this.connecting.set(sessionKey, { revision: server.revision, promise });
@@ -373,7 +381,7 @@ export class McpConnector implements ConnectorProvider {
     server: McpServer,
     context: AdapterContext,
     onRef: (ref: string) => void,
-  ): Promise<{ session: McpSession; material: OAuthMaterial; ref?: string }> {
+  ): Promise<{ session: McpSession; material: OAuthMaterial; ref?: string; digest?: string }> {
     const session = new McpSession({ name: `rakazo-${server.slug}` });
     // Hoisted so a throw after the secret is decoded can still hand the material out.
     let material: OAuthMaterial | undefined;
@@ -388,14 +396,14 @@ export class McpConnector implements ConnectorProvider {
           })
         : null;
       if (secret) onRef(secret.ciphertext);
-      material = secret
-        ? (JSON.parse(
-            await this.secrets.load(secret.ciphertext, {
-              recordId: secret.id,
-              signal: context.signal,
-            }),
-          ) as OAuthMaterial)
-        : {};
+      const plaintext = secret
+        ? await this.secrets.load(secret.ciphertext, {
+            recordId: secret.id,
+            signal: context.signal,
+          })
+        : undefined;
+      const digest = plaintext === undefined ? undefined : credentialDigest(plaintext);
+      material = plaintext === undefined ? {} : (JSON.parse(plaintext) as OAuthMaterial);
       const loaded = { material, ...(secret ? { secretId: secret.id } : {}) };
       const args = Array.isArray(server.args) ? server.args.map(String) : [];
       const env = { ...(material.env ?? {}) };
@@ -446,7 +454,7 @@ export class McpConnector implements ConnectorProvider {
           signal: context.signal,
         });
       }
-      return { session, material, ref: secret?.ciphertext };
+      return { session, material, ref: secret?.ciphertext, digest };
     } catch (error) {
       await session.close().catch(() => undefined);
       // Redact here, while the material is still in hand. This one rejection is handed

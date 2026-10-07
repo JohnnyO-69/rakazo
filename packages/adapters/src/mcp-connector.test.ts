@@ -161,6 +161,75 @@ describe("MCP connector session cache", () => {
     }
   });
 
+  it("detects rotation after digest eviction and evicts deleted credentials", async () => {
+    vi.useFakeTimers();
+    const fake = infisicalFake();
+    const store = new InfisicalSecretStore({
+      ...fake.options,
+      cacheTtlMs: 100,
+      cacheMaxEntries: 1,
+    });
+    const context = {
+      operationId: "test",
+      traceId: "test",
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    };
+    await store.start();
+    const record = await store.put(
+      JSON.stringify({ headers: { Authorization: "Bearer initial" } }),
+      context,
+    );
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: record.id } };
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn(async () => [assignment]),
+        findFirst: vi.fn(async () => assignment),
+      },
+      secret: { findFirst: vi.fn(async () => ({ id: record.id, ciphertext: record.ref })) },
+    };
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
+    vi.stubGlobal("fetch", mcpFetch(state));
+    const connector = new McpConnector(prisma as never, store, { network: TEST_NETWORK });
+    try {
+      await connector.discoverTools(context);
+      expect(state.initializations).toBe(1);
+      const reads = fake.fetcher.mock.calls.length;
+      await connector.discoverTools(context);
+      expect(fake.fetcher).toHaveBeenCalledTimes(reads);
+      expect(state.initializations).toBe(1);
+      const changed = vi.fn();
+      store.onChange(changed);
+      await vi.advanceTimersByTimeAsync(100);
+      await connector.discoverTools(context);
+      expect(state.initializations).toBe(1);
+      expect(changed).not.toHaveBeenCalled();
+      await store.put("unrelated", context);
+      fake.values.set(
+        record.ref.split(":").at(-1)!,
+        JSON.stringify({ headers: { Authorization: "Bearer rotated" } }),
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      await connector.discoverTools(context);
+      expect(changed).not.toHaveBeenCalledWith(record.ref);
+      expect(state.initializations).toBe(2);
+      expect(state.headers.some((headers) => headers.authorization === "Bearer rotated")).toBe(
+        true,
+      );
+      fake.values.delete(record.ref.split(":").at(-1)!);
+      await vi.advanceTimersByTimeAsync(100);
+      // Discovery suppresses per-server errors; no tools from the deleted credential survive.
+      await expect(connector.discoverTools(context)).resolves.toEqual([]);
+      expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(0);
+    } finally {
+      await connector.close();
+      await store.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a live session working during a secret-store outage after TTL", async () => {
     vi.useFakeTimers();
     const sink = createTestSink();

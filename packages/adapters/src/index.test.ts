@@ -16,8 +16,6 @@ describe("secret store", () => {
     });
     expect(record.ciphertext).not.toContain("sk-or-v1-secretvalue");
     expect(record.ciphertext).toMatch(/^v2:/);
-    expect(await store.load(record.ciphertext, record.id)).toBe("sk-or-v1-secretvalue");
-    await expect(store.load(record.ciphertext, "another-row")).rejects.toThrow();
     await expect(store.load(record.ciphertext, record.id)).resolves.toBe("sk-or-v1-secretvalue");
     await expect(store.load(record.ciphertext, "another-row")).rejects.toThrow();
   });

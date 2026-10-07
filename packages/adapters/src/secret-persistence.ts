@@ -25,16 +25,15 @@ const parentTables = { User: "user", Space: "spaces", Bot: "bots", Organization:
  * retain their native behavior. Inline encrypted refs still notify consumers. */
 export function withSecretPersistence(prisma: PrismaClient, store: SecretStore): PrismaClient {
   const transaction = new AsyncLocalStorage<Cleanup>();
-  async function cleanup(candidates: Candidate[], verify: boolean): Promise<void> {
+  async function cleanup(candidates: Candidate[]): Promise<void> {
     for (const row of new Map(candidates.map((row) => [row.ciphertext, row])).values()) {
       try {
         if (
-          verify &&
-          ((await prisma.secret.count({ where: { ciphertext: row.ciphertext } })) ||
-            (await prisma.botSecret.count({ where: { ciphertext: row.ciphertext } })) ||
-            (await prisma.integrationProviderConfig.count({
-              where: { ciphertext: row.ciphertext },
-            })))
+          (await prisma.secret.count({ where: { ciphertext: row.ciphertext } })) ||
+          (await prisma.botSecret.count({ where: { ciphertext: row.ciphertext } })) ||
+          (await prisma.integrationProviderConfig.count({
+            where: { ciphertext: row.ciphertext },
+          }))
         )
           continue;
         await deleteSecretBestEffort(store, row.ciphertext, row.id);
@@ -157,10 +156,10 @@ export function withSecretPersistence(prisma: PrismaClient, store: SecretStore):
                 return Reflect.apply(delegate[operation], delegate, [args]);
               }),
             );
-            await cleanup([...state.old, ...state.written], true);
+            await cleanup([...state.old, ...state.written]);
             return result;
           } catch (error) {
-            await cleanup(state.written, true);
+            await cleanup(state.written);
             throw error;
           }
         },
@@ -185,10 +184,10 @@ export function withSecretPersistence(prisma: PrismaClient, store: SecretStore):
           const result = await transaction.run(state, () =>
             Reflect.apply(target.$transaction, target, args),
           );
-          await cleanup([...state.old, ...state.written], true);
+          await cleanup([...state.old, ...state.written]);
           return result;
         } catch (error) {
-          await cleanup(state.written, true);
+          await cleanup(state.written);
           throw error;
         }
       };
