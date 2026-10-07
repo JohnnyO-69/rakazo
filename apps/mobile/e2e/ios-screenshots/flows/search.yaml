@@ -18,6 +18,6 @@ name: Search
 - eraseText: 40
 - inputText: "marigold"
 - extendedWaitUntil:
-    visible: ".*marigold.*"
+    visible: ".*marigold checklist.*"
     timeout: 15000
 - takeScreenshot: 03-search-results

@@ -9,7 +9,6 @@ export interface IosGallerySection {
   shots: IosGalleryShot[];
 }
 
-/** Static gallery: sticky section nav, name filter, anchors, and click-to-enlarge. */
 export function renderIosScreenshotGallery(sections: IosGallerySection[]): string {
   const sidebar = sections
     .map(

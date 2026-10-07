@@ -27,6 +27,7 @@ interface GroupRow {
 interface RoutineRow {
   id: string;
   name: string;
+  active: boolean;
 }
 
 interface MeRow {
@@ -34,7 +35,6 @@ interface MeRow {
   spaceId: string;
 }
 
-/** Create disposable fixture users and thread rows against an already running API. */
 export async function seedIosScreenshotFixture(input: {
   apiUrl: string;
   databaseUrl: string;
@@ -95,8 +95,15 @@ export async function seedIosScreenshotFixture(input: {
       prompt: "Review the fixture launch notes and summarize the open questions.",
       crons: ["0 9 * * 1"],
       timezone: "UTC",
-      active: true,
+      active: false,
       notify: true,
+    });
+  }
+
+  if (routine.active) {
+    await rpc(input.apiUrl, populated.headers, "routines/update", {
+      routineId: routine.id,
+      active: false,
     });
   }
 
@@ -260,7 +267,9 @@ async function ensureUser(apiUrl: string, email: string, password: string, name:
   const signup = await postAuth(apiUrl, "sign-up", { email, password, name });
   const session = signup.ok ? signup : await postAuth(apiUrl, "sign-in", { email, password });
   if (!session.ok || !session.token) {
-    throw new Error(`Could not sign in fixture user (${session.status})`);
+    throw new Error(
+      `Could not sign in fixture user (${session.status})${session.message ? `: ${session.message}` : ""}`,
+    );
   }
   return {
     headers: {
@@ -282,10 +291,23 @@ async function postAuth(
     body: JSON.stringify(body),
   });
   const text = await response.text();
-  const parsed = text ? (JSON.parse(text) as unknown) : {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = undefined;
+  }
+  const message =
+    parsed &&
+    typeof parsed === "object" &&
+    "message" in parsed &&
+    typeof parsed.message === "string"
+      ? parsed.message
+      : undefined;
   return {
     ok: response.ok,
     status: response.status,
+    message,
     token: tokenFrom(response, parsed),
     cookie: sessionCookieHeader(response),
   };

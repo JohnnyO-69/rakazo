@@ -9,7 +9,6 @@ export interface IosScreenshotSection {
 
 const SECTION_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-/** Load the flow list. Adding a screen is a new flow file plus one catalog entry. */
 export async function loadIosScreenshotCatalog(
   catalogDir: string,
 ): Promise<IosScreenshotSection[]> {

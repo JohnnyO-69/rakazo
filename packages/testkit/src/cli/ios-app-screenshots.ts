@@ -1,9 +1,13 @@
+import { execFile } from "node:child_process";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { loadIosScreenshotCatalog } from "../ios-screenshot-catalog.js";
-import { type IosGallerySection, renderIosScreenshotGallery } from "../ios-screenshot-gallery.js";
+import type { IosGallerySection } from "../ios-screenshot-gallery.js";
+import { renderIosScreenshotGallery } from "../ios-screenshot-gallery.js";
 import { seedIosScreenshotFixture } from "./ios-screenshot-seed.js";
 import { runProcess } from "./process.js";
 
@@ -41,6 +45,7 @@ async function main() {
     process.env.IOS_SCREENSHOT_OUT || path.join(ROOT, "test-report", "ios-screenshots"),
   );
 
+  await assertSafeOutputDirectory(outDir);
   await assertSimulatorBooted(udid);
   if (requested.length === 0) await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
@@ -156,9 +161,33 @@ function requiredEnv(name: string) {
   return value;
 }
 
+async function resolveOutputPath(dir: string): Promise<string> {
+  try {
+    return await realpath(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return path.join(await resolveOutputPath(path.dirname(dir)), path.basename(dir));
+  }
+}
+
+async function assertSafeOutputDirectory(outDir: string) {
+  const resolved = await resolveOutputPath(outDir);
+  const repo = await realpath(ROOT);
+  const home = await realpath(homedir());
+  const relative = path.relative(resolved, repo);
+  if (
+    resolved === path.parse(resolved).root ||
+    resolved === home ||
+    relative === "" ||
+    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  ) {
+    throw new Error(
+      "IOS_SCREENSHOT_OUT must not be a filesystem root, home, repository, or repository parent",
+    );
+  }
+}
+
 async function assertSimulatorBooted(udid: string) {
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
   const output = await promisify(execFile)("xcrun", ["simctl", "list", "devices", "booted"]);
   if (!output.stdout.includes(udid)) {
     throw new Error(
@@ -176,7 +205,6 @@ async function publishShots(work: string, dest: string) {
   });
   await rm(dest, { recursive: true, force: true });
   await mkdir(dest, { recursive: true });
-  const { copyFile } = await import("node:fs/promises");
   const names = [...found.keys()].sort((left, right) => left.localeCompare(right));
   for (const name of names) {
     const source = found.get(name);

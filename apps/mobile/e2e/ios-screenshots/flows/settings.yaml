@@ -95,20 +95,7 @@ name: Settings
     direction: DOWN
     timeout: 20000
     visibilityPercentage: 50
-- scrollUntilVisible:
-    element: ".*Current password.*"
-    direction: DOWN
-    timeout: 10000
-- tapOn: "Current password"
-- inputText: ${RAKAZO_SCREENSHOT_PASSWORD}
-- hideKeyboard
-- scrollUntilVisible:
-    element: ".*Delete account.*"
-    direction: DOWN
-    timeout: 10000
-- tapOn:
-    text: ".*Delete account.*"
-    index: 1
+- tapOn: "Delete account"
 - extendedWaitUntil:
     visible: ".*Delete your account.*"
     timeout: 10000
