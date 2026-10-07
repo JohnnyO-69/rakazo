@@ -41,10 +41,15 @@ describe("blog posts", () => {
   });
 
   it("counts quoted categories and indexes a category at three posts", () => {
-    expect(categoryFromFrontmatter('category: "roundups"\n')).toBe("roundups");
-    expect(categoryFromFrontmatter("category: roundups\n")).toBe("roundups");
-    expect(categoryFromFrontmatter("category: 'guides'\n")).toBe("guides");
-    expect(categoryFromFrontmatter('category: "nope"\n')).toBeUndefined();
+    const post = (category: string, body = "") => `---\ncategory: ${category}\n---\n${body}`;
+    expect(categoryFromFrontmatter(post('"roundups"'))).toBe("roundups");
+    expect(categoryFromFrontmatter(post("roundups"))).toBe("roundups");
+    expect(categoryFromFrontmatter(post("'guides'"))).toBe("guides");
+    expect(categoryFromFrontmatter(post('"nope"'))).toBeUndefined();
+    expect(categoryFromFrontmatter(post("guides # setup articles", "category: roundups"))).toBe(
+      "guides",
+    );
+    expect(categoryFromFrontmatter("---\ntitle: Hi\n---\ncategory: roundups\n")).toBeUndefined();
     expect(categoryIsIndexedAtCount(2)).toBe(false);
     expect(categoryIsIndexedAtCount(3)).toBe(true);
   });

@@ -18,12 +18,14 @@ export const CATEGORY_LABEL: Record<BlogCategory, string> = {
 
 const blogDir = join(dirname(fileURLToPath(import.meta.url)), "../content/blog");
 
-const CATEGORY_LINE = /^category:\s*["']?([a-z]+)["']?\s*$/m;
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
+const CATEGORY_LINE = /^category:\s*["']?([a-z]+)["']?(?:\s+#.*)?\s*$/m;
 
-/** Reads `category` from Markdown frontmatter, including quoted values. */
+/** Reads `category` from the YAML frontmatter block, including quoted values. */
 export function categoryFromFrontmatter(text: string): BlogCategory | undefined {
-  const match = CATEGORY_LINE.exec(text);
-  const category = match?.[1];
+  const block = FRONTMATTER.exec(text)?.[1];
+  if (!block) return undefined;
+  const category = CATEGORY_LINE.exec(block)?.[1];
   if (category && (BLOG_CATEGORIES as readonly string[]).includes(category)) {
     return category as BlogCategory;
   }

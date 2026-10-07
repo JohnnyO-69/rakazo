@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ogPages } from "../src/og-pages.ts";
@@ -9,6 +9,7 @@ const outDir = join(root, "public/og");
 const chrome = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
 function pageHtml(kicker, title) {
+  const fontSize = title.length > 72 ? 40 : 68;
   return `<!doctype html>
 <html>
 <head>
@@ -18,7 +19,7 @@ function pageHtml(kicker, title) {
     body { font-family: Geist, ui-sans-serif, system-ui, sans-serif; color: #242424; }
     .card { box-sizing: border-box; width: 1200px; height: 630px; padding: 72px 80px; display: flex; flex-direction: column; justify-content: space-between; }
     .kicker { margin: 0; color: #6d6e70; font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase; }
-    h1 { margin: 18px 0 0; max-width: 980px; font-size: 68px; line-height: 1.05; font-weight: 560; letter-spacing: -0.03em; }
+    h1 { margin: 18px 0 0; max-width: 980px; font-size: ${fontSize}px; line-height: 1.05; font-weight: 560; letter-spacing: -0.03em; }
     .brand { display: flex; align-items: center; gap: 14px; font-size: 28px; font-weight: 600; }
   </style>
 </head>
@@ -45,25 +46,32 @@ function pageHtml(kicker, title) {
 mkdirSync(outDir, { recursive: true });
 const tmp = join(outDir, ".og-render.html");
 
-for (const page of ogPages()) {
-  writeFileSync(tmp, pageHtml(page.kicker, page.title));
-  const target = join(outDir, `${page.id}.png`);
-  const result = spawnSync(
-    chrome,
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--hide-scrollbars",
-      "--force-device-scale-factor=1",
-      "--window-size=1200,630",
-      "--default-background-color=00000000",
-      `--screenshot=${target}`,
-      `file://${tmp}`,
-    ],
-    { stdio: "inherit" },
-  );
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+const selected = new Set(process.argv.slice(2));
+const pages = ogPages().filter((page) => selected.size === 0 || selected.has(page.id));
+
+try {
+  for (const page of pages) {
+    writeFileSync(tmp, pageHtml(page.kicker, page.title));
+    const target = join(outDir, `${page.id}.png`);
+    const result = spawnSync(
+      chrome,
+      [
+        "--headless=new",
+        "--disable-gpu",
+        "--hide-scrollbars",
+        "--force-device-scale-factor=1",
+        "--window-size=1200,630",
+        "--default-background-color=00000000",
+        `--screenshot=${target}`,
+        `file://${tmp}`,
+      ],
+      { stdio: "inherit" },
+    );
+    if (result.status !== 0) {
+      throw new Error(`Open Graph render failed for ${page.id} with status ${result.status ?? 1}`);
+    }
+    console.log(page.id);
   }
-  console.log(page.id);
+} finally {
+  if (existsSync(tmp)) unlinkSync(tmp);
 }
