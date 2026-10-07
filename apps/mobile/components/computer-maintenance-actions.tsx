@@ -119,6 +119,9 @@ export function ComputerMaintenanceActions({
             ]
           : [],
     } satisfies NativeStackNavigationOptions);
+    return () => {
+      navigation.setOptions({ unstable_headerRightItems: () => [] });
+    };
   }, [navigation, hasComputer, canUpdate, busy, t, botId, onChanged]);
 
   if (!computer) return null;

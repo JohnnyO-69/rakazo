@@ -1,10 +1,12 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, Text } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import { ActivityIndicator, Alert, ScrollView, Text, View } from "react-native";
 import { ArchivedBotList } from "../components/archived-bot-list";
+import { NativeActionButton } from "../components/native-action-button";
 import type { MobileBot } from "../lib/api";
 import { rpc } from "../lib/api";
 import { confirmDeleteBot, restoreArchivedBot } from "../lib/bot-lifecycle";
+import { useFloatingHeaderInset } from "../lib/floating-header";
 import { useI18n } from "../lib/i18n";
 import { useMobileTokens } from "../lib/native";
 import { errorText } from "../lib/user-error";
@@ -13,34 +15,42 @@ export default function ArchivedBots() {
   const { t } = useI18n();
   const router = useRouter();
   const tokens = useMobileTokens();
+  const headerInset = useFloatingHeaderInset();
+  const listRequest = useRef<AbortController | null>(null);
   const [bots, setBots] = useState<MobileBot[] | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadBots = useCallback(async () => {
+    listRequest.current?.abort();
+    const request = new AbortController();
+    listRequest.current = request;
+    setError(null);
+    try {
+      const next = await rpc<MobileBot[]>("bots/listArchived", {}, { signal: request.signal });
+      if (!request.signal.aborted) setBots(next);
+    } catch (cause) {
+      if (!request.signal.aborted) setError(errorText(cause, t("Could not load bots")));
+    }
+  }, [t]);
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      void rpc<MobileBot[]>("bots/listArchived")
-        .then((next) => {
-          if (active) {
-            setBots(next);
-            setError(null);
-          }
-        })
-        .catch((cause) => {
-          if (active) setError(errorText(cause, t("Could not load bots")));
-        });
-      return () => {
-        active = false;
-      };
-    }, [t]),
+      void loadBots();
+      return () => listRequest.current?.abort();
+    }, [loadBots]),
   );
+
+  function removed(botId: string) {
+    listRequest.current?.abort();
+    setError(null);
+    setBots((current) => current?.filter((item) => item.id !== botId) ?? null);
+  }
 
   async function restore(bot: MobileBot) {
     if (pending) return;
     setPending(true);
     try {
       await restoreArchivedBot(bot.id);
-      setBots((current) => current?.filter((item) => item.id !== bot.id) ?? null);
+      removed(bot.id);
     } catch (cause) {
       Alert.alert(t("Could not restore bot"), errorText(cause, t("Try again.")));
     } finally {
@@ -50,9 +60,7 @@ export default function ArchivedBots() {
 
   function remove(bot: MobileBot) {
     if (pending) return;
-    confirmDeleteBot(bot, () =>
-      setBots((current) => current?.filter((item) => item.id !== bot.id) ?? null),
-    );
+    confirmDeleteBot(bot, () => removed(bot.id));
   }
 
   async function open(bot: MobileBot) {
@@ -74,31 +82,43 @@ export default function ArchivedBots() {
     }
   }
 
-  if (!bots?.length || error)
+  const failure = error ? (
+    <>
+      <Text accessibilityRole="alert" style={{ color: tokens.destructive }}>
+        {error}
+      </Text>
+      <NativeActionButton label={t("Try again.")} onPress={() => void loadBots()} fill={false} />
+    </>
+  ) : null;
+  if (!bots?.length)
     return (
       <ScrollView
         style={{ flex: 1, backgroundColor: tokens.background }}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: 24 }}
+        contentContainerStyle={{ padding: 24, gap: 12 }}
       >
-        {error ? (
-          <Text accessibilityRole="alert" style={{ color: tokens.destructive }}>
-            {error}
-          </Text>
-        ) : bots ? (
-          <Text style={{ color: tokens.mutedForeground }}>{t("No archived bots")}</Text>
-        ) : (
-          <ActivityIndicator color={tokens.foreground} />
-        )}
+        {failure ??
+          (bots ? (
+            <Text style={{ color: tokens.mutedForeground }}>{t("No archived bots")}</Text>
+          ) : (
+            <ActivityIndicator color={tokens.foreground} />
+          ))}
       </ScrollView>
     );
   return (
-    <ArchivedBotList
-      bots={bots}
-      pending={pending}
-      onOpen={(bot) => void open(bot)}
-      onRestore={(bot) => void restore(bot)}
-      onDelete={remove}
-    />
+    <>
+      {failure ? (
+        <View style={{ paddingHorizontal: 24, paddingTop: headerInset + 24, gap: 12 }}>
+          {failure}
+        </View>
+      ) : null}
+      <ArchivedBotList
+        bots={bots}
+        pending={pending}
+        onOpen={(bot) => void open(bot)}
+        onRestore={(bot) => void restore(bot)}
+        onDelete={remove}
+      />
+    </>
   );
 }
