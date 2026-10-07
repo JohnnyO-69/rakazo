@@ -286,9 +286,17 @@ button {
 }
 
 .button--primary {
-  color: #fff;
   background: linear-gradient(to bottom, var(--blue-top), var(--blue-bottom));
   box-shadow: 0 2px 10px rgba(75, 131, 253, 0.2);
+}
+
+a.button.button--primary,
+button.button--primary,
+a.button.button--primary:hover,
+a.button.button--primary:focus-visible,
+button.button--primary:hover,
+button.button--primary:focus-visible {
+  color: #fff;
 }
 
 .button--primary:hover,
@@ -297,10 +305,18 @@ button {
 }
 
 .button--secondary {
-  color: #525252;
   background: #fff;
   border-color: var(--line);
   box-shadow: var(--shadow-soft);
+}
+
+a.button.button--secondary,
+button.button--secondary,
+a.button.button--secondary:hover,
+a.button.button--secondary:focus-visible,
+button.button--secondary:hover,
+button.button--secondary:focus-visible {
+  color: #525252;
 }
 
 .button--secondary:hover,
@@ -2134,13 +2150,46 @@ button {
   list-style: disc;
 }
 
-.privacy-copy a {
+.privacy-copy a:not(.button) {
   color: var(--blue);
 }
 
-.privacy-copy a:hover,
-.privacy-copy a:focus-visible {
-  color: #1d4ed8;
+.privacy-copy a:not(.button):hover,
+.privacy-copy a:not(.button):focus-visible {
+  color: var(--blue);
+}
+
+.guide ul.source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.guide ul.source-list li {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.guide ul.source-list li:not(:last-child)::after {
+  content: ",\00a0";
+  color: var(--muted);
+}
+
+.guide ul.source-list a {
+  color: var(--muted-2);
+}
+
+.guide ul.source-list a:hover,
+.guide ul.source-list a:focus-visible {
+  color: var(--ink);
 }
 
 .guide {

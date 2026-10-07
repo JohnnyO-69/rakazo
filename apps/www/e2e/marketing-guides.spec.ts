@@ -33,11 +33,11 @@ test.describe("marketing guides", () => {
     await page.waitForLoadState("load");
 
     await expect(page).toHaveTitle("Rakazo | Open source Grok Bot alternative");
-    await expect(page.locator('link[hreflang="de"]')).toHaveAttribute(
+    await expect(page.locator('link[hreflang="de-DE"]')).toHaveAttribute(
       "href",
       "https://rakazo.com/de/",
     );
-    await expect(page.locator('link[hreflang="ko"]')).toHaveAttribute(
+    await expect(page.locator('link[hreflang="ko-KR"]')).toHaveAttribute(
       "href",
       "https://rakazo.com/ko/",
     );
@@ -89,9 +89,21 @@ test.describe("marketing guides", () => {
       "content",
       "https://rakazo.com/self-hosted-ai-agent/",
     );
-    await expect(page.locator('link[hreflang="de"]')).toHaveCount(0);
-    await expect(page.locator('link[hreflang="ko"]')).toHaveCount(0);
+    await expect(page.locator('link[hreflang="de-DE"]')).toHaveCount(0);
+    await expect(page.locator('link[hreflang="ko-KR"]')).toHaveCount(0);
     await expect(page.locator('link[hreflang="zh-CN"]')).toHaveCount(0);
+    const licenseParagraph = page.locator("main p").filter({ hasText: "Apache-2.0" });
+    await expect(licenseParagraph).toContainText("Hosted Rakazo Cloud is not generally available.");
+    await expect(licenseParagraph.getByRole("link", { name: "Hosted Rakazo Cloud" })).toHaveCount(0);
+    await expect(licenseParagraph.getByRole("link", { name: "Apache-2.0" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Get started" })).toHaveCSS(
+      "color",
+      "rgb(255, 255, 255)",
+    );
+    const reference = page.locator("ul.source-list");
+    await expect(reference).toHaveCSS("display", "flex");
+    await expect(reference).toHaveCSS("font-size", "14px");
+    await expect(page.locator("footer [aria-current='page']")).toHaveCount(1);
     await expect(page.getByRole("link", { name: "full self-hosting guide" })).toHaveAttribute(
       "href",
       /github\.com\/elie222\/rakazo\/blob\/main\/docs\/self-host\.md$/,
@@ -130,7 +142,13 @@ test.describe("marketing guides", () => {
       "content",
       "https://rakazo.com/openclaw-alternative/",
     );
-    await expect(page.locator('link[hreflang="de"]')).toHaveCount(0);
+    await expect(page.locator('link[hreflang="de-DE"]')).toHaveCount(0);
+    const guide = page.getByRole("link", { name: "Self-host guide", exact: true });
+    await expect(guide).toHaveCSS("color", "rgb(255, 255, 255)");
+    const sources = page.locator("ul.source-list");
+    await expect(sources).toHaveCSS("display", "flex");
+    await expect(sources).toHaveCSS("font-size", "14px");
+    await expect(page.locator("footer [aria-current='page']")).toHaveCount(1);
     await expect(page.getByRole("table")).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Rakazo" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "OpenClaw" })).toBeVisible();
@@ -149,7 +167,7 @@ test.describe("marketing guides", () => {
   test("locale homepages stay routed and the guides are English-only", async ({ page }) => {
     await page.goto("/de/");
     await expect(page.locator("html")).toHaveAttribute("lang", "de");
-    await expect(page.locator('link[hreflang="en"]')).toHaveAttribute("href", "https://rakazo.com/");
+    await expect(page.locator('link[hreflang="en-US"]')).toHaveAttribute("href", "https://rakazo.com/");
     await expect(page.locator("footer").getByRole("link", { name: "OpenClaw-Alternative" })).toHaveAttribute(
       "href",
       "/openclaw-alternative/",

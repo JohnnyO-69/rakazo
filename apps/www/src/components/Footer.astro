@@ -53,6 +53,12 @@ const {
     terms: "Terms",
   },
 } = Astro.props;
+
+const currentPath = Astro.url.pathname.replace(/\/+$/, "") || "/";
+
+function isCurrentPage(href: string): boolean {
+  return (href.replace(/\/+$/, "") || "/") === currentPath;
+}
 ---
 
 <footer class="site-footer">
@@ -71,7 +77,7 @@ const {
           <a
             href={localeHomePath(locale)}
             hreflang={LOCALE_HREFLANG[locale]}
-            aria-current={locale === currentLocale ? "page" : undefined}
+            aria-current={isCurrentPage(localeHomePath(locale)) ? "page" : undefined}
           >
             {LOCALE_LABELS[locale]}
           </a>
@@ -80,8 +86,15 @@ const {
     </nav>
     <nav class="site-footer__links" aria-label={navLabel}>
       <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
-      <a href={SELF_HOST_GUIDE_PATH}>{linkLabels.docs}</a>
-      <a href={OPENCLAW_ALTERNATIVE_PATH}>{linkLabels.openClaw}</a>
+      <a href={SELF_HOST_GUIDE_PATH} aria-current={isCurrentPage(SELF_HOST_GUIDE_PATH) ? "page" : undefined}>
+        {linkLabels.docs}
+      </a>
+      <a
+        href={OPENCLAW_ALTERNATIVE_PATH}
+        aria-current={isCurrentPage(OPENCLAW_ALTERNATIVE_PATH) ? "page" : undefined}
+      >
+        {linkLabels.openClaw}
+      </a>
       <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">{linkLabels.changelog}</a>
       <a href="/about/">{linkLabels.about}</a>
       <a href="/support/">{linkLabels.support}</a>
