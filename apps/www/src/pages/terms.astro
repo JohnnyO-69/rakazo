@@ -98,6 +98,9 @@ const starsLabel = stars === null ? "Star" : formatStarCount(stars);
         Some features require a paid plan. Prices are shown before you subscribe. Subscriptions renew
         automatically at the end of each billing period until you cancel, and we charge the payment
         method on file, which is processed by Stripe. Prices exclude taxes unless stated otherwise.
+        If your plan starts with a free trial, we collect a payment method at signup and charge it
+        when the trial ends unless you cancel before then. Cancelling during the trial ends it, and you
+        are not charged.
         Plans may include usage limits, and we may slow or pause usage that exceeds them or places an
         unreasonable load on the Service. If a payment fails, we may pause paid features until it
         succeeds. If you dispute a charge with your bank instead of contacting us, we may suspend the
