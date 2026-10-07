@@ -563,9 +563,9 @@ export const ALTERNATIVES: readonly Alternative[] = [
     h1: "Open source Hark Pro alternative",
     otherName: "Hark Pro",
     intro: [
-      "Hark Pro is the personal agent at hark.com, published October 6, 2026. It is a hosted app on the web, iOS, and Android. The launch article says every feature stays free, with $20 a month for twice the usage and $100 a month for ten times the usage.",
+      "Hark Pro is the personal agent at hark.com, launched October 6, 2026. It is a hosted app on the web, iOS, and Android. The launch article says every feature stays free, with $20 a month for twice the usage and $100 a month for ten times the usage.",
       "Like Grok Bot, Rakazo is just chat: you set up the bot and manage it from that chat. Hark Pro is a conversation too. The same article also describes Home, Action Buttons, Panels, and Projects around that thread, and a cloud computer called Handoff that Hark operates.",
-      "Handoff, the computer-use agent, was published August 5, 2026. This comparison uses Hark's public pages. It is not a measured benchmark.",
+      "Hark introduced Handoff, its computer-use agent, on August 5, 2026. This comparison uses Hark's public pages. It is not a measured benchmark.",
     ],
     rows: [
       {
@@ -607,7 +607,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
         rakazo:
           "Sandboxed browser, terminal, files, and a graphical desktop. Docker is the default local computer, with optional E2B, Daytona, CreateOS, Box, or a trusted local computer.",
         other:
-          "Handoff, published August 5, 2026, is a virtual computer with a browser, files, and a terminal. The October 6 launch article says it can run up to 6 browsers at once and log in on your behalf. Hark operates that computer.",
+          "Handoff, introduced August 5, 2026, is a virtual computer with a browser, files, and a terminal. The October 6 launch article says it can run up to 6 browsers at once and log in on your behalf. Hark operates that computer.",
       },
       {
         topic: "Connected apps",
