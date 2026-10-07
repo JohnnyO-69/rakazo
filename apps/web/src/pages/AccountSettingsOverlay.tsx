@@ -106,8 +106,7 @@ export function GeneralSettingsPanels({
         <AccountAccess onSecurity={setAccountSecurity} />
       </section>
 
-      {accountSecurity?.hasPassword !== false &&
-      accountSecurity?.passwordChangeEnabled !== false ? (
+      {accountSecurity?.hasPassword && accountSecurity.passwordChangeEnabled !== false ? (
         <ChangePasswordSection email={email} />
       ) : null}
 
