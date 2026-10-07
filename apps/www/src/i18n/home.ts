@@ -17,6 +17,7 @@ export type HomeCopy = {
     bots: string;
     selfHost: string;
     openSource: string;
+    grokBot: string;
     docs: string;
     viewOnGithub: string;
   };
@@ -98,10 +99,12 @@ export type HomeCopy = {
       docs: string;
       openClaw: string;
       changelog: string;
+      alternatives: string;
       about: string;
       support: string;
       privacy: string;
       terms: string;
+      grokAlternative: string;
     };
   };
 };
@@ -278,14 +281,15 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       bots: "Bots",
       selfHost: "Self-host",
       openSource: "Open source",
+      grokBot: "Grok Bot",
       docs: "Docs",
       viewOnGithub: "View on GitHub",
     },
     hero: {
       badge: "Apache-2.0",
       pill: "Self-hosted",
-      heading: "AI teammates you actually own",
-      lead: "Rakazo is an open source Grok Bot alternative. Give a bot real work. It signs in to your tools, uses them the way you do, and comes back when it needs you.",
+      heading: "The open source Grok Bot alternative you actually own",
+      lead: "Give a bot real work. It signs in to your tools, uses them the way you do, and comes back when it needs you.",
       getStarted: "Get started",
       viewOnGithub: "View on GitHub",
       setupWithAgent: "Set up with your agent",
@@ -294,7 +298,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     selfHost: {
       eyebrow: "Self-hosted",
-      heading: "The computer is yours",
+      heading: "Self-hosted. The computer is yours.",
       copy: "Run Rakazo on your machine. Your keys, your model, your data.",
       features: [
         {
@@ -319,7 +323,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     openSource: {
       eyebrow: "Open source",
-      heading: "No pricing page. Just the repo.",
+      heading: "Open source. Just the repo.",
       copy: "Rakazo is Apache-2.0 licensed and runs on your own machine with your own model keys. Nothing is gated, nothing phones home.",
       selfHostTitle: "Self-host",
       selfHostMeta: "Available today",
@@ -388,10 +392,12 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
         docs: "Docs",
         openClaw: "OpenClaw alternative",
         changelog: "Changelog",
+        alternatives: "Alternatives",
         about: "About",
         support: "Support",
         privacy: "Privacy",
         terms: "Terms",
+        grokAlternative: "Grok Bot alternative",
       },
     },
   },
@@ -412,14 +418,15 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       bots: "Bots",
       selfHost: "Self-host",
       openSource: "Open Source",
+      grokBot: "Grok Bot",
       docs: "Docs",
       viewOnGithub: "Auf GitHub ansehen",
     },
     hero: {
       badge: "Apache-2.0",
       pill: "Self-hosted",
-      heading: "KI-Teamkollegen, die dir wirklich gehören",
-      lead: "Rakazo ist eine Open-Source-Alternative zu Grok Bot. Gib einem Bot echte Arbeit. Er meldet sich in deinen Tools an, nutzt sie wie du. Er kommt zurück, wenn er dich braucht.",
+      heading: "Die Open-Source-Alternative zu Grok Bot, die dir wirklich gehört",
+      lead: "Gib einem Bot echte Arbeit. Er meldet sich in deinen Tools an, nutzt sie wie du. Er kommt zurück, wenn er dich braucht.",
       getStarted: "Loslegen",
       viewOnGithub: "Auf GitHub ansehen",
       setupWithAgent: "Mit deinem Agenten einrichten",
@@ -428,7 +435,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     selfHost: {
       eyebrow: "Self-hosted",
-      heading: "Der Computer gehört dir",
+      heading: "Self-hosted. Der Computer gehört dir.",
       copy: "Betreibe Rakazo auf deiner Maschine. Deine Keys, dein Modell, deine Daten.",
       features: [
         {
@@ -453,7 +460,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     openSource: {
       eyebrow: "Open Source",
-      heading: "Keine Preisseite. Nur das Repo.",
+      heading: "Open Source. Nur das Repo.",
       copy: "Rakazo ist Apache-2.0-lizenziert und läuft auf deiner Maschine mit deinen Model-Keys. Nichts ist freigeschaltet, nichts telefoniert nach Hause.",
       selfHostTitle: "Self-host",
       selfHostMeta: "Heute verfügbar",
@@ -522,10 +529,12 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
         docs: "Dokumentation",
         openClaw: "OpenClaw-Alternative",
         changelog: "Änderungsprotokoll",
+        alternatives: "Alternativen",
         about: "Über uns",
         support: "Support",
         privacy: "Datenschutz",
         terms: "AGB",
+        grokAlternative: "Grok-Bot-Alternative",
       },
     },
   },
@@ -545,14 +554,15 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       bots: "봇",
       selfHost: "셀프 호스트",
       openSource: "오픈소스",
+      grokBot: "Grok Bot",
       docs: "Docs",
       viewOnGithub: "GitHub에서 보기",
     },
     hero: {
       badge: "Apache-2.0",
       pill: "셀프 호스트",
-      heading: "진짜로 내 것인 AI 팀원",
-      lead: "Rakazo는 오픈소스 Grok Bot 대안입니다. 봇에게 실제 업무를 맡기세요. 봇이 도구에 로그인하고, 당신처럼 사용하며, 필요할 때 돌아와 묻습니다.",
+      heading: "진짜로 내 것인 오픈소스 Grok Bot 대안",
+      lead: "봇에게 실제 업무를 맡기세요. 봇이 도구에 로그인하고, 당신처럼 사용하며, 필요할 때 돌아와 묻습니다.",
       getStarted: "시작하기",
       viewOnGithub: "GitHub에서 보기",
       setupWithAgent: "에이전트로 설정하기",
@@ -561,7 +571,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     selfHost: {
       eyebrow: "셀프 호스트",
-      heading: "컴퓨터는 당신 것",
+      heading: "셀프 호스트. 컴퓨터는 당신 것",
       copy: "당신 머신에서 Rakazo를 실행하세요. 키, 모델, 데이터는 모두 당신 것.",
       features: [
         {
@@ -586,7 +596,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     openSource: {
       eyebrow: "오픈소스",
-      heading: "가격 페이지 없음. 리포만.",
+      heading: "오픈소스. 리포만.",
       copy: "Rakazo는 Apache-2.0 라이선스이며, 당신 머신에서 당신 모델 키로 실행됩니다. 잠긴 기능도, 외부로 연락하는 것도 없습니다.",
       selfHostTitle: "셀프 호스트",
       selfHostMeta: "지금 사용 가능",
@@ -655,10 +665,12 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
         docs: "문서",
         openClaw: "OpenClaw 대안",
         changelog: "변경 내역",
+        alternatives: "대안",
         about: "소개",
         support: "지원",
         privacy: "개인정보 처리방침",
         terms: "이용약관",
+        grokAlternative: "Grok Bot 대안",
       },
     },
   },
@@ -678,14 +690,15 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       bots: "Bot",
       selfHost: "自托管",
       openSource: "开源",
+      grokBot: "Grok Bot",
       docs: "文档",
       viewOnGithub: "在 GitHub 上查看",
     },
     hero: {
       badge: "Apache-2.0",
       pill: "自托管",
-      heading: "真正属于你的 AI 队友",
-      lead: "Rakazo 是一个开源 Grok Bot 替代品。把真正的工作交给 Bot：它会登录你的工具，像你一样使用它们，并在需要你时回来询问。",
+      heading: "真正属于你的开源 Grok Bot 替代品",
+      lead: "把真正的工作交给 Bot：它会登录你的工具，像你一样使用它们，并在需要你时回来询问。",
       getStarted: "开始使用",
       viewOnGithub: "在 GitHub 上查看",
       setupWithAgent: "用你的智能体安装",
@@ -694,7 +707,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     selfHost: {
       eyebrow: "自托管",
-      heading: "电脑归你所有",
+      heading: "自托管。电脑归你所有。",
       copy: "在你自己的机器上运行 Rakazo。密钥、模型、数据，都归你所有。",
       features: [
         {
@@ -719,7 +732,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
     },
     openSource: {
       eyebrow: "开源",
-      heading: "没有定价页，只有代码仓库。",
+      heading: "开源。只有代码仓库。",
       copy: "Rakazo 采用 Apache-2.0 许可证，在你自己的机器上用你自己的模型密钥运行。没有功能墙，也不会偷偷外联。",
       selfHostTitle: "自托管",
       selfHostMeta: "现已可用",
@@ -788,10 +801,12 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
         docs: "文档",
         openClaw: "OpenClaw 替代方案",
         changelog: "更新日志",
+        alternatives: "替代方案",
         about: "关于",
         support: "支持",
         privacy: "隐私",
         terms: "条款",
+        grokAlternative: "Grok Bot 替代品",
       },
     },
   },

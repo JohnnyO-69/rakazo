@@ -38,8 +38,9 @@ describe("agent content negotiation", () => {
     expect(getMarkdownDocument("/self-hosted-ai-agent/")).toContain(
       "# Self-hosted AI agent",
     );
-    expect(getMarkdownDocument("/openclaw-alternative")).toContain(
-      "OpenClaw",
+    expect(getMarkdownDocument("/openclaw-alternative")).toContain("OpenClaw");
+    expect(getMarkdownDocument("/grok-bot-alternative/")).toContain(
+      "Is Grok Bot open source?",
     );
     expect(getMarkdownAlternate("/")).toBe("/index.md");
     expect(getMarkdownAlternate("/self-hosted-ai-agent/")).toBe(
@@ -49,6 +50,9 @@ describe("agent content negotiation", () => {
       "/openclaw-alternative.md",
     );
     expect(getMarkdownAlternate("/support/")).toBe("/support.md");
+    expect(getMarkdownAlternate("/grok-bot-alternative/")).toBe(
+      "/grok-bot-alternative.md",
+    );
     expect(getMarkdownDocument("/terms/")).toContain("# Rakazo terms");
     expect(getMarkdownDocument("/missing")).toBeUndefined();
     expect(getMarkdownAlternate("/missing")).toBeUndefined();

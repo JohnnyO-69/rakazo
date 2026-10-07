@@ -7,6 +7,7 @@ import {
   localeHomePath,
   type Locale,
 } from "../i18n/locales";
+import { GROK_ALTERNATIVE_PATH } from "../grok-alternative";
 import { GITHUB_URL, SELF_HOST_GUIDE_PATH } from "../site";
 import Button from "./Button.astro";
 import Logo from "./Logo.astro";
@@ -29,7 +30,10 @@ const NAV_LINKS: Array<{ href: string; label: string; external?: boolean }> = [
   { href: localeHashPath(locale, "selfhost"), label: copy.selfHost },
   { href: localeHashPath(locale, "open-source"), label: copy.openSource },
   { href: SELF_HOST_GUIDE_PATH, label: copy.docs },
+  { href: GROK_ALTERNATIVE_PATH, label: copy.grokBot },
 ];
+
+const currentPath = Astro.url.pathname.replace(/\/+$/, "") || "/";
 
 const externalAttrs = { target: "_blank", rel: "noreferrer" };
 ---
@@ -40,7 +44,15 @@ const externalAttrs = { target: "_blank", rel: "noreferrer" };
     <nav class="site-nav" aria-label={copy.primary}>
       {
         NAV_LINKS.map((link) => (
-          <a href={link.href} {...(link.external ? externalAttrs : {})}>
+          <a
+            href={link.href}
+            aria-current={
+              !link.external && (link.href.replace(/\/+$/, "") || "/") === currentPath
+                ? "page"
+                : undefined
+            }
+            {...(link.external ? externalAttrs : {})}
+          >
             {link.label}
           </a>
         ))
@@ -67,7 +79,15 @@ const externalAttrs = { target: "_blank", rel: "noreferrer" };
       <nav class="site-menu__panel" aria-label={copy.primary}>
         {
           NAV_LINKS.map((link) => (
-            <a href={link.href} {...(link.external ? externalAttrs : {})}>
+            <a
+              href={link.href}
+              aria-current={
+                !link.external && (link.href.replace(/\/+$/, "") || "/") === currentPath
+                  ? "page"
+                  : undefined
+              }
+              {...(link.external ? externalAttrs : {})}
+            >
               {link.label}
             </a>
           ))
