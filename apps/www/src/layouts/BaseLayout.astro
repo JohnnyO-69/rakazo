@@ -19,6 +19,7 @@ type Props = {
   locale?: Locale;
   skipLabel?: string;
   homeAlternates?: boolean;
+  includeLocaleAlternates?: boolean;
   ogImageAlt?: string;
 };
 
@@ -28,6 +29,7 @@ const {
   structuredData,
   skipLabel = "Skip to content",
   homeAlternates = false,
+  includeLocaleAlternates = true,
   ogImageAlt = "Rakazo. AI teammates you actually own. Your keys, your model, your machine.",
 } = Astro.props;
 
@@ -62,7 +64,7 @@ const homeUrls = Object.fromEntries(
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content={SITE_NAME} />
     <meta property="og:locale" content={ogLocale} />
-    {LOCALES.filter((l) => l !== locale).map((l) => (
+    {includeLocaleAlternates && LOCALES.filter((l) => l !== locale).map((l) => (
       <meta property="og:locale:alternate" content={LOCALE_OG[l]} />
     ))}
     <meta property="og:image" content={socialImage} />

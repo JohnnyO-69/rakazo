@@ -97,6 +97,7 @@ export type HomeCopy = {
     links: {
       docs: string;
       changelog: string;
+      alternatives: string;
       about: string;
       support: string;
       privacy: string;
@@ -385,6 +386,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       links: {
         docs: "Docs",
         changelog: "Changelog",
+        alternatives: "Alternatives",
         about: "About",
         support: "Support",
         privacy: "Privacy",
@@ -517,6 +519,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       links: {
         docs: "Dokumentation",
         changelog: "Änderungsprotokoll",
+        alternatives: "Alternativen",
         about: "Über uns",
         support: "Support",
         privacy: "Datenschutz",
@@ -648,6 +651,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       links: {
         docs: "문서",
         changelog: "변경 내역",
+        alternatives: "대안",
         about: "소개",
         support: "지원",
         privacy: "개인정보 처리방침",
@@ -779,6 +783,7 @@ const HOME_COPY: Record<Locale, HomeCopy> = {
       links: {
         docs: "文档",
         changelog: "更新日志",
+        alternatives: "替代方案",
         about: "关于",
         support: "支持",
         privacy: "隐私",

@@ -20,6 +20,7 @@ type Props = {
   linkLabels?: {
     docs: string;
     changelog: string;
+    alternatives: string;
     about: string;
     support: string;
     privacy: string;
@@ -38,6 +39,7 @@ const {
   linkLabels = {
     docs: "Docs",
     changelog: "Changelog",
+    alternatives: "Alternatives",
     about: "About",
     support: "Support",
     privacy: "Privacy",
@@ -72,6 +74,7 @@ const {
       <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
       <a href={DOCS_URL} target="_blank" rel="noreferrer">{linkLabels.docs}</a>
       <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">{linkLabels.changelog}</a>
+      <a href="/alternatives/">{linkLabels.alternatives}</a>
       <a href="/about/">{linkLabels.about}</a>
       <a href="/support/">{linkLabels.support}</a>
       <a href="/privacy/">{linkLabels.privacy}</a>

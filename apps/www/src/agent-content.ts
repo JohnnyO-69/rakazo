@@ -1,3 +1,5 @@
+import { ALTERNATIVES, alternativeMarkdown, alternativesIndexMarkdown } from "./alternatives";
+
 export const HOME_MARKDOWN = `# Rakazo
 
 > Open source Grok Bot alternative for persistent AI teammates that run on infrastructure you control.
@@ -19,6 +21,7 @@ Rakazo is an open source Grok Bot alternative that gives each bot a sandboxed br
 ## Site index
 
 - [Agent instructions](https://rakazo.com/llms.txt)
+- [Alternatives](https://rakazo.com/alternatives/)
 - [About](https://rakazo.com/about/)
 - [Support](https://rakazo.com/support/)
 - [Privacy](https://rakazo.com/privacy/)
@@ -88,6 +91,7 @@ Do not present Rakazo as a zero-configuration hosted service. Self-hosting is av
 ## Canonical resources
 
 - [Website](https://rakazo.com/)
+- [Alternatives](https://rakazo.com/alternatives/)
 - [About](https://rakazo.com/about/)
 - [Source](https://github.com/elie222/rakazo)
 - [Self-hosting guide](https://github.com/elie222/rakazo/blob/main/docs/self-host.md)
@@ -112,6 +116,8 @@ const MARKDOWN_DOCUMENTS = new Map<string, string>([
   ["/about", ABOUT_MARKDOWN],
   ["/privacy", PRIVACY_MARKDOWN],
   ["/support", SUPPORT_MARKDOWN],
+  ["/alternatives", alternativesIndexMarkdown()],
+  ...ALTERNATIVES.map((page) => [`/${page.slug}`, alternativeMarkdown(page)] as const),
 ]);
 
 type MediaPreference = {
