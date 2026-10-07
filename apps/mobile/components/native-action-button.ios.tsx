@@ -4,6 +4,7 @@ import {
   buttonStyle,
   controlSize,
   disabled as disable,
+  foregroundStyle,
   frame,
   progressViewStyle,
   tint,
@@ -66,7 +67,16 @@ export function NativeActionButton({
             ]}
           />
         ) : stretches ? (
-          <Text modifiers={[frame({ maxWidth: Infinity })]}>{label}</Text>
+          <Text
+            modifiers={[
+              frame({ maxWidth: Infinity }),
+              ...(!inactive && prominence === "primary"
+                ? [foregroundStyle(tokens.primaryForeground)]
+                : []),
+            ]}
+          >
+            {label}
+          </Text>
         ) : undefined}
       </Button>
     </Host>
