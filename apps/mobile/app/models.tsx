@@ -341,6 +341,10 @@ export default function Models() {
     !isOpenAiCompatible && selected
       ? (selected.thinkingLevels ?? []).filter((level) => level !== "off")
       : [];
+  const reasoningEffortValue = thinkingLevel ? thinkingLevelLabel(thinkingLevel, t) : t("Default");
+  const catalogThinkingValue = thinkingLevel
+    ? thinkingLevelLabel(thinkingLevel, t)
+    : t("Default ({level})", { level: thinkingLevelLabel("medium", t) });
   const selectedStoredLevel =
     !isOpenAiCompatible && credential?.modelId === selected?.id
       ? (credential?.thinkingLevel ?? null)
@@ -873,6 +877,7 @@ export default function Models() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t("Reasoning effort")}
+                accessibilityValue={{ text: reasoningEffortValue }}
                 disabled={busy}
                 onPress={() => {
                   presentMessageActionSheet({
@@ -895,9 +900,7 @@ export default function Models() {
                 style={({ pressed }) => [styles.modelRow, pressed && styles.pressed]}
               >
                 <Text style={styles.modelLabel}>{t("Reasoning effort")}</Text>
-                <Text style={styles.rowValue}>
-                  {thinkingLevel ? thinkingLevelLabel(thinkingLevel, t) : t("Default")}
-                </Text>
+                <Text style={styles.rowValue}>{reasoningEffortValue}</Text>
               </Pressable>
             ) : null}
             <View style={[styles.modelRow, styles.singleRow]}>
@@ -1036,6 +1039,7 @@ export default function Models() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t("Thinking")}
+              accessibilityValue={{ text: catalogThinkingValue }}
               disabled={busy}
               onPress={() => {
                 presentMessageActionSheet({
@@ -1064,11 +1068,7 @@ export default function Models() {
               ]}
             >
               <Text style={styles.modelLabel}>{t("Thinking")}</Text>
-              <Text style={styles.rowValue}>
-                {thinkingLevel
-                  ? thinkingLevelLabel(thinkingLevel, t)
-                  : t("Default ({level})", { level: thinkingLevelLabel("medium", t) })}
-              </Text>
+              <Text style={styles.rowValue}>{catalogThinkingValue}</Text>
             </Pressable>
           ) : null}
         </View>

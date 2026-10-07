@@ -39,4 +39,21 @@ describe("Models settings form", () => {
     expect(screen).toContain('disclosureRow(t("Advanced")');
     expect(screen).not.toContain("helpLabel");
   });
+
+  it("exposes the shown thinking value on the effort rows", () => {
+    const effort = sliceBetween(
+      screen,
+      'accessibilityLabel={t("Reasoning effort")}',
+      't("Supports images")',
+    );
+    expect(effort).toContain("accessibilityValue={{ text: reasoningEffortValue }}");
+    expect(effort).toContain("{reasoningEffortValue}");
+    const thinking = sliceBetween(
+      screen,
+      'accessibilityLabel={t("Thinking")}',
+      'disclosureRow(t("Advanced")',
+    );
+    expect(thinking).toContain("accessibilityValue={{ text: catalogThinkingValue }}");
+    expect(thinking).toContain("{catalogThinkingValue}");
+  });
 });
