@@ -26,7 +26,12 @@ const starsLabel = stars === null ? "Star" : formatStarCount(stars);
 const structuredData = faqPageStructuredData(OPENCLAW_FAQS);
 ---
 
-<BaseLayout title={OPENCLAW_TITLE} description={OPENCLAW_DESCRIPTION} {structuredData}>
+<BaseLayout
+  title={OPENCLAW_TITLE}
+  description={OPENCLAW_DESCRIPTION}
+  {structuredData}
+  localeAlternates={false}
+>
   <div class="container">
     <Header starsLabel={starsLabel} />
     <GetStartedDialog copy={home.getStartedDialog} waitlist={home.waitlist} />

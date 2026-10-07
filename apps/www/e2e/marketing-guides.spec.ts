@@ -92,6 +92,7 @@ test.describe("marketing guides", () => {
     await expect(page.locator('link[hreflang="de-DE"]')).toHaveCount(0);
     await expect(page.locator('link[hreflang="ko-KR"]')).toHaveCount(0);
     await expect(page.locator('link[hreflang="zh-CN"]')).toHaveCount(0);
+    await expect(page.locator('meta[property="og:locale:alternate"]')).toHaveCount(0);
     const licenseParagraph = page.locator("main p").filter({ hasText: "Apache-2.0" });
     await expect(licenseParagraph).toContainText("Hosted Rakazo Cloud is not generally available.");
     await expect(licenseParagraph.getByRole("link", { name: "Hosted Rakazo Cloud" })).toHaveCount(0);
@@ -143,6 +144,7 @@ test.describe("marketing guides", () => {
       "https://rakazo.com/openclaw-alternative/",
     );
     await expect(page.locator('link[hreflang="de-DE"]')).toHaveCount(0);
+    await expect(page.locator('meta[property="og:locale:alternate"]')).toHaveCount(0);
     const guide = page.getByRole("link", { name: "Self-host guide", exact: true });
     await expect(guide).toHaveCSS("color", "rgb(255, 255, 255)");
     const sources = page.locator("ul.source-list");
