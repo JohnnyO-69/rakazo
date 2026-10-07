@@ -1,6 +1,7 @@
 import type { BillingStatus, Me } from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { lazy, Suspense, useEffect, useState } from "react";
+import { fetchAuthCapabilities } from "../lib/auth-capabilities";
 import { peekInitialBootstrap } from "../lib/bootstrap";
 import { rpc } from "../lib/rpc";
 
@@ -17,9 +18,8 @@ let billingCapability: Promise<boolean> | undefined;
 
 /** Public and DB-free, so a deployment without billing opens without waiting on bootstrap. */
 function deploymentBills(): Promise<boolean> {
-  billingCapability ??= fetch("/api/auth/capabilities")
-    .then((response) => (response.ok ? response.json() : {}))
-    .then((body: { billing?: unknown }) => body.billing === true)
+  billingCapability ??= fetchAuthCapabilities()
+    .then((capabilities) => capabilities.billing === true)
     .catch(() => false);
   return billingCapability;
 }
