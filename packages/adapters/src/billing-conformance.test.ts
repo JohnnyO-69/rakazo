@@ -102,6 +102,21 @@ for (const [name, create] of Object.entries(factories)) {
       );
     });
 
+    it("replaces an unfinished checkout so only the latest one can be paid", async () => {
+      const harness = create();
+      const { customerId } = await harness.provider.createCustomer({
+        email: "owner@example.com",
+        organizationId: "org_3",
+      });
+      await harness.provider.createCheckout({ customerId, seats: 1, ...urls });
+      await harness.provider.createCheckout({ customerId, seats: 4, trialDays: 14, ...urls });
+      harness.completeCheckout(customerId);
+      expect(await harness.provider.getCustomerSubscription(customerId)).toMatchObject({
+        status: "trialing",
+        seats: 4,
+      });
+    });
+
     it("is active immediately without a trial and returns null before any subscription", async () => {
       const harness = create();
       const { customerId } = await harness.provider.createCustomer({

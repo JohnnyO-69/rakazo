@@ -54,6 +54,10 @@ const subscriptionListSchema = z.object({
   data: z.array(subscriptionSchema),
   has_more: z.boolean(),
 });
+const checkoutListSchema = z.object({
+  data: z.array(z.object({ id: z.string().min(1) })),
+  has_more: z.boolean(),
+});
 type StripeSubscription = z.infer<typeof subscriptionSchema>;
 
 /** Stripe REST wire format and credentials stay inside this adapter. */
@@ -104,6 +108,9 @@ export class StripeBillingProvider implements BillingProvider {
   }
 
   async createCheckout(input: BillingCheckoutRequest) {
+    // An abandoned session has no subscription yet, so the access check still passes.
+    // Expire it before opening another; a completed session is not open and stays paid once.
+    await this.expireOpenCheckouts(input.customerId);
     const body = encodeStripeForm({
       mode: "subscription",
       customer: input.customerId,
@@ -158,6 +165,25 @@ export class StripeBillingProvider implements BillingProvider {
 
   parseWebhook(rawBody: string, headers: Headers) {
     return parseStripeWebhook(this.config.webhookSecret, rawBody, headers, this.now());
+  }
+
+  private async expireOpenCheckouts(customerId: string): Promise<void> {
+    const seen = new Set<string>();
+    for (;;) {
+      const query = encodeStripeForm({ customer: customerId, status: "open", limit: 100 });
+      const page = checkoutListSchema.parse(
+        await this.request("GET", `/v1/checkout/sessions?${query}`),
+      );
+      const fresh = page.data.filter((session) => !seen.has(session.id));
+      if (fresh.length === 0) return;
+      for (const session of fresh) {
+        seen.add(session.id);
+        await this.request(
+          "POST",
+          `/v1/checkout/sessions/${encodeURIComponent(session.id)}/expire`,
+        );
+      }
+    }
   }
 
   private async listSubscriptions(customerId: string): Promise<StripeSubscription[]> {

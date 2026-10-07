@@ -9,7 +9,7 @@ export class StripeEmulator {
     form: Record<string, string>;
   }> = [];
   readonly customers = new Map<string, Record<string, unknown>>();
-  readonly checkouts = new Map<string, Record<string, string>>();
+  readonly sessions: StripeCheckoutSession[] = [];
   readonly subscriptions: StripeSubscriptionRecord[] = [];
   /** Largest page the list endpoint returns; lower it to exercise pagination. */
   pageSize = 100;
@@ -46,13 +46,16 @@ export class StripeEmulator {
     return response;
   };
 
-  /** The customer finishes the last checkout they started. */
+  /** The customer finishes their open checkout. An expired session cannot be paid. */
   completeCheckout(customerId: string, status?: string) {
-    const checkout = this.checkouts.get(customerId);
-    if (!checkout) throw new Error(`No checkout for ${customerId}`);
+    const checkout = this.sessions.findLast(
+      (session) => session.customer === customerId && session.status === "open",
+    );
+    if (!checkout) throw new Error(`No open checkout for ${customerId}`);
+    checkout.status = "complete";
     const n = ++this.sequence;
     const nowSeconds = Math.floor(this.now() / 1000);
-    const trialDays = checkout["subscription_data[trial_period_days]"];
+    const trialDays = checkout.form["subscription_data[trial_period_days]"];
     const trialEnd = trialDays ? nowSeconds + Number(trialDays) * 86_400 : null;
     this.subscriptions.push({
       id: `sub_fake_${n}`,
@@ -70,8 +73,8 @@ export class StripeEmulator {
           {
             id: `si_fake_${n}`,
             object: "subscription_item",
-            price: { id: checkout["line_items[0][price]"]!, object: "price" },
-            quantity: Number(checkout["line_items[0][quantity]"]),
+            price: { id: checkout.form["line_items[0][price]"]!, object: "price" },
+            quantity: Number(checkout.form["line_items[0][quantity]"]),
             current_period_end: trialEnd ?? nowSeconds + 30 * 86_400,
           },
         ],
@@ -105,13 +108,44 @@ export class StripeEmulator {
     if (method === "POST" && path === "/v1/checkout/sessions") {
       const customer = form.customer ?? "";
       if (!this.customers.has(customer)) return stripeError(404, `No such customer: '${customer}'`);
-      this.checkouts.set(customer, form);
-      const id = `cs_fake_${this.checkouts.size}`;
+      const id = `cs_fake_${++this.sequence}`;
+      this.sessions.push({ id, customer, status: "open", form });
       return Response.json({
         id,
         object: "checkout.session",
+        status: "open",
         url: `https://checkout.stripe.com/c/pay/${id}`,
       });
+    }
+    if (method === "GET" && path === "/v1/checkout/sessions") {
+      const matching = this.sessions.filter(
+        (session) =>
+          session.customer === (form.customer ?? "") &&
+          (form.status === undefined || session.status === form.status),
+      );
+      const start = form.starting_after
+        ? matching.findIndex((session) => session.id === form.starting_after) + 1
+        : 0;
+      const limit = Math.min(Number(form.limit ?? 10), this.pageSize);
+      const data = matching.slice(start, start + limit).map((session) => ({
+        id: session.id,
+        object: "checkout.session",
+        status: session.status,
+      }));
+      return Response.json({ object: "list", has_more: start + limit < matching.length, data });
+    }
+    const expire = /^\/v1\/checkout\/sessions\/([^/]+)\/expire$/.exec(path);
+    if (method === "POST" && expire) {
+      const found = this.sessions.find((session) => session.id === decodeURIComponent(expire[1]!));
+      if (!found) return stripeError(404, "No such checkout session");
+      if (found.status !== "open") {
+        return stripeError(
+          400,
+          `This Checkout Session has a status of \`${found.status}\` and cannot be expired.`,
+        );
+      }
+      found.status = "expired";
+      return Response.json({ id: found.id, object: "checkout.session", status: "expired" });
     }
     if (method === "POST" && path === "/v1/billing_portal/sessions")
       return Response.json({
@@ -155,6 +189,13 @@ export class StripeEmulator {
       .filter((s) => s.customer === customerId)
       .sort((a, b) => b.created - a.created);
   }
+}
+
+export interface StripeCheckoutSession {
+  id: string;
+  customer: string;
+  status: "open" | "expired" | "complete";
+  form: Record<string, string>;
 }
 
 export interface StripeSubscriptionRecord {

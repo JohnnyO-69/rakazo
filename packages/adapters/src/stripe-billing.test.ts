@@ -63,6 +63,38 @@ describe("Stripe billing HTTP boundary", () => {
     expect(wire.requests.at(-1)!.form["subscription_data[trial_period_days]"]).toBe("14");
   });
 
+  it("expires unfinished checkouts, including past the first page, and leaves a paid one", async () => {
+    const { wire, provider } = setup();
+    wire.pageSize = 1;
+    const { customerId } = await provider.createCustomer({
+      email: "owner@example.com",
+      organizationId: "org_1",
+    });
+    for (const id of ["cs_old_1", "cs_old_2", "cs_old_3"]) {
+      wire.sessions.push({
+        id,
+        customer: customerId,
+        status: "open",
+        form: { "line_items[0][price]": wire.priceId, "line_items[0][quantity]": "1" },
+      });
+    }
+    const opened = await provider.createCheckout({ customerId, seats: 4, ...urls });
+    expect(
+      wire.sessions.filter((session) => session.status === "expired").map((s) => s.id),
+    ).toEqual(["cs_old_1", "cs_old_2", "cs_old_3"]);
+    const open = wire.sessions.filter((session) => session.status === "open");
+    expect(open).toHaveLength(1);
+    expect(opened.url).toBe(`https://checkout.stripe.com/c/pay/${open[0]!.id}`);
+    wire.completeCheckout(customerId);
+    expect(wire.subscriptions).toHaveLength(1);
+    expect(wire.subscriptions[0]!.items.data[0]!.quantity).toBe(4);
+    expect(() => wire.completeCheckout(customerId)).toThrow(/open checkout/);
+
+    await provider.createCheckout({ customerId, seats: 1, ...urls });
+    expect(wire.requests.filter((request) => request.path.endsWith("/expire"))).toHaveLength(3);
+    expect(wire.sessions.filter((session) => session.status === "complete")).toHaveLength(1);
+  });
+
   it("reads every page of subscriptions", async () => {
     const { wire, provider } = setup();
     wire.pageSize = 2;
