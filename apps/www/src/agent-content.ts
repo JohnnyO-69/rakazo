@@ -71,15 +71,15 @@ export const TERMS_MARKDOWN = `# Rakazo terms
 
 Last updated: October 7, 2026
 
-These terms are an agreement between you and Inbox Zero Inc. for the Rakazo service we host, the Rakazo apps, and rakazo.com. The Rakazo source code is governed by the Apache License 2.0, and self-hosted deployments are the operator's responsibility.
+These terms are an agreement between you and Inbox Zero Inc. for the Rakazo service we host, the Rakazo apps, and rakazo.com. The Rakazo source code is governed by the Apache License 2.0, which does not grant rights to the Rakazo name or logo, and self-hosted deployments are the operator's responsibility.
 
-You are responsible for your account and for actions your bots take on your behalf. Do not use the Service to break the law, send spam or malware, access systems without authorization, abuse its computers, or violate the terms of connected providers. You keep ownership of your content and bot output. AI output can be wrong, so review it before relying on it.
+You are responsible for your account and for actions your bots take on your behalf, including in scheduled routines; give bots only the access they need and require approval for actions that are hard to undo. AI output can be wrong, so review it before relying on it, and do not use the Service where an error could cause serious harm. Do not use the Service to break the law, send spam or malware, access systems without authorization, abuse its computers, or violate the terms of connected providers. You keep ownership of your content and bot output, and you pay any fees charged by third-party services, including usage on your own API keys.
 
-Paid plans renew automatically until cancelled and are charged through Stripe. Cancel at any time from billing settings or by emailing [hello@rakazo.com](mailto:hello@rakazo.com); access continues until the end of the paid period. Payments are non-refundable and not prorated except where required by law. Charges made in error are refunded when reported within 30 days.
+Paid plans renew automatically until cancelled and are charged through Stripe. Cancel at any time from billing settings or by emailing [hello@rakazo.com](mailto:hello@rakazo.com); access continues until the end of the paid period. Payments are non-refundable and not prorated except where required by law. Charges made in error are refunded when reported within 30 days. Consumers in the EU and UK can withdraw from a new subscription within 14 days and are refunded less the value of the Service already provided.
 
-The Service is provided as is. Our liability is limited to the greater of what you paid us in the previous 12 months or US$100. New York law governs these terms.
+The Service is provided as is. Our liability is limited to the greater of what you paid us in the previous 12 months or US$100, except where the law does not allow a limit. New York law governs these terms.
 
-Read the [complete terms](https://rakazo.com/terms/) for acceptable use, third-party services, termination, disclaimers, changes, and contact details.
+Read the [complete terms](https://rakazo.com/terms/) for acceptable use, termination and data deletion, disclaimers, indemnity, app store terms, changes, and contact details.
 `;
 
 export const AGENT_INSTRUCTIONS = `# Rakazo
