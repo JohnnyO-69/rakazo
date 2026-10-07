@@ -342,7 +342,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
         rakazo:
           "Bring your own model credentials. Multiple providers are supported, including a custom model server.",
         other:
-          "The privacy policy and terms do not name a public model. They say Instinct may use what you submit to train the models behind the service. You can opt out at app.instinct.com/settings. The opt-out is forward-looking, material flagged for safety review can still be used, and models already trained stay trained. Materials you put in the Vault feature are not used for training. Information received from Google Workspace APIs is excluded from model training.",
+          "The privacy policy and terms do not name a public model. They say Instinct may train its models on what you submit unless you opt out in settings. Vault materials and Google Workspace data are excluded.",
       },
       {
         topic: "Computer",
@@ -356,7 +356,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
         rakazo:
           "Composio or Pipedream Connect, or a Treg, remote MCP, or OpenAPI source you install. Connector credentials are encrypted on the server and are not returned by the API.",
         other:
-          "The terms authorize Instinct to access connected services and take actions there, including sharing a payment method when a purchase is part of the action. Linking Google Workspace grants Calendar, Gmail, Drive, Docs, Sheets, Slides, and Tasks. Precise location is collected only if you choose to share it. Payment details for Instinct's own fees go through a third-party payment processor.",
+          "The terms let Instinct act in services you connect, including using a payment method for a purchase. Linking Google Workspace grants Calendar, Gmail, Drive, Docs, Sheets, Slides, and Tasks.",
       },
       {
         topic: "Ongoing work",
@@ -370,7 +370,7 @@ export const ALTERNATIVES: readonly Alternative[] = [
         rakazo:
           "A bot can pause for approval when a task crosses a boundary you set. Actions are recorded in an audit log.",
         other:
-          "The terms say you authorize Instinct to take actions it treats as responsive to what you send, including purchases, and that you remain responsible for them. They say safeguards or confirmation steps may exist, and they do not promise those steps will prevent an unintended action. The privacy policy says the assistant can act on its own within the permissions you grant, and it asks you to review actions because an unintended payment or message is possible. You must be 18 or older.",
+          "The terms say Instinct can act on what you send, including purchases, and that you remain responsible for those actions. Confirmation steps may exist but are not promised to prevent an unintended action.",
       },
       {
         topic: "Where you use it",
