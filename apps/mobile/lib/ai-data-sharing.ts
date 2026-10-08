@@ -1,4 +1,9 @@
-import type { AiRecipient } from "@rakazo/contracts";
+import type { AiConsentStatus, AiRecipient } from "@rakazo/contracts";
+
+export function aiDataSharingPlaceholder(status: AiConsentStatus | null, loadFailed: boolean) {
+  if (!status) return loadFailed ? "failed" : "loading";
+  return status.recipients.length === 0 ? "empty" : null;
+}
 
 export function groupAiRecipients(recipients: AiRecipient[]) {
   return (["model", "voice", "memory"] as const)

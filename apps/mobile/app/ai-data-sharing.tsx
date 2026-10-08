@@ -10,7 +10,11 @@ import {
   useStackedSettings,
 } from "../components/settings-group";
 import { promptAiConsent } from "../lib/ai-consent";
-import { aiPrivacyLinks, groupAiRecipients } from "../lib/ai-data-sharing";
+import {
+  aiDataSharingPlaceholder,
+  aiPrivacyLinks,
+  groupAiRecipients,
+} from "../lib/ai-data-sharing";
 import { rpc } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { native, useThemedStyles } from "../lib/native";
@@ -20,13 +24,28 @@ export default function AiDataSharing() {
   const { t } = useI18n();
   const [status, setStatus] = useState<AiConsentStatus | null>(null);
   const [pending, setPending] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const placeholder = aiDataSharingPlaceholder(status, loadFailed);
   const styles = useThemedStyles(createStyles);
   const stacked = useStackedSettings();
   const error = (cause: unknown) =>
     Alert.alert(t("AI data sharing"), errorText(cause, t("Could not load permissions.")));
   useEffect(() => {
-    void rpc<AiConsentStatus>("aiConsent/status").then(setStatus).catch(error);
+    reload();
   }, []);
+
+  function reload() {
+    setLoadFailed(false);
+    void rpc<AiConsentStatus>("aiConsent/status")
+      .then(setStatus)
+      .catch((cause: unknown) => {
+        setLoadFailed(true);
+        Alert.alert(t("AI data sharing"), errorText(cause, t("Could not load permissions.")), [
+          { text: t("Cancel"), style: "cancel" },
+          { text: t("Retry"), onPress: reload },
+        ]);
+      });
+  }
 
   function setAllowed(recipient: AiConsentStatus["recipients"][number], allowed: boolean) {
     if (!status) return;
@@ -75,11 +94,14 @@ export default function AiDataSharing() {
       contentContainerStyle={[styles.container, stacked && styles.compactContainer]}
       contentInsetAdjustmentBehavior="automatic"
     >
-      {!status ? (
-        <ActivityIndicator />
-      ) : status.recipients.length === 0 ? (
+      {placeholder === "loading" && <ActivityIndicator />}
+      {placeholder === "failed" && (
+        <SettingsFooter>{t("Could not load permissions.")}</SettingsFooter>
+      )}
+      {placeholder === "empty" && (
         <SettingsFooter>{t("No AI services configured.")}</SettingsFooter>
-      ) : (
+      )}
+      {status && (
         <>
           {groupAiRecipients(status.recipients).map(({ use, recipients }) => (
             <SettingsGroup
