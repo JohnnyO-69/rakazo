@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { act, createElement } from "react";
+import { act, createElement, useEffect } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -14,6 +14,14 @@ const state = vi.hoisted(() => ({
   current: true,
   scope: vi.fn(),
   persisted: vi.fn(),
+  focused: true,
+}));
+vi.mock("expo-router", () => ({
+  useFocusEffect: (callback: () => undefined | (() => void)) => {
+    useEffect(() => {
+      if (state.focused) return callback();
+    }, [callback, state.focused]);
+  },
 }));
 vi.mock("./api", () => ({ rpc: state.rpc }));
 vi.mock("./integrations-cache", () => ({
@@ -117,6 +125,7 @@ let rejectCatalog: (error: Error) => void;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   state.current = true;
+  state.focused = true;
   state.scope.mockReset().mockResolvedValue({ userId: "user-a", spaceId: "space-a" });
   state.persisted.mockReset().mockResolvedValue(null);
   state.read.mockReset().mockReturnValue(null);
@@ -387,4 +396,33 @@ it("keeps sources loading when a rename cancels the catalog refresh", async () =
   expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Remove")).toBe(
     true,
   );
+});
+
+it("refreshes a different space on focus return and rejects the blurred refresh", async () => {
+  state.read.mockReturnValue({ catalog: [item], connections: [account] });
+  await render();
+  state.focused = false;
+  await render();
+  await act(async () => resolveCatalog([{ ...item, name: "Late old app" }]));
+  expect(container.textContent).not.toContain("Late old app");
+  state.current = false;
+  state.scope.mockImplementation(async () => {
+    state.current = true;
+    return { userId: "user-a", spaceId: "space-b" };
+  });
+  state.read.mockReturnValue(null);
+  let resolveNew!: (items: (typeof item)[]) => void;
+  const pending = new Promise<(typeof item)[]>((resolve) => {
+    resolveNew = resolve;
+  });
+  state.rpc.mockImplementation((proc: string) =>
+    proc === "connections/catalog" ? pending : Promise.resolve([]),
+  );
+  state.focused = true;
+  await render();
+  expect(container.textContent).not.toContain("Example app");
+  expect(container.querySelector('[data-testid="integrations-loading"]')).not.toBeNull();
+  await act(async () => resolveNew([{ ...item, name: "New space app", connected: false }]));
+  expect(container.textContent).toContain("New space appAdd");
+  expect(state.scope).toHaveBeenCalledTimes(2);
 });

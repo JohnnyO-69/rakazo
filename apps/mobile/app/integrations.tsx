@@ -7,7 +7,8 @@ import {
   filterConnectionCatalogItems,
   humanizeToolName,
 } from "@rakazo/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -79,6 +80,7 @@ export default function Integrations() {
   const cacheScope = useRef<IntegrationsCacheScope | null>(null);
   const snapshot = useRef<IntegrationsSnapshot>({ catalog: [], connections: [] });
   const mounted = useRef(false);
+  const focusGeneration = useRef(0);
   const refreshGeneration = useRef(0);
   const sourcesGeneration = useRef(0);
 
@@ -155,6 +157,7 @@ export default function Integrations() {
   }
 
   async function refresh() {
+    const focus = focusGeneration.current;
     clearStaleScope();
     let scope: IntegrationsCacheScope;
     try {
@@ -162,6 +165,7 @@ export default function Integrations() {
     } catch (reason) {
       if (
         mounted.current &&
+        focus === focusGeneration.current &&
         cacheScope.current &&
         !isIntegrationsScopeCurrent(cacheScope.current)
       ) {
@@ -170,7 +174,7 @@ export default function Integrations() {
       }
       throw reason;
     }
-    if (!mounted.current) return;
+    if (!mounted.current || focus !== focusGeneration.current) return;
     if (!isIntegrationsScopeCurrent(scope)) {
       clearStaleScope();
       return refresh();
@@ -247,26 +251,35 @@ export default function Integrations() {
     }
   }
 
-  useEffect(() => {
-    mounted.current = true;
-    void (async () => {
-      const scope = await persistedIntegrationsCacheScope();
-      if (!mounted.current) return;
-      if (scope && isIntegrationsScopeCurrent(scope)) {
-        cacheScope.current = scope;
-        const cached = readIntegrationsCache(scope);
-        if (cached) applySnapshot(cached);
-      }
-      await retryRefresh();
-    })();
-    void loadLastBotId().then(setLastBotId);
-    return () => {
-      mounted.current = false;
-      refreshGeneration.current += 1;
-      sourcesGeneration.current += 1;
-      connectionAttempt.current?.abort();
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      mounted.current = true;
+      focusGeneration.current += 1;
+      let cancelled = false;
+      clearStaleScope();
+      void (async () => {
+        const scope = await persistedIntegrationsCacheScope();
+        if (cancelled) return;
+        if (scope && isIntegrationsScopeCurrent(scope)) {
+          cacheScope.current = scope;
+          const cached = readIntegrationsCache(scope);
+          if (cached) applySnapshot(cached);
+        }
+        await retryRefresh();
+      })();
+      void loadLastBotId().then((id) => {
+        if (!cancelled) setLastBotId(id);
+      });
+      return () => {
+        cancelled = true;
+        mounted.current = false;
+        focusGeneration.current += 1;
+        refreshGeneration.current += 1;
+        sourcesGeneration.current += 1;
+        connectionAttempt.current?.abort();
+      };
+    }, []),
+  );
 
   useEffect(() => {
     if (!detailKey) {
