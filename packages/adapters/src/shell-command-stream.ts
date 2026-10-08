@@ -1,4 +1,5 @@
 import type { ProcessEvent } from "@rakazo/adapter-kit";
+import { redactSecrets } from "@rakazo/core";
 import { redactShellStreams } from "./agent-environment.js";
 import { clipToolResultText } from "./pi-runtime-limits.js";
 
@@ -157,6 +158,12 @@ export async function observeShellCommand(
         }
         if (stdout.length > 0 || stderr.length > 0) armIdle();
       }
+    } catch (error) {
+      // Providers may include command environment values in errors. Never expose the raw
+      // error or its cause to runtime tool handling or a background completion observer.
+      throw new Error(
+        redactSecrets(error instanceof Error ? error.message : String(error), options.secrets),
+      );
     } finally {
       clearIdle();
       finished = true;

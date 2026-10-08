@@ -227,11 +227,7 @@ export function BotCredentialsSection({ botId }: { botId: string }) {
         <Trans>Credentials</Trans>
       </div>
       <p className="mt-0.5 text-[12px] text-muted-foreground/70">
-        <Trans>
-          Keys and passwords this bot can use. A site credential works only on its saved site, and a
-          command variable is available to the bot's shell commands. Values are encrypted and never
-          shown again.
-        </Trans>
+        <Trans>Values are encrypted and never shown again.</Trans>
       </p>
       {loadFailed ? (
         <p className="mt-3 text-[13px] text-destructive">

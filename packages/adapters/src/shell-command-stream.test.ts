@@ -8,6 +8,21 @@ import {
 } from "./shell-command-stream.js";
 
 describe("observeShellCommand", () => {
+  it("redacts provider errors before they reach the runtime", async () => {
+    const secret = "fake-shell-error-secret";
+    const error = await observeShellCommand(
+      (async function* () {
+        yield { type: "stdout" as const, data: "starting" };
+        throw new Error(`Provider failed with ${secret}`, { cause: new Error(secret) });
+      })(),
+      { secrets: [secret] },
+    ).catch((error: Error) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Provider failed with [redacted]");
+    expect((error as Error).stack).not.toContain(secret);
+    expect((error as Error).cause).toBeUndefined();
+  });
+
   it("returns a fast command only after it exits", async () => {
     const seen: string[] = [];
     const observed = await observeShellCommand(

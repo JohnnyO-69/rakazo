@@ -1,6 +1,6 @@
 import type { BotSecretDestination } from "@rakazo/contracts";
 import { redactSecrets } from "@rakazo/core";
-import type { Prisma, PrismaClient } from "@rakazo/db";
+import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { redactAgentCommandResult } from "./agent-environment.js";
 import {
@@ -64,12 +64,16 @@ function fakeDatabase() {
       return { count: before - rows.length };
     }),
   };
-  const client: Record<string, unknown> = { botSecret, $queryRaw: vi.fn(async () => []) };
+  const client: Record<string, unknown> = {
+    botSecret,
+    secret: { count: vi.fn(async () => 0) },
+    integrationProviderConfig: { count: vi.fn(async () => 0) },
+    $queryRaw: vi.fn(async () => []),
+  };
   client.$transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(client);
   return {
     rows: () => rows,
     prisma: client as unknown as PrismaClient,
-    tx: client as unknown as Prisma.TransactionClient,
   };
 }
 
@@ -85,7 +89,7 @@ function save(
   saveScope = scope,
 ) {
   return storeBotSecret({
-    tx: db.tx,
+    prisma: db.prisma,
     secretStore,
     scope: saveScope,
     destination: { name, origin: "", auth: command, ...destination },
@@ -100,20 +104,24 @@ describe("storing a command variable", () => {
     const [row] = db.rows();
     expect(row).toMatchObject({ name: "netbird-setup-key", origin: "", auth: command });
     expect(row!.ciphertext).not.toContain("fake-setup-key-1");
-    expect(secretStore.load(row!.ciphertext, row!.id)).toBe("fake-setup-key-1");
+    expect(await secretStore.load(row!.ciphertext, row!.id)).toBe("fake-setup-key-1");
   });
 
   it("accepts any value up to 16384 characters and nothing longer", async () => {
     const db = fakeDatabase();
-    await expect(save(db, "big", "x".repeat(16_384))).resolves.toBeUndefined();
+    await expect(save(db, "big", "x".repeat(16_384))).resolves.toEqual(
+      expect.objectContaining({ auth: command }),
+    );
     await expect(save(db, "bigger", "x".repeat(16_385))).rejects.toThrow(
       "Invalid credential length",
     );
     await expect(save(db, "empty", "")).rejects.toThrow("Invalid credential length");
-    await expect(save(db, "odd", "line one\nline two with 'quotes' $HOME ;")).resolves.toBe(
-      undefined,
+    await expect(save(db, "odd", "line one\nline two with 'quotes' $HOME ;")).resolves.toEqual(
+      expect.objectContaining({ auth: command }),
     );
-    await expect(save(db, "pair", "ok\uD800\uDC00")).resolves.toBeUndefined();
+    await expect(save(db, "pair", "ok\uD800\uDC00")).resolves.toEqual(
+      expect.objectContaining({ auth: command }),
+    );
   });
 
   it("refuses a value an environment variable cannot carry", async () => {
@@ -145,7 +153,7 @@ describe("storing a command variable", () => {
     await save(db, "deploy-token", "first-value");
     await save(db, "deploy-token", "second-value");
     expect(db.rows()).toHaveLength(1);
-    expect(secretStore.load(db.rows()[0]!.ciphertext, db.rows()[0]!.id)).toBe("second-value");
+    expect(await secretStore.load(db.rows()[0]!.ciphertext, db.rows()[0]!.id)).toBe("second-value");
     await expect(
       save(db, "deploy-token", "value", {
         origin: "https://api.example.test",
@@ -321,7 +329,7 @@ describe("shell command environment", () => {
     // The cipher's UTF-8 round trip replaces an unpaired surrogate, so this loader
     // stands in for a row whose plaintext still contains one.
     const store = {
-      load(ciphertext: string, recordId: string) {
+      async load(ciphertext: string, recordId: string) {
         return recordId === "stored-bad" ? bad : secretStore.load(ciphertext, recordId);
       },
     };
