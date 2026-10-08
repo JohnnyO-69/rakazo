@@ -65,16 +65,34 @@ it("uses quote, caption, localized photo, filename, and attachment in order", ()
   expect(replyLabel(undefined, "", replyAttachment([file]), labels)).toBe("notes.txt");
   expect(replyLabel(undefined, "", { ...file, name: "" }, labels)).toBe("Anhang");
 });
-it("accepts legacy previews, validates attachment metadata, and preserves it in events", () => {
-  expect(ReplyPreviewSchema.parse({ role: "user", text: "legacy" })).toEqual({
-    role: "user",
-    text: "legacy",
-  });
+it.each([
+  { role: "user", text: "legacy" },
+  { role: "bot", botId: "bot", text: "legacy" },
+])("accepts legacy previews and strips unexpected top-level fields: %j", (preview) => {
+  expect(ReplyPreviewSchema.parse(preview)).toEqual(preview);
+  expect(ReplyPreviewSchema.parse({ ...preview, source: "cache" })).toEqual(preview);
+});
+it("strips unknown preview and attachment fields and preserves known metadata in events", () => {
   const preview = { role: "user", text: "", attachment: image };
   expect(replyMetadata({ replyPreview: preview }).replyPreview).toEqual(preview);
+  const cachedPreview = {
+    ...preview,
+    source: "cache",
+    attachment: { ...image, contentBase64: "bytes", size: 12 },
+  };
+  expect(ReplyPreviewSchema.safeParse(cachedPreview)).toEqual({ success: true, data: preview });
+  expect(replyMetadata({ replyPreview: cachedPreview }).replyPreview).toEqual(preview);
+});
+it("still rejects missing or invalid known preview and attachment fields", () => {
+  expect(ReplyPreviewSchema.safeParse({ role: "user" }).success).toBe(false);
+  expect(ReplyPreviewSchema.safeParse({ role: "invalid", text: "" }).success).toBe(false);
+  expect(ReplyPreviewSchema.safeParse({ role: "user", text: 12 }).success).toBe(false);
+  const preview = { role: "user", text: "" };
+  expect(ReplyPreviewSchema.safeParse({ ...preview, attachment: { kind: "image" } }).success).toBe(
+    false,
+  );
   expect(
-    ReplyPreviewSchema.safeParse({ ...preview, attachment: { ...image, contentBase64: "bytes" } })
-      .success,
+    ReplyPreviewSchema.safeParse({ ...preview, attachment: { ...image, mimeType: 12 } }).success,
   ).toBe(false);
 });
 
