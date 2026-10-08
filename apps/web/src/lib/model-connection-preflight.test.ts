@@ -143,37 +143,19 @@ describe("loadStoredModelAuth", () => {
 describe("runModelConnectionPreflight", () => {
   it("probes catalog providers through the pinned catalog endpoint", async () => {
     const probeCatalog = vi.fn().mockResolvedValue({ models: ["gpt-test"] });
-    const probe = vi.fn();
     const result = await runModelConnectionPreflight({
       authKind: "api-key",
       provider: "openrouter",
       apiKey: "sk-test-key-12345678",
       modelId: "gpt-test",
       catalogProbe: true,
-      probe,
       probeCatalog,
     });
     expect(result.ok).toBe(true);
-    expect(probe).not.toHaveBeenCalled();
     expect(probeCatalog).toHaveBeenCalledWith({
       provider: "openrouter",
       apiKey: "sk-test-key-12345678",
     });
-  });
-
-  it("rejects a selected model a compatible probe did not list", async () => {
-    const result = await runModelConnectionPreflight({
-      authKind: "openai-compatible",
-      provider: "openai-compatible",
-      baseUrl: "http://127.0.0.1:8000/v1",
-      modelId: "missing-model",
-      probe: async () => ({ models: ["listed-model"] }),
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.failure.outcome).toBe("unavailable_model");
-      expect(result.failure.nextAction).toMatch(/enter a model id/);
-    }
   });
 
   it("rejects a selected model the catalog probe did not list", async () => {
@@ -193,13 +175,12 @@ describe("runModelConnectionPreflight", () => {
     }
   });
 
-  it("does not send catalog keys through the user-supplied URL probe", async () => {
+  it("rejects providers without a pinned catalog endpoint", async () => {
     const result = await runModelConnectionPreflight({
       authKind: "api-key",
       provider: "anthropic",
       apiKey: "sk-test-key-12345678",
       catalogProbe: false,
-      probe: vi.fn(),
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.failure.message).toMatch(/cannot be tested without saving/);

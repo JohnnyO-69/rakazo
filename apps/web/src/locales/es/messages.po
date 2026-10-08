@@ -2018,10 +2018,6 @@ msgstr ""
 msgid "Enter a password"
 msgstr "Introduce una contraseña"
 
-#: src/lib/model-connection-preflight.ts
-msgid "Enter a server URL before testing."
-msgstr "Introduce una URL de servidor antes de probar."
-
 #: src/pages/shell/bot-credentials.tsx
 msgid "Enter a username and password"
 msgstr ""
@@ -3220,10 +3216,6 @@ msgstr "Pega una clave de reemplazo"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed."
 msgstr "Pega la dirección compatible con OpenAI de tu servidor. Rakazo agrega /v1 si es necesario."
-
-#: src/lib/model-connection-preflight.ts
-msgid "Paste the OpenAI-compatible base URL, then test again."
-msgstr "Pega la URL base compatible con OpenAI y vuelve a probar."
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Paste your API key"

@@ -374,8 +374,7 @@ export function OnboardingPage() {
       },
       onError: (err) => {
         if (!preflightStillCurrent(revision)) return;
-        const failure = classifyModelConnectionFailure(err, { modelId });
-        setPreflightFailure(failure);
+        setPreflightFailure(classifyModelConnectionFailure(err, { modelId }));
         setNotice(null);
       },
     });

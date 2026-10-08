@@ -59,7 +59,7 @@ export async function probeCatalogProviderModels(
 /** Wire protocols whose registry base URL also serves GET {base}/models. */
 const CATALOG_PROBE_APIS = new Set(["openai-completions", "openai-responses"]);
 
-function pinnedOpenAiCompletionsBaseUrl(
+function pinnedCatalogProbeBaseUrl(
   providerId: string,
   models: ReadonlyArray<{ api: string; baseUrl?: string }>,
 ): string | null {
@@ -111,7 +111,7 @@ function buildPiCatalog(): PiCatalogEntry[] {
       oauth,
     });
     const providerModels = provider.getModels();
-    const probeBaseUrl = pinnedOpenAiCompletionsBaseUrl(provider.id, providerModels);
+    const probeBaseUrl = pinnedCatalogProbeBaseUrl(provider.id, providerModels);
     if (probeBaseUrl) catalogProbeBaseUrls.set(provider.id, probeBaseUrl);
     const modelIds = providerModels.map((model) => model.id);
     for (const model of providerModels) {

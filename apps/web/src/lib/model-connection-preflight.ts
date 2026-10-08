@@ -1,7 +1,7 @@
 import { plural, t } from "@lingui/core/macro";
+import type { ModelCredential } from "@rakazo/contracts";
 
-export type ModelPreflightOutcome =
-  | "success"
+type ModelPreflightOutcome =
   | "timeout"
   | "rate_limit"
   | "unauthorized"
@@ -17,7 +17,7 @@ export type ModelPreflightFailure = {
   nextAction: string;
 };
 
-export type StoredModelAuthKind = "api_key" | "oauth" | "openai_compatible";
+type StoredModelAuthKind = NonNullable<ModelCredential["authKind"]>;
 
 const SECRET_PATTERNS: RegExp[] = [
   /\bsk-[a-zA-Z0-9_-]{8,}\b/g,
@@ -183,10 +183,9 @@ export async function loadStoredModelAuth(
   }
 }
 
-export type ModelConnectionPreflightInput = {
-  authKind: "openai-compatible" | "api-key" | "oauth";
+type ModelConnectionPreflightInput = {
+  authKind: "api-key" | "oauth";
   provider: string;
-  baseUrl?: string;
   apiKey?: string;
   modelId?: string;
   /** Kind of the stored credential, when a lookup succeeded and the secret was readable. */
@@ -196,15 +195,13 @@ export type ModelConnectionPreflightInput = {
   credentialUnreadable?: boolean;
   /** Catalog entry says this provider has a pinned models-list URL. */
   catalogProbe?: boolean;
-  probe?: (input: { baseUrl: string; apiKey?: string }) => Promise<{ models: string[] }>;
   probeCatalog?: (input: { provider: string; apiKey: string }) => Promise<{ models: string[] }>;
 };
 
 export async function runModelConnectionPreflight(
   input: ModelConnectionPreflightInput,
 ): Promise<
-  | { ok: true; discoveredModels: string[]; usesModelsListOnly: true }
-  | { ok: false; failure: ModelPreflightFailure }
+  { ok: true; discoveredModels: string[] } | { ok: false; failure: ModelPreflightFailure }
 > {
   if (input.authKind === "oauth") {
     if (input.credentialLookupFailed || input.credentialUnreadable) {
@@ -218,7 +215,7 @@ export async function runModelConnectionPreflight(
       };
     }
     if (input.storedAuthKind === "oauth") {
-      return { ok: true, discoveredModels: [], usesModelsListOnly: true };
+      return { ok: true, discoveredModels: [] };
     }
     if (input.storedAuthKind === "api_key" || input.storedAuthKind === "openai_compatible") {
       return {
@@ -243,63 +240,34 @@ export async function runModelConnectionPreflight(
   const trimmedKey = input.apiKey?.trim() ?? "";
   const trimmedModel = input.modelId?.trim() ?? "";
 
-  if (input.authKind === "api-key") {
-    if (trimmedKey.length < 8) {
-      return {
-        ok: false,
-        failure: {
-          outcome: "missing_fields",
-          message: t`Enter an API key before testing.`,
-          nextAction: t`Paste your API key, then test again.`,
-        },
-      };
-    }
-    if (!input.catalogProbe || !input.probeCatalog) {
-      return {
-        ok: false,
-        failure: {
-          outcome: "unknown",
-          message: t`This provider cannot be tested without saving.`,
-          nextAction: t`Use Connect to verify the key.`,
-        },
-      };
-    }
-    try {
-      const { models } = await input.probeCatalog({
-        provider: input.provider,
-        apiKey: trimmedKey,
-      });
-      const unavailable = unavailableSelectedModel(trimmedModel, models, { manualEntry: false });
-      if (unavailable) return { ok: false, failure: unavailable };
-      return { ok: true, discoveredModels: models, usesModelsListOnly: true };
-    } catch (error) {
-      return {
-        ok: false,
-        failure: classifyModelConnectionFailure(error, { modelId: trimmedModel }),
-      };
-    }
-  }
-
-  const baseUrl = input.baseUrl?.trim() ?? "";
-  if (!baseUrl || !input.probe) {
+  if (trimmedKey.length < 8) {
     return {
       ok: false,
       failure: {
         outcome: "missing_fields",
-        message: t`Enter a server URL before testing.`,
-        nextAction: t`Paste the OpenAI-compatible base URL, then test again.`,
+        message: t`Enter an API key before testing.`,
+        nextAction: t`Paste your API key, then test again.`,
       },
     };
   }
-
+  if (!input.catalogProbe || !input.probeCatalog) {
+    return {
+      ok: false,
+      failure: {
+        outcome: "unknown",
+        message: t`This provider cannot be tested without saving.`,
+        nextAction: t`Use Connect to verify the key.`,
+      },
+    };
+  }
   try {
-    const { models } = await input.probe({
-      baseUrl,
-      apiKey: trimmedKey || undefined,
+    const { models } = await input.probeCatalog({
+      provider: input.provider,
+      apiKey: trimmedKey,
     });
-    const unavailable = unavailableSelectedModel(trimmedModel, models);
+    const unavailable = unavailableSelectedModel(trimmedModel, models, { manualEntry: false });
     if (unavailable) return { ok: false, failure: unavailable };
-    return { ok: true, discoveredModels: models, usesModelsListOnly: true };
+    return { ok: true, discoveredModels: models };
   } catch (error) {
     return {
       ok: false,
