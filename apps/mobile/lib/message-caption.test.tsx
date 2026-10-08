@@ -52,6 +52,7 @@ vi.mock("react-native", () => {
         buttons: Array<{ text: string; onPress?: () => void }>,
       ) => buttons.find((button) => button.text === "Open")?.onPress?.(),
     },
+    I18nManager: { isRTL: false },
   };
 });
 
