@@ -339,11 +339,22 @@ export const ProductEventSchema = z.object({
 });
 export type ProductEvent = z.infer<typeof ProductEventSchema>;
 
-export const ReplyPreviewSchema = z.object({
-  role: MessageRole,
-  botId: Id.optional(),
-  text: z.string(),
-});
+export const ReplyPreviewSchema = z
+  .object({
+    role: MessageRole,
+    botId: Id.optional(),
+    text: z.string(),
+    attachment: z
+      .object({
+        kind: z.enum(["image", "file"]),
+        artifactId: Id,
+        mimeType: z.string(),
+        name: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 export type ReplyPreview = z.infer<typeof ReplyPreviewSchema>;
 
 export const ThreadMessageSchema = z.object({

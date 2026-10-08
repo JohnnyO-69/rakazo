@@ -1,5 +1,7 @@
+import type { MessageBlock } from "@rakazo/contracts";
+import { ReplyPreviewSchema } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
-import { replyLineText, replyMetadata } from "./message-replies.js";
+import { replyAttachment, replyLabel, replyLineText, replyMetadata } from "./message-replies.js";
 
 describe("shared reply presentation", () => {
   it("keeps selected quotes on one line and uses preview before local fallback", () => {
@@ -35,4 +37,52 @@ describe("shared reply presentation", () => {
       replyPreview: { role: "user", text: "New" },
     });
   });
+});
+
+const image: MessageBlock = { kind: "image", artifactId: "photo", mimeType: "image/png", name: "" };
+const file: MessageBlock = {
+  kind: "file",
+  artifactId: "document",
+  mimeType: "text/plain",
+  name: "notes.txt",
+  size: 12,
+};
+it("prefers the first parent image and copies only attachment metadata", () => {
+  expect(replyAttachment([file, image, { ...image, artifactId: "second" }])).toEqual(image);
+  expect(replyAttachment([file])).toEqual({
+    kind: "file",
+    artifactId: "document",
+    mimeType: "text/plain",
+    name: "notes.txt",
+  });
+  expect(replyAttachment([])).toBeUndefined();
+});
+it("uses quote, caption, localized photo, filename, and attachment in order", () => {
+  const labels = { photo: "Foto", attachment: "Anhang" };
+  expect(replyLabel("selected\ntext", "caption", image, labels)).toBe("selected text");
+  expect(replyLabel(undefined, "caption", image, labels)).toBe("caption");
+  expect(replyLabel(undefined, "", image, labels)).toBe("Foto");
+  expect(replyLabel(undefined, "", replyAttachment([file]), labels)).toBe("notes.txt");
+  expect(replyLabel(undefined, "", { ...file, name: "" }, labels)).toBe("Anhang");
+});
+it("accepts legacy previews, validates attachment metadata, and preserves it in events", () => {
+  expect(ReplyPreviewSchema.parse({ role: "user", text: "legacy" })).toEqual({
+    role: "user",
+    text: "legacy",
+  });
+  const preview = { role: "user", text: "", attachment: image };
+  expect(replyMetadata({ replyPreview: preview }).replyPreview).toEqual(preview);
+  expect(
+    ReplyPreviewSchema.safeParse({ ...preview, attachment: { ...image, contentBase64: "bytes" } })
+      .success,
+  ).toBe(false);
+});
+
+it("localizes legacy image-only quotes while retaining real selected caption text", () => {
+  const labels = { photo: "Foto", attachment: "Anhang" };
+  expect(replyLabel("[image: ]", "", image, labels)).toBe("Foto");
+  expect(replyLabel("photo.png", "", { ...image, name: "photo.png" }, labels)).toBe("Foto");
+  expect(
+    replyLabel("photo.png", "Caption photo.png", { ...image, name: "photo.png" }, labels),
+  ).toBe("photo.png");
 });
