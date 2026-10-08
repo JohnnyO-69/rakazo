@@ -10,6 +10,7 @@ import { NativeActionButton as IosButton } from "../components/native-action-but
 const platform = vi.hoisted(() => ({ OS: "ios", Version: 26 }));
 const swiftButton = vi.hoisted(() => vi.fn());
 const swiftLabel = vi.hoisted(() => vi.fn());
+const appearance = vi.hoisted(() => ({ value: "light" as "light" | "dark" }));
 const swiftHost = vi.hoisted(() => vi.fn());
 
 vi.mock("react-native", () => ({
@@ -42,8 +43,8 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("../components/native-symbol", () => ({ NativeSymbol: () => <i /> }));
 vi.mock("./native", () => ({
-  useMobileTokens: () => tokensForAppearance("light"),
-  useResolvedAppearance: () => "light",
+  useMobileTokens: () => tokensForAppearance(appearance.value),
+  useResolvedAppearance: () => appearance.value,
   native: { label: tokensForAppearance("light").foreground },
 }));
 vi.mock("@expo/ui/swift-ui", () => ({
@@ -83,6 +84,7 @@ vi.mock("@expo/ui/swift-ui/modifiers", () => {
 });
 
 beforeEach(() => {
+  appearance.value = "light";
   swiftButton.mockClear();
   swiftLabel.mockClear();
   swiftHost.mockClear();
@@ -179,7 +181,10 @@ describe("compact native actions", () => {
     expect(swiftLabel.mock.lastCall?.[0]).toMatchObject({
       title: "Keyboard",
       systemImage: "keyboard",
-      modifiers: [{ name: "frame", value: { maxWidth: Infinity } }],
+      modifiers: [
+        { name: "frame", value: { maxWidth: Infinity, minHeight: 16 } },
+        { name: "foregroundStyle", value: tokensForAppearance("light").primaryForeground },
+      ],
     });
     expect(swiftHost.mock.lastCall?.[0].style[0].minHeight).toBeUndefined();
     renderToStaticMarkup(
@@ -205,6 +210,36 @@ describe("compact native actions", () => {
       ]),
     );
   });
+  it.each(["light", "dark"] as const)(
+    "uses the filled foreground for enabled selected icons in %s mode",
+    (scheme) => {
+      appearance.value = scheme;
+      for (const disabled of [false, true]) {
+        renderToStaticMarkup(
+          <IosButton
+            accessibilityLabel="Keyboard"
+            icon={{ ios: "keyboard", android: "keypad-outline" }}
+            size="compact"
+            prominence="secondary"
+            fill
+            selected
+            disabled={disabled}
+            onPress={() => {}}
+          />,
+        );
+        const { modifiers } = swiftLabel.mock.lastCall![0];
+        expect(
+          modifiers.some((modifier: { name: string }) => modifier.name === "foregroundStyle"),
+        ).toBe(!disabled);
+        if (!disabled) {
+          expect(modifiers).toContainEqual({
+            name: "foregroundStyle",
+            value: tokensForAppearance(scheme).primaryForeground,
+          });
+        }
+      }
+    },
+  );
   it("shows a selected fallback without a minimum height", () => {
     const host = document.createElement("div");
     host.innerHTML = renderToStaticMarkup(

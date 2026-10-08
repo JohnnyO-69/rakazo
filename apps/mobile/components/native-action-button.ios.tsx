@@ -96,12 +96,17 @@ export function NativeActionButton({
           <Label
             title={label ?? accessibilityLabel}
             systemImage={icon.ios as never}
-            modifiers={[frame({ maxWidth: Infinity })]}
+            modifiers={[
+              frame({ maxWidth: Infinity, ...(small ? { minHeight: 16 } : {}) }),
+              ...(!inactive && effectiveProminence === "primary"
+                ? [foregroundStyle(tokens.primaryForeground)]
+                : []),
+            ]}
           />
         ) : stretches ? (
           <Text
             modifiers={[
-              frame({ maxWidth: Infinity }),
+              frame({ maxWidth: Infinity, ...(small ? { minHeight: 16 } : {}) }),
               ...(!inactive && effectiveProminence === "primary"
                 ? [foregroundStyle(tokens.primaryForeground)]
                 : []),
