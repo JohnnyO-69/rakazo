@@ -139,16 +139,20 @@ describe("integration disk cache", () => {
     expect((await integrationsCacheScope()).userId).toBe("user-b");
     expect(state.rpc).toHaveBeenCalledTimes(2);
   });
-  it("rejects identity that returns after sign-out or space switch", async () => {
-    let resolve!: (value: unknown) => void;
-    state.rpc.mockReturnValue(
-      new Promise((done) => {
-        resolve = done;
-      }),
-    );
-    const pending = integrationsCacheScope();
-    state.generation += 1;
-    resolve({ userId: "user-a", spaceId: "space-a" });
-    await expect(pending).rejects.toThrow("scope changed");
-  });
+  it.each(["session", "space"])(
+    "rejects identity that returns after a %s change",
+    async (change) => {
+      let resolve!: (value: unknown) => void;
+      state.rpc.mockReturnValue(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      const pending = integrationsCacheScope();
+      if (change === "session") state.generation += 1;
+      else state.space = "space-b";
+      resolve({ userId: "user-a", spaceId: "space-a" });
+      await expect(pending).rejects.toThrow("Could not load integrations");
+    },
+  );
 });

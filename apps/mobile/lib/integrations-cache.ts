@@ -2,6 +2,7 @@ import type { Connection, ConnectionCatalogItem, Me } from "@rakazo/contracts";
 import { ConnectionCatalogItemSchema, ConnectionSchema } from "@rakazo/contracts";
 import { Directory, File, Paths } from "expo-file-system";
 import { currentApiBase, rpc, selectedSpaceId } from "./api";
+import { t } from "./i18n";
 import { currentSessionGeneration } from "./session";
 
 export type IntegrationsSnapshot = {
@@ -39,8 +40,8 @@ export async function integrationsCacheScope(): Promise<IntegrationsCacheScope> 
     generation !== currentSessionGeneration() ||
     spaceId !== selectedSpaceId()
   )
-    throw new Error("Integration scope changed");
-  if (!me.userId || !(spaceId || me.spaceId)) throw new Error("Missing integration scope");
+    throw new Error(t("Could not load integrations"));
+  if (!me.userId || !(spaceId || me.spaceId)) throw new Error(t("Could not load integrations"));
   return {
     apiBase,
     userId: me.userId,
