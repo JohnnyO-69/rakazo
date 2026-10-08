@@ -187,10 +187,10 @@ describe("computer keyboard edits", () => {
     expect(bridge.isReady()).toBe(true);
     expect(bridge.push(text)).toEqual([text]);
     expect(bridge.ready()).toEqual([]);
-    bridge.reset();
-    expect(bridge.isReady()).toBe(false);
-    expect(bridge.push(enter)).toEqual([]);
-    expect(bridge.ready()).toEqual([enter]);
+    const nextBridge = createComputerKeyboardBridge();
+    expect(nextBridge.isReady()).toBe(false);
+    expect(nextBridge.push(enter)).toEqual([]);
+    expect(nextBridge.ready()).toEqual([enter]);
   });
 
   it("asks the screen page to report when the keyboard bridge exists", () => {

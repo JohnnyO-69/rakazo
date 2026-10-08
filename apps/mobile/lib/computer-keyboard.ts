@@ -177,7 +177,6 @@ export function createComputerKeyboardBridge(): {
   push(command: ComputerKeyboardCommand): ComputerKeyboardCommand[];
   ready(): ComputerKeyboardCommand[];
   isReady(): boolean;
-  reset(): void;
 } {
   let accepting = false;
   const pending: ComputerKeyboardCommand[] = [];
@@ -198,10 +197,6 @@ export function createComputerKeyboardBridge(): {
     },
     isReady() {
       return accepting;
-    },
-    reset() {
-      accepting = false;
-      pending.length = 0;
     },
   };
 }

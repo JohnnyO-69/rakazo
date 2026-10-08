@@ -44,16 +44,6 @@ export function ComputerKeyboardBar({
   const [open, setOpen] = useState(false);
   const [control, setControl] = useState(false);
 
-  function send(command: ComputerKeyboardCommand) {
-    onCommand(command);
-  }
-
-  function emitReturn(latched: boolean) {
-    send(
-      latched ? { type: "key", name: "Return", control: true } : { type: "key", name: "Return" },
-    );
-  }
-
   function placeCaretAtEnd() {
     const end = draft.length;
     inputRef.current?.setNativeProps({ selection: { start: end, end } });
@@ -71,7 +61,7 @@ export function ComputerKeyboardBar({
     if (commands.some((command) => command.type === "key" && command.name === "Return")) {
       returnAt.current = Date.now();
     }
-    for (const command of commands) send(command);
+    for (const command of commands) onCommand(command);
     if (latched && commands.length > 0) setControl(false);
     setDraft(edit.draft);
     if (next.length < 1) inputRef.current?.focus();
@@ -81,13 +71,15 @@ export function ComputerKeyboardBar({
     const now = Date.now();
     if (now - returnAt.current < 30) return;
     returnAt.current = now;
-    emitReturn(control);
+    onCommand(
+      control ? { type: "key", name: "Return", control: true } : { type: "key", name: "Return" },
+    );
     if (control) setControl(false);
     setDraft((current) => nextComputerKeyboardDraft(`${current}\n`));
   }
 
   function press(name: ComputerKeyName) {
-    send(control ? { type: "key", name, control: true } : { type: "key", name });
+    onCommand(control ? { type: "key", name, control: true } : { type: "key", name });
     if (control) setControl(false);
   }
 
