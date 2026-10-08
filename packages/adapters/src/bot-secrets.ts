@@ -162,7 +162,7 @@ export async function shellCommandEnvironment(input: {
   scope: BotSecretScope;
   spaceEnvironment: Record<string, string>;
   registerRedactions: (values: string[]) => void;
-}): Promise<Record<string, string>> {
+}): Promise<{ env: Record<string, string>; unsetEnv: string[] }> {
   const unsetVariables = new Set<string>();
   const botEnvironment = await loadBotCommandEnvironment(
     input.prisma,
@@ -176,7 +176,7 @@ export async function shellCommandEnvironment(input: {
   const environment = { ...input.spaceEnvironment, ...botEnvironment };
   // A failed bot credential still shadows the space credential with the same name.
   for (const variable of unsetVariables) delete environment[variable];
-  return environment;
+  return { env: environment, unsetEnv: [...unsetVariables] };
 }
 
 /** Another command credential of this bot that is exported as the same variable. */

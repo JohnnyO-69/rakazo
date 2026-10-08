@@ -4949,7 +4949,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ],
                     cwd,
                     env:
-                      Object.keys(commandEnvironment).length > 0 ? commandEnvironment : undefined,
+                      Object.keys(commandEnvironment.env).length > 0
+                        ? commandEnvironment.env
+                        : undefined,
+                    unsetEnv: commandEnvironment.unsetEnv,
                     timeoutMs: sandboxCommandTimeoutMs(),
                   },
                   context,

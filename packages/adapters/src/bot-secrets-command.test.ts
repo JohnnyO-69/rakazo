@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { BotSecretDestination } from "@rakazo/contracts";
 import { redactSecrets } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
@@ -13,6 +16,7 @@ import {
   shellCommandEnvironment,
   storeBotSecret,
 } from "./bot-secrets.js";
+import { DesktopSandboxProvider } from "./desktop-sandbox.js";
 import { EncryptedSecretStore } from "./secrets.js";
 
 // No database is available offline, so these run against an in-memory stand-in for the
@@ -278,7 +282,7 @@ describe("shell command environment", () => {
       runSecrets.push(...values.filter((value) => !runSecrets.includes(value)));
     };
     return async (runScope = scope) => {
-      const env = await shellCommandEnvironment({
+      const { env, unsetEnv } = await shellCommandEnvironment({
         prisma: db.prisma,
         secretStore,
         scope: runScope,
@@ -291,6 +295,7 @@ describe("shell command environment", () => {
         .join("\n");
       return {
         env,
+        unsetEnv,
         output: redactAgentCommandResult({ stdout: printed, stderr: printed, code: 0 }, runSecrets),
       };
     };
@@ -334,7 +339,7 @@ describe("shell command environment", () => {
       },
     };
     const redactions: string[] = [];
-    const env = await shellCommandEnvironment({
+    const { env } = await shellCommandEnvironment({
       prisma: db.prisma,
       secretStore: store,
       scope,
@@ -358,7 +363,7 @@ describe("shell command environment", () => {
     await save(db, "good-token", "fake-good-token");
     const spaceEnvironment = { CLI_TOKEN: "fake-space-token", SPACE_ONLY: "fake-space-only" };
     const registerRedactions = vi.fn();
-    const env = await shellCommandEnvironment({
+    const { env, unsetEnv } = await shellCommandEnvironment({
       prisma: db.prisma,
       secretStore: {
         async load(ciphertext, recordId) {
@@ -373,11 +378,60 @@ describe("shell command environment", () => {
       registerRedactions,
     });
     expect(env).toEqual({ SPACE_ONLY: "fake-space-only", GOOD_TOKEN: "fake-good-token" });
+    expect(unsetEnv).toEqual(["CLI_TOKEN"]);
     expect(Object.hasOwn(env, "CLI_TOKEN")).toBe(false);
     expect(spaceEnvironment.CLI_TOKEN).toBe("fake-space-token");
     expect(registerRedactions).toHaveBeenCalledExactlyOnceWith(
       commandCredentialRedactions({ GOOD_TOKEN: "fake-good-token" }),
     );
+  });
+
+  it("removes a failed bot credential from the desktop host environment", async () => {
+    const db = fakeDatabase();
+    await save(db, "cli-token", "fake-bot-token");
+    const requestEnvironment = await shellCommandEnvironment({
+      prisma: db.prisma,
+      secretStore: {
+        async load() {
+          throw new Error("unreadable");
+        },
+      },
+      scope,
+      spaceEnvironment: { CLI_TOKEN: "fake-space-token" },
+      registerRedactions: vi.fn(),
+    });
+    const root = mkdtempSync(path.join(tmpdir(), "rakazo-command-env-"));
+    const desktop = new DesktopSandboxProvider({ root });
+    const context = {
+      operationId: "test",
+      traceId: "test",
+      spaceId: "test",
+      userId: "test",
+      signal: new AbortController().signal,
+    };
+    vi.stubEnv("CLI_TOKEN", "fake-host-token");
+    try {
+      const computer = await desktop.provision({ botId: "test", homePath: "/unused" }, context);
+      const events = [];
+      for await (const event of desktop.execute(
+        computer,
+        {
+          argv: [
+            process.execPath,
+            "-e",
+            "process.exit(Object.hasOwn(process.env, 'CLI_TOKEN') ? 1 : 0)",
+          ],
+          ...requestEnvironment,
+        },
+        context,
+      ))
+        events.push(event);
+      expect(events).toEqual([{ type: "exit", code: 0 }]);
+      await desktop.destroy(computer, context);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("redacts encoded command credentials before any shell command registers them", async () => {
