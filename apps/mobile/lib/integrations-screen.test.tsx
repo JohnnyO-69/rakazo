@@ -426,3 +426,105 @@ it("refreshes a different space on focus return and rejects the blurred refresh"
   expect(container.textContent).toContain("New space appAdd");
   expect(state.scope).toHaveBeenCalledTimes(2);
 });
+
+it.each(["rename", "revoke", "uninstall", "connect"])(
+  "rejects a late %s result after an in-place space recovery",
+  async (action) => {
+    state.read.mockReturnValue({ catalog: [item], connections: [account] });
+    await render();
+    await act(async () =>
+      [...container.querySelectorAll("button")].find((b) => b.textContent === "Added")?.click(),
+    );
+    let finish!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const original = state.rpc.getMockImplementation()!;
+    state.rpc.mockImplementation((proc: string) => {
+      if (
+        proc === "connections/rename" ||
+        proc === "connections/revoke" ||
+        proc === "connections/complete"
+      )
+        return pending;
+      if (proc === "connections/begin")
+        return Promise.resolve({ connectionId: account.id, authorizationUrl: null });
+      return original(proc);
+    });
+    if (action === "rename") {
+      const input = container.querySelector("input")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+          input,
+          "Old space rename",
+        );
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    } else {
+      const label =
+        action === "revoke" ? "Remove" : action === "uninstall" ? "Uninstall" : "Add another";
+      await act(async () =>
+        [...container.querySelectorAll("button")].find((b) => b.textContent === label)?.click(),
+      );
+    }
+    expect(state.rpc).toHaveBeenCalledWith(
+      action === "rename"
+        ? "connections/rename"
+        : action === "connect"
+          ? "connections/complete"
+          : "connections/revoke",
+      expect.anything(),
+    );
+    state.current = false;
+    state.scope.mockImplementation(async () => {
+      state.current = true;
+      return { userId: "user-a", spaceId: "space-b" };
+    });
+    state.read.mockReturnValue(null);
+    state.rpc.mockImplementation((proc: string) =>
+      Promise.resolve(
+        proc === "connections/catalog"
+          ? [{ ...item, name: "New space app", connected: false }]
+          : [],
+      ),
+    );
+    await act(async () => resolveCatalog([item]));
+    expect(container.textContent).toContain("New space appAdd");
+    const writes = state.write.mock.calls.length;
+    await act(async () => finish({ ...account, displayName: "Old space rename" }));
+    expect(state.write).toHaveBeenCalledTimes(writes);
+    expect(state.write).toHaveBeenLastCalledWith(
+      { userId: "user-a", spaceId: "space-b" },
+      {
+        catalog: [{ ...item, name: "New space app", connected: false }],
+        connections: [],
+      },
+    );
+    expect(container.textContent).not.toContain("Old space rename");
+  },
+);
+
+it("ignores an old focus identity error after the new focus succeeds", async () => {
+  let failIdentity!: (reason: Error) => void;
+  const pending = new Promise((_, reject) => {
+    failIdentity = reject;
+  });
+  state.scope.mockReturnValueOnce(pending);
+  await render();
+  state.focused = false;
+  await render();
+  state.scope.mockResolvedValue({ userId: "user-a", spaceId: "space-b" });
+  state.rpc.mockImplementation((proc: string) =>
+    Promise.resolve(
+      proc === "connections/catalog" ? [{ ...item, name: "New space app", connected: false }] : [],
+    ),
+  );
+  state.focused = true;
+  await render();
+  expect(container.textContent).toContain("New space appAdd");
+  await act(async () => failIdentity(new Error("Old focus failed")));
+  expect(container.textContent).not.toContain("Old focus failed");
+  expect(container.textContent).not.toContain("Retry");
+  expect(container.textContent).toContain("New space appAdd");
+});

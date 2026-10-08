@@ -107,6 +107,23 @@ export default function Integrations() {
     writeIntegrationsCache(scope, next);
   }
 
+  function captureConnectionScope() {
+    const scope = cacheScope.current;
+    const focus = focusGeneration.current;
+    return () => {
+      const current = cacheScope.current;
+      return (
+        !!scope &&
+        !!current &&
+        mounted.current &&
+        focus === focusGeneration.current &&
+        isIntegrationsScopeCurrent(scope) &&
+        scope.userId === current.userId &&
+        scope.spaceId === current.spaceId
+      );
+    };
+  }
+
   function updateAccount(row: Connection) {
     const connections = [
       ...snapshot.current.connections.filter((entry) => entry.id !== row.id),
@@ -154,6 +171,8 @@ export default function Integrations() {
     setSources([]);
     setDetailKey(null);
     setLabelDrafts({});
+    setPending(null);
+    connectionAttempt.current?.abort();
   }
 
   async function refresh() {
@@ -163,12 +182,8 @@ export default function Integrations() {
     try {
       scope = await integrationsCacheScope();
     } catch (reason) {
-      if (
-        mounted.current &&
-        focus === focusGeneration.current &&
-        cacheScope.current &&
-        !isIntegrationsScopeCurrent(cacheScope.current)
-      ) {
+      if (!mounted.current || focus !== focusGeneration.current) return;
+      if (cacheScope.current && !isIntegrationsScopeCurrent(cacheScope.current)) {
         clearStaleScope();
         return refresh();
       }
@@ -218,32 +233,26 @@ export default function Integrations() {
       ]);
       next = { catalog, connections };
     } catch (reason) {
-      if (
-        mounted.current &&
-        isIntegrationsScopeCurrent(scope) &&
-        generation === refreshGeneration.current
-      )
-        throw reason;
-      if (mounted.current && !isIntegrationsScopeCurrent(scope)) return refresh();
+      if (!mounted.current || focus !== focusGeneration.current) return;
+      if (!isIntegrationsScopeCurrent(scope)) return refresh();
+      if (generation === refreshGeneration.current) throw reason;
       return;
     }
-    if (mounted.current && !isIntegrationsScopeCurrent(scope)) return refresh();
-    if (
-      !mounted.current ||
-      !isIntegrationsScopeCurrent(scope) ||
-      generation !== refreshGeneration.current
-    )
-      return;
+    if (!mounted.current || focus !== focusGeneration.current) return;
+    if (!isIntegrationsScopeCurrent(scope)) return refresh();
+    if (generation !== refreshGeneration.current) return;
     applySnapshot(next);
     writeIntegrationsCache(scope, next);
   }
 
   async function retryRefresh() {
+    const focus = focusGeneration.current;
     try {
       await refresh();
     } catch (reason) {
       if (
         mounted.current &&
+        focus === focusGeneration.current &&
         (!cacheScope.current || isIntegrationsScopeCurrent(cacheScope.current))
       ) {
         setCatalogError(errorText(reason, t("Could not load integrations")));
@@ -277,6 +286,7 @@ export default function Integrations() {
         refreshGeneration.current += 1;
         sourcesGeneration.current += 1;
         connectionAttempt.current?.abort();
+        setPending(null);
       };
     }, []),
   );
@@ -341,9 +351,9 @@ export default function Integrations() {
     return item.connected || accountsFor(item).some((row) => row.status === "connected");
   }
 
-  async function notifyAppConnected(item: ConnectionCatalogItem) {
+  async function notifyAppConnected(item: ConnectionCatalogItem, isCurrent: () => boolean) {
     const botId = lastBotId || (await loadLastBotId());
-    if (!botId) return;
+    if (!botId || !isCurrent()) return;
     if (botId !== lastBotId) setLastBotId(botId);
     void rpc("onboarding/appConnected", {
       botId,
@@ -353,6 +363,8 @@ export default function Integrations() {
   }
 
   async function connect(item: ConnectionCatalogItem) {
+    const isCurrent = captureConnectionScope();
+    if (!isCurrent()) return;
     connectionAttempt.current?.abort();
     const controller = new AbortController();
     connectionAttempt.current = controller;
@@ -371,56 +383,63 @@ export default function Integrations() {
           })(),
         },
       );
+      if (!isCurrent() || controller.signal.aborted) return;
       if (started.authorizationUrl) await Linking.openURL(started.authorizationUrl);
       for (let attempt = 0; attempt < 45; attempt += 1) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !isCurrent()) return;
         const row = await rpc<Connection>("connections/complete", {
           connectionId: started.connectionId,
         }).catch(() => undefined);
         if (row?.status === "connected") {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || !isCurrent()) return;
           updateAccount(row);
-          void notifyAppConnected(item);
+          void notifyAppConnected(item, isCurrent);
           await refresh();
-          setToolsTick((tick) => tick + 1);
+          if (isCurrent()) setToolsTick((tick) => tick + 1);
           return;
         }
         await abortableDelay(2_000, controller.signal);
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       Alert.alert(
         t("Connection pending"),
         t("Finish connecting in the browser, then refresh this page."),
       );
     } catch (reason) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       setCatalogError(errorText(reason, t("Could not connect")));
     } finally {
       if (connectionAttempt.current === controller) {
         connectionAttempt.current = null;
-        setPending(null);
+        if (isCurrent()) setPending(null);
       }
     }
   }
 
   async function revokeAccount(row: Connection) {
+    const isCurrent = captureConnectionScope();
+    if (!isCurrent()) return;
     setPending(row.id);
     setCatalogError(null);
     try {
       await rpc("connections/revoke", { connectionId: row.id });
+      if (!isCurrent()) return;
       updateAccount({ ...row, status: "revoked" });
       await refresh();
-      setToolsTick((tick) => tick + 1);
+      if (isCurrent()) setToolsTick((tick) => tick + 1);
     } catch (reason) {
+      if (!isCurrent()) return;
       setCatalogError(errorText(reason, t("Could not revoke connection")));
     } finally {
-      setPending(null);
+      if (isCurrent()) setPending(null);
     }
   }
 
   async function renameAccount(row: Connection) {
     const displayName = (labelDrafts[row.id] ?? row.displayName).trim();
     if (!displayName || displayName === row.displayName) return;
+    const isCurrent = captureConnectionScope();
+    if (!isCurrent()) return;
     setPending(`rename:${row.id}`);
     setCatalogError(null);
     try {
@@ -428,16 +447,20 @@ export default function Integrations() {
         connectionId: row.id,
         displayName,
       });
+      if (!isCurrent()) return;
       updateAccount(updated);
       setLabelDrafts((current) => ({ ...current, [row.id]: updated.displayName }));
     } catch (reason) {
+      if (!isCurrent()) return;
       setCatalogError(errorText(reason, t("Could not rename connection")));
     } finally {
-      setPending(null);
+      if (isCurrent()) setPending(null);
     }
   }
 
   async function uninstall(item: ConnectionCatalogItem) {
+    const isCurrent = captureConnectionScope();
+    if (!isCurrent()) return;
     const matches = accountsFor(item);
     const key = itemKey(item);
     if (matches.length === 0) {
@@ -449,15 +472,17 @@ export default function Integrations() {
     try {
       for (const row of matches) {
         await rpc("connections/revoke", { connectionId: row.id });
+        if (!isCurrent()) return;
         updateAccount({ ...row, status: "revoked" });
       }
       await refresh();
-      closeDetail();
+      if (isCurrent()) closeDetail();
     } catch (reason) {
+      if (!isCurrent()) return;
       setCatalogError(errorText(reason, t("Could not revoke connection")));
       await refresh().catch(() => undefined);
     } finally {
-      setPending(null);
+      if (isCurrent()) setPending(null);
     }
   }
 
