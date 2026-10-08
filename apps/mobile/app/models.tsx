@@ -99,7 +99,7 @@ export default function Models() {
   const [credentials, setCredentials] = useState<MobileModelCredential[]>([]);
   const [me, setMe] = useState<MobileMe | null>(null);
   const [provider, setProvider] = useState("");
-  // The provider whose own-key form is open instead of its server credentials.
+  // The provider whose optional personal-key form is open.
   const [ownKeyProvider, setOwnKeyProvider] = useState<string | null>(null);
   const [showAllProviders, setShowAllProviders] = useState(false);
   const [modelId, setModelId] = useState("");
@@ -930,17 +930,6 @@ export default function Models() {
     </>
   ) : null;
 
-  const ownKeySwitch = (
-    <View style={styles.switchRow}>
-      <Text style={styles.switchLabel}>{t("Use server credentials")}</Text>
-      <Switch
-        accessibilityLabel={t("Use server credentials")}
-        value={ownKeyProvider !== provider}
-        onValueChange={(on) => setOwnKeyProvider(on ? null : provider)}
-      />
-    </View>
-  );
-
   const serverCredentialsNote = (
     <Text style={styles.secondary}>
       {t("Uses this server's own {source} credentials to access {provider}.", {
@@ -1260,7 +1249,13 @@ export default function Models() {
     credential && (!isActive || thinkingDirty || usingServerCredentials) ? (
       <NativeActionButton
         disabled={busy || (isOpenAiCompatible && !modelId.trim())}
-        label={pending === "default" ? t("Switching…") : isActive && !usingServerCredentials ? t("Save") : t("Use this model")}
+        label={
+          pending === "default"
+            ? t("Switching…")
+            : isActive && !usingServerCredentials
+              ? t("Save")
+              : t("Use this model")
+        }
         onPress={() => void setModelDefault()}
         style={{ marginTop: 12 }}
       />
@@ -1414,10 +1409,20 @@ export default function Models() {
               <View style={styles.maintenanceSection}>{catalogConnectionControls}</View>
               {feedbackAnchor === "model" ? null : feedback}
             </>
-          ) : provider === me?.hostCredentialProvider && ownKeyProvider !== provider ? (
+          ) : provider === me?.hostCredentialProvider ? (
             <>
-              {ownKeySwitch}
               {serverCredentialsNote}
+              {disclosureRow(t("Use your own key"), ownKeyProvider === provider, () =>
+                setOwnKeyProvider((current) => (current === provider ? null : provider)),
+              )}
+              {ownKeyProvider === provider ? (
+                <>
+                  {catalogConnectionControls}
+                  {feedback}
+                  <Text style={styles.sectionTitle}>{t("Model")}</Text>
+                  {catalogModelCard}
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -1475,18 +1480,6 @@ function createModelsStyles() {
       fontSize: 14,
       lineHeight: 20,
       marginTop: 4,
-    },
-    switchRow: {
-      alignItems: "center",
-      flexDirection: "row",
-      gap: 12,
-      justifyContent: "space-between",
-      marginBottom: 8,
-    },
-    switchLabel: {
-      color: native.label,
-      flex: 1,
-      fontSize: 15,
     },
     sectionTitle: {
       color: native.secondaryLabel,

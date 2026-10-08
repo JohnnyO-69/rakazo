@@ -40,22 +40,13 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  Label,
   ModelThinkingOptions,
   NativeSelect,
   NativeSelectOption,
-  Switch,
 } from "@rakazo/ui-web";
 import { Check, ChevronDown, Copy, X } from "lucide-react";
-import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type RefObject,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useCopyText } from "../lib/copy-text";
 import { localizedProviderHint } from "../lib/localized-provider-hint";
 import type { ModelCatalogEntry, ModelCredential } from "../lib/model-auth";
@@ -86,9 +77,8 @@ export function ModelSettingsOverlay({
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [me, setMe] = useState<Me | null>(null);
   const [provider, setProvider] = useState("");
-  // The provider whose own-key form is open instead of its server credentials.
+  // The provider whose optional personal-key form is open.
   const [ownKeyProvider, setOwnKeyProvider] = useState<string | null>(null);
-  const ownKeyId = useId();
   const [providerQuery, setProviderQuery] = useState("");
   const [modelId, setModelId] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -688,7 +678,7 @@ export function ModelSettingsOverlay({
             </NativeSelect>
           </label>
         ) : null}
-        {selected.billing ? (
+        {selected.billing && !usingServerCredentials ? (
           <p className="mt-2 text-[13px] leading-[1.5] text-muted-foreground">{selected.billing}</p>
         ) : null}
       </>
@@ -1282,31 +1272,20 @@ export function ModelSettingsOverlay({
                 </>
               ) : provider === me?.hostCredentialProvider ? (
                 <>
-                  <div className="flex items-start gap-3">
-                    <Switch
-                      id={ownKeyId}
-                      className="mt-0.5"
-                      checked={ownKeyProvider !== provider}
-                      onCheckedChange={(checked) => setOwnKeyProvider(checked ? null : provider)}
-                    />
-                    <Label
-                      htmlFor={ownKeyId}
-                      className="text-[14px] font-normal text-foreground/75"
-                    >
-                      <Trans>Use server credentials</Trans>
-                    </Label>
-                  </div>
-                  {ownKeyProvider === provider ? (
-                    <>
-                      <p className="mt-5 text-sm leading-[1.5] text-muted-foreground">
-                        <Trans>Server credentials stay in use until you connect a key.</Trans>
-                      </p>
-                      <div className="mt-5">{connectionControls}</div>
-                      <div className="mt-6">{catalogModelConfig}</div>
-                    </>
-                  ) : (
-                    <div className="mt-5">{serverCredentialsNote}</div>
-                  )}
+                  {serverCredentialsNote}
+                  <details
+                    className="mt-5 text-sm text-muted-foreground"
+                    open={ownKeyProvider === provider}
+                    onToggle={(event) =>
+                      setOwnKeyProvider(event.currentTarget.open ? provider : null)
+                    }
+                  >
+                    <summary className="w-fit cursor-pointer select-none">
+                      <Trans>Use your own key</Trans>
+                    </summary>
+                    <div className="mt-5">{connectionControls}</div>
+                    <div className="mt-6">{catalogModelConfig}</div>
+                  </details>
                 </>
               ) : (
                 <>

@@ -303,11 +303,9 @@ export const DE_MESSAGES: Record<string, string> = {
   "Active model": "Aktives Modell",
   "Authorization code": "Autorisierungscode",
   "Configured by deployment": "Durch die Bereitstellung konfiguriert",
-  "Use server credentials": "Server-Zugangsdaten verwenden",
+  "Use your own key": "Eigenen Schlüssel verwenden",
   "Uses this server's own {source} credentials to access {provider}.":
     "Verwendet die eigenen {source}-Zugangsdaten dieses Servers für den Zugriff auf {provider}.",
-  "Server credentials stay in use until you connect a key.":
-    "Die Server-Zugangsdaten bleiben in Gebrauch, bis ein Schlüssel verbunden ist.",
   "Connect API key": "API-Schlüssel verbinden",
   "Connect MCP server {name}": "MCP-Server „{name}“ verbinden",
   "Connected and using {label}.": "Verbunden, {label} ist aktiv.",
