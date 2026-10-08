@@ -1,7 +1,17 @@
 import { useLingui } from "@lingui/react/macro";
 import type { AvatarStyle, SpaceMemoryConfig } from "@rakazo/contracts";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
-import { Brain, CloudDownload, Cpu, Gauge, Monitor, Settings, Volume2, XIcon } from "lucide-react";
+import {
+  Brain,
+  CloudDownload,
+  Cpu,
+  CreditCard,
+  Gauge,
+  Monitor,
+  Settings,
+  Volume2,
+  XIcon,
+} from "lucide-react";
 import type { ComponentType } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { computersAreUnavailable } from "../components/ComputersUnavailableHint";
@@ -11,6 +21,7 @@ import {
   UpdatesSettingsPanel,
   UsageSettingsPanel,
 } from "./AccountSettingsOverlay";
+import { BillingSettingsPanel } from "./BillingSettingsPanel";
 import { MemorySettingsOverlay } from "./MemorySettingsOverlay";
 import { ModelSettingsOverlay } from "./ModelSettingsOverlay";
 import { VoiceSettingsOverlay } from "./VoiceSettingsOverlay";
@@ -22,6 +33,7 @@ export type SettingsSection =
   | "voice"
   | "usage"
   | "computer"
+  | "billing"
   | "updates";
 
 type NavItem = {
@@ -34,10 +46,12 @@ export function SettingsOverlay({
   email,
   name,
   usage,
+  onUsageOpen,
   initialSection = "general",
   avatarStyle,
   onAvatarStyleChange,
   isDeploymentOwner = false,
+  billingEnabled = false,
   sandboxProvider,
   onSandboxProviderChange,
   messagingEnabled = false,
@@ -49,11 +63,18 @@ export function SettingsOverlay({
 }: {
   email?: string | null;
   name: string;
-  usage?: { runs: number; inputTokens: number; outputTokens: number } | null;
+  usage?: {
+    runs: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens?: number | null;
+  } | null;
+  onUsageOpen: () => void;
   initialSection?: SettingsSection;
   avatarStyle: AvatarStyle;
   onAvatarStyleChange: (style: AvatarStyle) => Promise<void>;
   isDeploymentOwner?: boolean;
+  billingEnabled?: boolean;
   sandboxProvider?: string | null;
   onSandboxProviderChange?: (sandboxProvider: string) => void;
   messagingEnabled?: boolean;
@@ -97,15 +118,20 @@ export function SettingsOverlay({
   }, [showComputer, section]);
 
   useEffect(() => {
+    if (!billingEnabled && section === "billing") setSection("general");
+  }, [billingEnabled, section]);
+
+  useEffect(() => {
     if (section !== "computer") releaseComputerRecovery();
   }, [section, releaseComputerRecovery]);
   useEffect(() => () => window.clearTimeout(recoveryHoldTimer.current), []);
 
   useEffect(() => {
     if (section === "usage") {
+      onUsageOpen();
       usageRef.current?.focus();
     }
-  }, [section]);
+  }, [section, onUsageOpen]);
 
   const navItems: NavItem[] = [
     { id: "general", label: t`General`, icon: Settings },
@@ -114,6 +140,7 @@ export function SettingsOverlay({
     { id: "voice", label: t`Voice`, icon: Volume2 },
     { id: "usage", label: t`Usage`, icon: Gauge },
     ...(showComputer ? [{ id: "computer" as const, label: t`Computer`, icon: Monitor }] : []),
+    ...(billingEnabled ? [{ id: "billing" as const, label: t`Billing`, icon: CreditCard }] : []),
     { id: "updates", label: t`Updates`, icon: CloudDownload },
   ];
 
@@ -248,6 +275,7 @@ export function SettingsOverlay({
                   onRecoveryDismissed={releaseComputerRecovery}
                 />
               ) : null}
+              {section === "billing" && billingEnabled ? <BillingSettingsPanel /> : null}
               {section === "updates" ? (
                 <UpdatesSettingsPanel isDeploymentOwner={isDeploymentOwner} />
               ) : null}

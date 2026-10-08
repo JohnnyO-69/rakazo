@@ -20,6 +20,7 @@ import {
   ArtifactVersionSchema,
   ArtifactWithContentSchema,
   AvatarStyleSchema,
+  BillingStatusSchema,
   BotMcpServerSchema,
   BotSchema,
   BotSectionSchema,
@@ -169,6 +170,11 @@ export const appContract = {
   },
   health: oc.output(z.object({ ok: z.literal(true), version: z.string() })),
   me: oc.output(MeSchema),
+  billing: {
+    status: oc.output(BillingStatusSchema),
+    checkout: oc.output(z.object({ url: z.string().url() })),
+    portal: oc.output(z.object({ url: z.string().url() })),
+  },
   preferences: {
     update: oc.input(z.object({ avatarStyle: AvatarStyleSchema })).output(MeSchema),
   },
@@ -813,8 +819,10 @@ export const appContract = {
     list: oc.output(z.array(UsageRecordSchema)),
     summary: oc.output(
       z.object({
-        inputTokens: z.number(),
-        outputTokens: z.number(),
+        inputTokens: z.number().nullable(),
+        outputTokens: z.number().nullable(),
+        totalTokens: z.number().nullable().optional(),
+        modelCalls: z.number().optional(),
         runs: z.number(),
       }),
     ),
@@ -824,7 +832,8 @@ export const appContract = {
   },
   notifications: {
     registerPush: oc
-      .input(z.object({ token: z.string().min(8).max(512) }))
+      // No whitespace: the token store keeps the registering session on the next line.
+      .input(z.object({ token: z.string().min(8).max(512).regex(/^\S+$/) }))
       .output(z.object({ ok: z.literal(true) })),
     unregisterPush: oc.output(z.object({ ok: z.literal(true) })),
   },

@@ -26,7 +26,7 @@ describe("Android mobile platform contract", () => {
     expect(thread).toContain("KeyboardAvoidingView");
     expect(thread).toContain('behavior="height"');
     expect(thread).toContain("useHeaderHeight");
-    expect(thread).toContain("keyboardVerticalOffset={headerHeight}");
+    expect(thread).toContain("keyboardVerticalOffset={0}");
     expect(thread).not.toContain("automaticOffset");
     expect(thread).not.toContain("KeyboardStickyView");
     expect(thread).toContain("useSafeAreaInsets");
@@ -264,7 +264,7 @@ describe("Android mobile platform contract", () => {
       "targetGroupId ? { groupId: targetGroupId } : { botId: targetBotId! },",
     );
     expect(stopSource).toMatch(
-      /if \(isCurrentTarget\(targetBotId, targetGroupId\)\) \{\s*setError\(err instanceof Error \? err\.message : t\("Failed to stop work"\)\);/,
+      /if \(isCurrentTarget\(targetBotId, targetGroupId\)\) \{\s*setError\(errorText\(err, t\("Failed to stop work"\)\)\);/,
     );
     expect(stopSource).toMatch(
       /if \(isCurrentTarget\(targetBotId, targetGroupId\)\) \{\s*(?:const detail = [^\n]+;\s*)?setError\(t\("Work stopped, but the thread could not refresh: \{detail\}", \{ detail \}\)\);/,

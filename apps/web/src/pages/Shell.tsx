@@ -118,7 +118,6 @@ import {
 import {
   type ClipboardEvent,
   type DragEvent,
-  lazy,
   type MutableRefObject,
   memo,
   type RefObject,
@@ -147,6 +146,7 @@ import { ComputerUpdateProgress } from "../components/ComputerUpdateProgress";
 import { CallCard } from "../components/call/CallCard";
 import { VoiceChatCard } from "../components/call/VoiceChatCard";
 import { ComputerWorkspace } from "../components/computer/ComputerWorkspace";
+import { lazyOverlay } from "../components/ErrorBoundary";
 import { MessageHoverMetadata } from "../components/MessageHoverMetadata";
 import {
   LIVE_TOOL_STEP_WINDOW,
@@ -236,6 +236,7 @@ import {
   transcriptMovedDown,
 } from "../lib/transcript-scroll";
 import { speaker } from "../lib/tts";
+import { errorText } from "../lib/user-error";
 import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
@@ -275,25 +276,23 @@ import {
 import { commitSpaceRename, sidebarGroupsForSpaces } from "./shell/space-sidebar";
 import { WindowChrome } from "./WindowChrome";
 
-const BotContextMenu = lazy(() =>
-  import("./BotContextMenu").then((module) => ({ default: module.BotContextMenu })),
+const BotContextMenu = lazyOverlay(() =>
+  import("./BotContextMenu").then((module) => module.BotContextMenu),
 );
-const MessagingSettingsOverlay = lazy(() =>
-  import("./MessagingSettingsOverlay").then((module) => ({
-    default: module.MessagingSettingsOverlay,
-  })),
+const MessagingSettingsOverlay = lazyOverlay(() =>
+  import("./MessagingSettingsOverlay").then((module) => module.MessagingSettingsOverlay),
 );
-const SettingsOverlay = lazy(() =>
-  import("./SettingsOverlay").then((module) => ({ default: module.SettingsOverlay })),
+const SettingsOverlay = lazyOverlay(() =>
+  import("./SettingsOverlay").then((module) => module.SettingsOverlay),
 );
-const PeerMessagesOverlay = lazy(() =>
-  import("./PeerMessagesOverlay").then((module) => ({ default: module.PeerMessagesOverlay })),
+const PeerMessagesOverlay = lazyOverlay(() =>
+  import("./PeerMessagesOverlay").then((module) => module.PeerMessagesOverlay),
 );
-const PluginsOverlay = lazy(() =>
-  import("./PluginsOverlay").then((module) => ({ default: module.PluginsOverlay })),
+const PluginsOverlay = lazyOverlay(() =>
+  import("./PluginsOverlay").then((module) => module.PluginsOverlay),
 );
-const McpServersOverlay = lazy(() =>
-  import("./McpServersOverlay").then((module) => ({ default: module.McpServersOverlay })),
+const McpServersOverlay = lazyOverlay(() =>
+  import("./McpServersOverlay").then((module) => module.McpServersOverlay),
 );
 
 type PendingAttachment = {
@@ -722,10 +721,17 @@ export function ShellPage() {
     };
   }, [session.data?.user]);
   const [usage, setUsage] = useState<{
-    inputTokens: number;
-    outputTokens: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens?: number | null;
     runs: number;
   } | null>(null);
+  const refreshUsage = useCallback(() => {
+    void rpc.usage
+      .summary()
+      .then(setUsage)
+      .catch(() => undefined);
+  }, []);
   const autoBooted = useRef<string | null>(null);
   const routineSavePending = useRef(false);
   const webhookSecretProvisionRef = useRef(new Map<string, Promise<string>>());
@@ -2012,7 +2018,7 @@ export function ShellPage() {
           ? activeGroupId.current === groupId
           : activeBotId.current === botId;
         if (!stillHere) return;
-        setSendError(error instanceof Error ? error.message : t`Could not update reaction`);
+        setSendError(errorText(error, t`Could not update reaction`));
       }
     },
     [t],
@@ -2188,11 +2194,11 @@ export function ShellPage() {
         else if (botTarget) void refreshThreadRef.current(botTarget).catch(() => undefined);
       } catch (error) {
         if (reroutedToGroup && groupTarget) {
-          setSendError(error instanceof Error ? error.message : t`Failed to send message`);
+          setSendError(errorText(error, t`Failed to send message`));
         } else if (groupTarget && activeGroupId.current === groupTarget) {
-          setSendError(error instanceof Error ? error.message : t`Failed to send message`);
+          setSendError(errorText(error, t`Failed to send message`));
         } else if (botTarget && activeBotId.current === botTarget) {
-          setSendError(error instanceof Error ? error.message : t`Failed to send message`);
+          setSendError(errorText(error, t`Failed to send message`));
         }
       } finally {
         sendingRef.current = false;
@@ -2223,7 +2229,7 @@ export function ShellPage() {
           await rpc.threads.stop({ groupId: groupTarget });
         } catch (error) {
           if (activeGroupId.current === groupTarget) {
-            setSendError(error instanceof Error ? error.message : t`Failed to stop`);
+            setSendError(errorText(error, t`Failed to stop`));
           }
           return;
         }
@@ -2242,7 +2248,7 @@ export function ShellPage() {
         await rpc.threads.stop({ botId: botTarget });
       } catch (error) {
         if (activeBotId.current === botTarget) {
-          setSendError(error instanceof Error ? error.message : t`Failed to stop`);
+          setSendError(errorText(error, t`Failed to stop`));
         }
         return;
       }
@@ -2436,7 +2442,7 @@ export function ShellPage() {
       await refreshComputerFor(targetBotId);
     } catch (error) {
       if (!stillThisBoot() || !stillThisBot()) return;
-      setComputerError(error instanceof Error ? error.message : t`Could not take control`);
+      setComputerError(errorText(error, t`Could not take control`));
       setComputerErrorFromScreen(false);
       throw error;
     } finally {
@@ -2789,13 +2795,6 @@ export function ShellPage() {
           aria-label={t`Close navigation`}
           onClick={() => setMobileSidebarOpen(false)}
           className="absolute inset-y-0 end-0 start-[min(calc(100%-48px),316px)] z-30 bg-overlay md:hidden"
-        />
-      ) : null}
-      {!mobileSidebarOpen ? (
-        <div
-          data-testid="mobile-sidebar-swipe-edge"
-          aria-hidden="true"
-          className="absolute bottom-20 start-0 top-16 z-20 w-8 touch-none md:hidden"
         />
       ) : null}
       <aside
@@ -3402,10 +3401,6 @@ export function ShellPage() {
                 aria-label={t`Usage`}
                 onClick={() => {
                   setMenuOpen(false);
-                  void rpc.usage
-                    .summary()
-                    .then(setUsage)
-                    .catch(() => undefined);
                   openSettings("usage");
                 }}
               >
@@ -3476,11 +3471,20 @@ export function ShellPage() {
         />
       )}
 
+      {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
       <main
         aria-hidden={mobileSidebarOpen || undefined}
         inert={mobileSidebarOpen}
-        className="flex min-w-0 flex-1 flex-col bg-background"
+        className="isolate flex min-w-0 flex-1 flex-col bg-background"
       >
+        {/* Inside main so the composer and its menus stay above it. */}
+        {!mobileSidebarOpen ? (
+          <div
+            data-testid="mobile-sidebar-swipe-edge"
+            aria-hidden="true"
+            className="absolute bottom-20 start-0 top-16 z-20 w-8 touch-none md:hidden"
+          />
+        ) : null}
         <div className="app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]">
           <div className="flex min-w-0 items-center gap-2">
             {/* Collapsed bots sidebar: this header is the leading edge for window chrome. */}
@@ -3659,10 +3663,6 @@ export function ShellPage() {
                 return;
               }
               if (action === "settings-usage") {
-                void rpc.usage
-                  .summary()
-                  .then(setUsage)
-                  .catch(() => undefined);
                 openSettings("usage");
               }
             }}
@@ -4006,9 +4006,7 @@ export function ShellPage() {
                     ) {
                       return;
                     }
-                    setRoutineError(
-                      error instanceof Error ? error.message : t`Could not save routine`,
-                    );
+                    setRoutineError(errorText(error, t`Could not save routine`));
                     return;
                   } finally {
                     routineSavePending.current = false;
@@ -4035,9 +4033,7 @@ export function ShellPage() {
                     await refreshThread(targetBotId);
                   } catch (error) {
                     if (activeBotId.current === targetBotId) {
-                      setRoutineError(
-                        error instanceof Error ? error.message : t`Could not run routine`,
-                      );
+                      setRoutineError(errorText(error, t`Could not run routine`));
                     }
                   } finally {
                     routineRunPending.current = false;
@@ -4464,9 +4460,11 @@ export function ShellPage() {
             name={userName}
             email={session.data?.user.email}
             usage={usage}
+            onUsageOpen={refreshUsage}
             initialSection={settingsSection}
             avatarStyle={bootstrapMe?.avatarStyle ?? "robot"}
             isDeploymentOwner={bootstrapMe?.isDeploymentOwner === true}
+            billingEnabled={bootstrapMe?.billingEnabled === true}
             sandboxProvider={bootstrapMe?.sandboxProvider}
             onSandboxProviderChange={(sandboxProvider) =>
               setBootstrapMe((prev) => (prev ? { ...prev, sandboxProvider } : prev))
