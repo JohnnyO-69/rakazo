@@ -63,6 +63,7 @@ import {
   expireComputerControl,
   forgetBotSecret,
   hasActiveComputerControl,
+  hostCredentialSource,
   isAutoReviewCheckerConfigured,
   isComputerScreenUnavailable,
   isSandboxGoneError,
@@ -86,6 +87,7 @@ import {
   prepareGraphqlInstall,
   prepareManagedConnectorForTransaction,
   prepareStoredModelAuth,
+  probeCatalogProviderModels,
   probeOpenAiCompatibleModels,
   provisionComputer,
   queueComputerUpdate,
@@ -562,7 +564,8 @@ export interface RouterDeps {
     teamChatJudgeModel?: string;
     defaultProvider: string;
     defaultModel: string;
-    deploymentModelKey?: string;
+    deploymentModelConfigured?: boolean;
+    deploymentModelHostCredentials?: boolean;
     webOrigin: string;
     privacyPolicyUrl?: string;
     screenProxySecret: string;
@@ -1188,6 +1191,20 @@ export function createRouter(deps: RouterDeps) {
           }
         },
       ),
+      probeCatalog: authed.models.probeCatalog.handler(async ({ context, input }) => {
+        try {
+          const models = await probeCatalogProviderModels(
+            { provider: input.provider, apiKey: input.apiKey },
+            undefined,
+            context.signal,
+          );
+          return { models };
+        } catch (error) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: error instanceof Error ? error.message : "Could not list models",
+          });
+        }
+      }),
       beginOAuth: authed.models.beginOAuth.handler(async ({ context, input }) => {
         return deps.oauthLogins.begin({
           userId: context.actor.userId,
@@ -5934,6 +5951,12 @@ async function loadAutoReviewSettings(deps: RouterDeps, actor: Actor) {
   return { enabled, checkerAvailable };
 }
 
+function hostCredentials(active: boolean, provider: string) {
+  return active
+    ? { hostCredentialProvider: provider, hostCredentialSource: hostCredentialSource(provider) }
+    : { hostCredentialProvider: null, hostCredentialSource: null };
+}
+
 async function meDto(deps: RouterDeps, actor: Actor): Promise<Me> {
   const [user, setup] = await Promise.all([
     deps.prisma.user.findUniqueOrThrow({ where: { id: actor.userId } }),
@@ -5952,6 +5975,13 @@ async function meDto(deps: RouterDeps, actor: Actor): Promise<Me> {
       deps.env.defaultProvider,
     defaultModel:
       setup.credential?.defaultModel ?? setup.settings?.defaultModelId ?? deps.env.defaultModel,
+    // Set only while the active default is the deployment's own, running on host credentials.
+    ...hostCredentials(
+      !setup.credential &&
+        !setup.settings?.defaultModelProvider &&
+        Boolean(deps.env.deploymentModelHostCredentials),
+      deps.env.defaultProvider,
+    ),
     computerHost: computerHostFor(setup.settings?.computerHost, deps.env.sandboxProvider),
     canChooseHostComputer: actor.isDeploymentOwner && deps.env.sandboxProvider === "docker",
     sandboxProvider: deps.env.sandboxProvider,
@@ -5970,7 +6000,7 @@ async function modelSetup(deps: RouterDeps, actor: Actor) {
     findDefaultModelCredential(deps.prisma, actor),
     deps.prisma.deploymentSettings.findUnique({ where: { id: "default" } }),
   ]);
-  const hasDeployment = Boolean(deps.env.deploymentModelKey);
+  const hasDeployment = Boolean(deps.env.deploymentModelConfigured);
   return {
     credential,
     settings,
