@@ -241,10 +241,9 @@ function useNativeLinkConfirm() {
         return;
       }
       // Keep the actual host visible even when userinfo or the path is very long.
-      const preview = url.length > 300 ? `${url.slice(0, 300)}…` : url;
       Alert.alert(
         copy.title,
-        `${new URL(url).host}\n\n${preview}`,
+        `${new URL(url).host}\n\n${url}`,
         [
           { text: copy.cancel, style: "cancel" },
           {

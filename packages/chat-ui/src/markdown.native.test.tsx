@@ -993,7 +993,7 @@ describe("native external link confirmation", () => {
   });
 });
 
-it("bounds a long native URL preview and opens the full destination only on confirmation", async () => {
+it("shows a full long native URL and opens it only on confirmation", async () => {
   const url = `https://example.test/${"a".repeat(10000)}`;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   alert.mockClear();
@@ -1008,8 +1008,7 @@ it("bounds a long native URL preview and opens the full destination only on conf
   });
   const [title, message, buttons, options] = alert.mock.calls.at(-1)!;
   expect(title).toBe("Open external link?");
-  expect(message).toContain("example.test");
-  expect(message.length).toBeLessThan(350);
+  expect(message).toBe(`example.test\n\n${url}`);
   expect(buttons.map((button: { text: string }) => button.text)).toEqual(["Cancel", "Open"]);
   expect(options).toEqual({ cancelable: true });
   expect(linking.openURL).not.toHaveBeenCalled();
