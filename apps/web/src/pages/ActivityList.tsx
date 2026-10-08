@@ -4,7 +4,6 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { RunActivityRow, RunStatus } from "@rakazo/contracts";
 import { isAgedStuckWork } from "@rakazo/core";
 import { Button, Input, Label, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
-import type { KeyboardEvent } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ActivityListFilters } from "../lib/activity-list-filters";
 import {
@@ -30,15 +29,11 @@ type ActivityListProps = {
 
 export function ActivityList({ onOpenRun }: ActivityListProps) {
   const { t } = useLingui();
-  const searchId = useId();
-  const statusId = useId();
-  const fromId = useId();
-  const toId = useId();
   const [activeRuns, setActiveRuns] = useState<RunActivityRow[]>([]);
   const [recentRuns, setRecentRuns] = useState<RunActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<ActivityListFilters>(() => emptyActivityFilters());
+  const [filters, setFilters] = useState<ActivityListFilters>(emptyActivityFilters);
 
   const reloadRef = useRef<(() => void) | null>(null);
 
@@ -101,12 +96,6 @@ export function ActivityList({ onOpenRun }: ActivityListProps) {
   const hasAnyRuns = activeRuns.length > 0 || recentRuns.length > 0;
   const hasVisibleRuns = filteredActive.length > 0 || filteredRecent.length > 0;
 
-  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Escape") {
-      setFilters((prev) => clearActivityFilterField(prev, "query"));
-    }
-  }
-
   if (loading && !hasAnyRuns && !filtersOn) {
     return (
       <div className="px-2.5 py-2 text-[13px] text-muted-foreground/80" role="status">
@@ -119,44 +108,18 @@ export function ActivityList({ onOpenRun }: ActivityListProps) {
     if (!error) return null;
     return (
       <div className="px-2.5 py-2" role="alert">
-        <p className="text-[13px] text-destructive">{error}</p>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="mt-2 rounded-full"
-          onClick={() => reloadRef.current?.()}
-        >
-          <Trans>Try again</Trans>
-        </Button>
+        <ActivityError error={error} onRetry={() => reloadRef.current?.()} />
       </div>
     );
   }
 
   return (
     <div className="mb-2 border-b border-border pb-2" data-testid="activity-list">
-      <ActivityFilters
-        searchId={searchId}
-        statusId={statusId}
-        fromId={fromId}
-        toId={toId}
-        filters={filters}
-        onChange={setFilters}
-        onSearchKeyDown={handleSearchKeyDown}
-      />
+      <ActivityFilters filters={filters} onChange={setFilters} />
 
       {error ? (
         <div className="px-2.5 pb-2" role="alert">
-          <p className="text-[12.5px] text-destructive">{error}</p>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="mt-2 rounded-full"
-            onClick={() => reloadRef.current?.()}
-          >
-            <Trans>Try again</Trans>
-          </Button>
+          <ActivityError error={error} onRetry={() => reloadRef.current?.()} compact />
         </div>
       ) : null}
 
@@ -214,24 +177,43 @@ const STATUS_FILTERS: RunStatus[] = [
   "cancelled",
 ];
 
+function ActivityError({
+  error,
+  onRetry,
+  compact = false,
+}: {
+  error: string;
+  onRetry: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <>
+      <p className={`${compact ? "text-[12.5px]" : "text-[13px]"} text-destructive`}>{error}</p>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className="mt-2 rounded-full"
+        onClick={onRetry}
+      >
+        <Trans>Try again</Trans>
+      </Button>
+    </>
+  );
+}
+
 function ActivityFilters({
-  searchId,
-  statusId,
-  fromId,
-  toId,
   filters,
   onChange,
-  onSearchKeyDown,
 }: {
-  searchId: string;
-  statusId: string;
-  fromId: string;
-  toId: string;
   filters: ActivityListFilters;
   onChange: (next: ActivityListFilters) => void;
-  onSearchKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
 }) {
   const { t } = useLingui();
+  const searchId = useId();
+  const statusId = useId();
+  const fromId = useId();
+  const toId = useId();
   const filtersOn = activityFiltersActive(filters);
   const statusLabelText = filters.status === "all" ? null : statusLabel(filters.status);
 
@@ -246,7 +228,9 @@ function ActivityFilters({
           data-testid="activity-search"
           value={filters.query}
           onChange={(event) => onChange({ ...filters, query: event.target.value })}
-          onKeyDown={onSearchKeyDown}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") onChange(clearActivityFilterField(filters, "query"));
+          }}
           placeholder={t`Search runs`}
           autoComplete="off"
           className="rounded-xl bg-card text-[13px] dark:bg-input"
