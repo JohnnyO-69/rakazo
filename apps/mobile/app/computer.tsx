@@ -2,8 +2,8 @@ import type { ComputerMode, ComputerReleaseReason } from "@rakazo/contracts";
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import type { RefObject } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Modal, Pressable, Text, View } from "react-native";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import {
   initialWindowMetrics,
@@ -14,12 +14,13 @@ import { WebView } from "react-native-webview";
 import { ComputerKeyboardBar } from "../components/computer-keyboard-bar";
 import { ComputerMaintenanceActions } from "../components/computer-maintenance-actions";
 import { ComputerModePicker } from "../components/computer-mode-picker";
-import { NativeSymbol } from "../components/native-symbol";
+import { GlassIconButton } from "../components/glass-icon-button";
+import { NativeActionButton } from "../components/native-action-button";
 import { currentApiBase, rpc } from "../lib/api";
+import type { ComputerStatus } from "../lib/computer";
 import {
   COMPUTER_HEARTBEAT_MS,
   COMPUTER_LIFECYCLE_TIMEOUT_MS,
-  type ComputerStatus,
   computerLabel,
   controlLabel,
   embeddableScreenUrl,
@@ -40,6 +41,8 @@ import {
 import { createComputerRefresh } from "../lib/computer-refresh";
 import { useI18n } from "../lib/i18n";
 import { useMobileTokens } from "../lib/native";
+import { iosAtLeast } from "../lib/native-controls";
+import { errorText } from "../lib/user-error";
 
 export default function Computer() {
   const { t } = useI18n();
@@ -122,11 +125,14 @@ export default function Computer() {
         onStatus: setComputer,
         onScreen: setScreenUrl,
         onReady: () => setReadyBotId(botId ?? null),
-        onInitialError: (err) => setError(err instanceof Error ? err.message : String(err)),
+        onInitialError: (err) => setError(errorText(err)),
       }),
     [botId],
   );
   const refresh = refreshController.refresh;
+  const refreshAfterMaintenance = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
 
   useEffect(() => {
     setComputer(null);
@@ -168,7 +174,7 @@ export default function Computer() {
       return true;
     } catch (err) {
       if (!action.isActive()) return false;
-      setError(err instanceof Error ? err.message : t("Could not open computer"));
+      setError(errorText(err, t("Could not open computer")));
       throw err;
     } finally {
       if (action.isActive() && showBooting) setBootingCount((count) => count - 1);
@@ -262,7 +268,7 @@ export default function Computer() {
       await action.refresh();
     } catch (err) {
       if (!action.isActive()) return;
-      setError(err instanceof Error ? err.message : t("Could not switch computer"));
+      setError(errorText(err, t("Could not switch computer")));
     } finally {
       if (action.isActive()) setSwitchingCount((count) => count - 1);
       action.finish();
@@ -273,13 +279,17 @@ export default function Computer() {
     screenError ?? previewPlaceholder(computer?.state, booting, name, computer?.mode);
 
   return (
-    <View style={{ flex: 1, backgroundColor: tokens.background, padding: 24 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: tokens.background }}
+      contentContainerStyle={{ padding: 24 }}
+      contentInsetAdjustmentBehavior="automatic"
+    >
       {error ? (
         <Text style={{ color: tokens.mutedForeground, marginBottom: 12 }}>{error}</Text>
       ) : null}
       <View
         style={{
-          flex: 1,
+          height: 360,
           minHeight: 220,
           borderRadius: 14,
           overflow: "hidden",
@@ -332,26 +342,19 @@ export default function Computer() {
             onRelease={releaseComputer}
           />
         ) : (
-          <Pressable
+          <NativeActionButton
+            label={t("Take control")}
+            prominence="secondary"
+            style={{ alignSelf: "center" }}
             onPress={() => void openComputer()}
-            style={{
-              backgroundColor: tokens.muted,
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-              borderRadius: 12,
-            }}
-          >
-            <Text style={{ color: tokens.foreground }}>{t("Take control")}</Text>
-          </Pressable>
+          />
         )}
       </View>
       {computer ? (
         <ComputerMaintenanceActions
           botId={botId ?? ""}
           computer={computer}
-          onChanged={async () => {
-            await refresh();
-          }}
+          onChanged={refreshAfterMaintenance}
         />
       ) : null}
       <ComputerModePicker
@@ -424,7 +427,7 @@ export default function Computer() {
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 12,
-                  borderBottomWidth: 1,
+                  borderBottomWidth: iosAtLeast(26) ? 0 : 1,
                   borderBottomColor: tokens.border,
                   paddingHorizontal: 14,
                   paddingVertical: 4,
@@ -472,44 +475,25 @@ export default function Computer() {
                       onRelease={releaseComputer}
                     />
                   ) : (
-                    <Pressable
+                    <NativeActionButton
+                      label={t("Take control")}
+                      fill={false}
+                      style={{ alignSelf: "center" }}
                       onPress={() =>
                         void bootComputer({ takeControl: true, overlay: false }).catch(
                           () => undefined,
                         )
                       }
-                      hitSlop={8}
-                      style={{
-                        borderWidth: 1,
-                        borderColor: tokens.border,
-                        paddingHorizontal: 12,
-                        paddingVertical: 6,
-                        borderRadius: 10,
-                        minHeight: 36,
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Text style={{ color: tokens.foreground }}>{t("Take control")}</Text>
-                    </Pressable>
-                  )}
-                  <Pressable
-                    accessibilityLabel={t("Close computer")}
-                    hitSlop={8}
-                    onPress={() => setComputerOpen(false)}
-                    style={{
-                      minWidth: 36,
-                      minHeight: 36,
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <NativeSymbol
-                      ios="xmark"
-                      android="close"
-                      size={16}
-                      color={tokens.mutedForeground}
                     />
-                  </Pressable>
+                  )}
+                  <GlassIconButton
+                    accessibilityLabel={t("Close computer")}
+                    onPress={() => setComputerOpen(false)}
+                    ios="xmark"
+                    android="close"
+                    size={36}
+                    iconSize={16}
+                  />
                 </View>
               </SafeAreaView>
               <View style={{ flex: 1, backgroundColor: tokens.card }}>
@@ -553,7 +537,7 @@ export default function Computer() {
           )}
         </SafeAreaProvider>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -565,7 +549,6 @@ function ComputerReleaseActions({
   onRelease: (reason?: ComputerReleaseReason) => Promise<void>;
 }) {
   const { t } = useI18n();
-  const tokens = useMobileTokens();
   const actions: Array<{ label: string; reason?: ComputerReleaseReason; primary?: boolean }> =
     takeoverRequested
       ? [
@@ -576,26 +559,14 @@ function ComputerReleaseActions({
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       {actions.map((action) => (
-        <Pressable
+        <NativeActionButton
           key={action.label}
-          accessibilityLabel={action.label}
+          label={action.label}
+          prominence={action.primary ? "primary" : "secondary"}
+          fill={false}
+          style={{ alignSelf: "center" }}
           onPress={() => void onRelease(action.reason)}
-          hitSlop={8}
-          style={{
-            minHeight: 36,
-            justifyContent: "center",
-            borderWidth: 1,
-            borderColor: action.primary ? tokens.primary : tokens.border,
-            backgroundColor: action.primary ? tokens.primary : tokens.muted,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 10,
-          }}
-        >
-          <Text style={{ color: action.primary ? tokens.primaryForeground : tokens.foreground }}>
-            {action.label}
-          </Text>
-        </Pressable>
+        />
       ))}
     </View>
   );
