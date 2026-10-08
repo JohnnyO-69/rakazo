@@ -9,9 +9,7 @@ import {
 } from "@rakazo/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
-  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -22,11 +20,19 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { ConnectorIcon } from "../components/connector-icon";
 import { NativeActionButton } from "../components/native-action-button";
 import { Chevron } from "../components/row-accessories";
 import { rpc } from "../lib/api";
 import { mobileTokens } from "../lib/appearance";
 import { useI18n } from "../lib/i18n";
+import type { IntegrationsCacheScope, IntegrationsSnapshot } from "../lib/integrations-cache";
+import {
+  integrationsCacheScope,
+  isIntegrationsScopeCurrent,
+  readIntegrationsCache,
+  writeIntegrationsCache,
+} from "../lib/integrations-cache";
 import { loadLastBotId } from "../lib/last-bot";
 import { native, useThemedStyles } from "../lib/native";
 import { errorText } from "../lib/user-error";
@@ -38,43 +44,6 @@ const LOGO_SIZE = 32;
 
 function itemKey(item: Pick<ConnectionCatalogItem, "connectorId" | "slug">) {
   return `${item.connectorId}:${item.slug}`;
-}
-
-function ConnectorLogo({
-  logo,
-  label,
-  styles,
-}: {
-  logo?: string | null;
-  label: string;
-  styles: ReturnType<typeof createIntegrationsStyles>;
-}) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    setFailed(false);
-  }, [logo]);
-  const initial = (label.trim()[0] || "?").toUpperCase();
-  if (!logo || failed) {
-    return (
-      <View
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={styles.logoFallback}
-      >
-        <Text style={styles.logoInitial}>{initial}</Text>
-      </View>
-    );
-  }
-  return (
-    <Image
-      accessibilityIgnoresInvertColors
-      accessible={false}
-      onError={() => setFailed(true)}
-      resizeMode="contain"
-      source={{ uri: logo }}
-      style={styles.logo}
-    />
-  );
 }
 
 export default function Integrations() {
@@ -106,6 +75,57 @@ export default function Integrations() {
   const [toolsTick, setToolsTick] = useState(0);
   const connectionAttempt = useRef<AbortController | null>(null);
 
+  const cacheScope = useRef<IntegrationsCacheScope | null>(null);
+  const snapshot = useRef<IntegrationsSnapshot>({ catalog: [], connections: [] });
+  const mounted = useRef(false);
+  const refreshGeneration = useRef(0);
+
+  function applySnapshot(next: IntegrationsSnapshot) {
+    snapshot.current = next;
+    setCatalog(next.catalog);
+    setConnections(next.connections);
+    setCatalogReady(true);
+    setLabelDrafts((current) =>
+      Object.fromEntries(
+        next.connections
+          .filter((row) => row.status === "connected" || row.status === "pending")
+          .map((row) => [row.id, current[row.id] ?? row.displayName]),
+      ),
+    );
+  }
+
+  function saveSnapshot(next: IntegrationsSnapshot) {
+    const scope = cacheScope.current;
+    if (!mounted.current || !scope || !isIntegrationsScopeCurrent(scope)) return;
+    // A mutation invalidates any earlier background refresh.
+    refreshGeneration.current += 1;
+    applySnapshot(next);
+    writeIntegrationsCache(scope, next);
+  }
+
+  function updateAccount(row: Connection) {
+    const connections = [
+      ...snapshot.current.connections.filter((entry) => entry.id !== row.id),
+      row,
+    ];
+    saveSnapshot({
+      connections,
+      catalog: snapshot.current.catalog.map((item) =>
+        item.connectorId === row.connectorId && item.slug === row.provider
+          ? {
+              ...item,
+              connected: connections.some(
+                (entry) =>
+                  entry.connectorId === item.connectorId &&
+                  entry.provider === item.slug &&
+                  entry.status === "connected",
+              ),
+            }
+          : item,
+      ),
+    });
+  }
+
   const featuredTiles = useMemo(() => buildFeaturedConnectorTiles(catalog), [catalog]);
   const showFeatured = !query.trim();
   const catalogApps = useMemo(() => filterConnectionCatalogItems(catalog, query), [catalog, query]);
@@ -121,44 +141,79 @@ export default function Integrations() {
   }, [catalog, detailKey]);
 
   async function refresh() {
-    const catalogResult = await rpc<ConnectionCatalogItem[]>("connections/catalog");
-    setCatalog(catalogResult);
-    setCatalogReady(true);
-    try {
-      const rows = await rpc<Connection[]>("connections/list");
-      setConnections(rows);
-      setLabelDrafts((current) => {
-        const next: Record<string, string> = {};
-        for (const row of rows) {
-          if (row.status === "connected" || row.status === "pending") {
-            next[row.id] = current[row.id] ?? row.displayName;
-          }
-        }
-        return next;
-      });
-    } catch {
-      setConnections([]);
-      setLabelDrafts({});
+    const scope = cacheScope.current ?? (await integrationsCacheScope());
+    if (!mounted.current || !isIntegrationsScopeCurrent(scope)) return;
+    if (!cacheScope.current) {
+      cacheScope.current = scope;
+      const cached = readIntegrationsCache(scope);
+      if (cached) applySnapshot(cached);
     }
+    const generation = ++refreshGeneration.current;
+    setCatalogError(null);
+    let next: IntegrationsSnapshot;
+    try {
+      const [catalog, connections] = await Promise.all([
+        rpc<ConnectionCatalogItem[]>("connections/catalog"),
+        rpc<Connection[]>("connections/list"),
+      ]);
+      next = { catalog, connections };
+    } catch (reason) {
+      if (
+        mounted.current &&
+        isIntegrationsScopeCurrent(scope) &&
+        generation === refreshGeneration.current
+      )
+        throw reason;
+      return;
+    }
+    if (
+      !mounted.current ||
+      !isIntegrationsScopeCurrent(scope) ||
+      generation !== refreshGeneration.current
+    )
+      return;
+    applySnapshot(next);
+    writeIntegrationsCache(scope, next);
     try {
       const installs = await rpc<CapabilityInstall[]>("capabilities/list");
-      setSources(
-        installs.filter(
-          (item) => item.kind === "mcp" || item.kind === "api" || item.kind === "graphql",
-        ),
-      );
+      if (
+        mounted.current &&
+        isIntegrationsScopeCurrent(scope) &&
+        generation === refreshGeneration.current
+      ) {
+        setSources(
+          installs.filter(
+            (item) => item.kind === "mcp" || item.kind === "api" || item.kind === "graphql",
+          ),
+        );
+      }
     } catch {
       // Tool sources are optional; keep featured/catalog usable if this fails.
     }
   }
 
+  async function retryRefresh() {
+    try {
+      await refresh();
+    } catch (reason) {
+      if (
+        mounted.current &&
+        (!cacheScope.current || isIntegrationsScopeCurrent(cacheScope.current))
+      ) {
+        setCatalogError(errorText(reason, t("Could not load integrations")));
+      }
+    }
+  }
+
   useEffect(() => {
-    void refresh().catch((reason) => {
-      setCatalogReady(false);
-      setCatalogError(errorText(reason, t("Could not load integrations")));
-    });
+    mounted.current = true;
+    void retryRefresh();
     void loadLastBotId().then(setLastBotId);
-    return () => connectionAttempt.current?.abort();
+    return () => {
+      mounted.current = false;
+      refreshGeneration.current += 1;
+      connectionAttempt.current?.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -259,6 +314,7 @@ export default function Integrations() {
         }).catch(() => undefined);
         if (row?.status === "connected") {
           if (controller.signal.aborted) return;
+          updateAccount(row);
           void notifyAppConnected(item);
           await refresh();
           setToolsTick((tick) => tick + 1);
@@ -287,6 +343,7 @@ export default function Integrations() {
     setCatalogError(null);
     try {
       await rpc("connections/revoke", { connectionId: row.id });
+      updateAccount({ ...row, status: "revoked" });
       await refresh();
       setToolsTick((tick) => tick + 1);
     } catch (reason) {
@@ -306,11 +363,7 @@ export default function Integrations() {
         connectionId: row.id,
         displayName,
       });
-      setConnections((current) =>
-        current.map((entry) =>
-          entry.id === row.id ? { ...entry, displayName: updated.displayName } : entry,
-        ),
-      );
+      updateAccount(updated);
       setLabelDrafts((current) => ({ ...current, [row.id]: updated.displayName }));
     } catch (reason) {
       setCatalogError(errorText(reason, t("Could not rename connection")));
@@ -331,6 +384,7 @@ export default function Integrations() {
     try {
       for (const row of matches) {
         await rpc("connections/revoke", { connectionId: row.id });
+        updateAccount({ ...row, status: "revoked" });
       }
       await refresh();
       closeDetail();
@@ -436,7 +490,7 @@ export default function Integrations() {
     const connected = itemConnected(item);
     const body = (
       <>
-        <ConnectorLogo logo={item.logo} label={label} styles={styles} />
+        <ConnectorIcon logo={item.logo} name={label} size={LOGO_SIZE} />
         <View style={styles.grow}>
           <Text numberOfLines={1} style={styles.title}>
             {label}
@@ -484,7 +538,7 @@ export default function Integrations() {
             >
               <Text style={styles.link}>{t("Back")}</Text>
             </Pressable>
-            <ConnectorLogo logo={item.logo} label={item.name} styles={styles} />
+            <ConnectorIcon logo={item.logo} name={item.name} size={LOGO_SIZE} />
             <Text numberOfLines={1} style={styles.detailTitle}>
               {item.name}
             </Text>
@@ -591,13 +645,43 @@ export default function Integrations() {
           />
         ) : null}
 
-        {catalogError ? <Text style={styles.error}>{catalogError}</Text> : null}
+        {catalogError ? (
+          <View style={styles.catalogStack}>
+            <Text style={styles.error}>{catalogError}</Text>
+            <NativeActionButton
+              label={t("Retry")}
+              fill={false}
+              onPress={() => void retryRefresh()}
+              prominence="secondary"
+            />
+          </View>
+        ) : null}
 
         {detailItem ? (
           renderDetail(detailItem)
         ) : (
           <>
-            {!catalogReady ? <ActivityIndicator color={native.fillPressed} /> : null}
+            {!catalogReady && !catalogError ? (
+              <View
+                testID="integrations-loading"
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={catalogColumns === 2 ? styles.catalogGrid : styles.catalogStack}
+              >
+                {Array.from({ length: 8 }, (_, index) => (
+                  <View
+                    key={index}
+                    style={[styles.row, catalogColumns === 2 ? styles.catalogCell : null]}
+                  >
+                    <View style={styles.logoPlaceholder} />
+                    <View style={styles.grow}>
+                      <View style={styles.titlePlaceholder} />
+                    </View>
+                    <View style={styles.pillPlaceholder} />
+                  </View>
+                ))}
+              </View>
+            ) : null}
 
             {catalogReady && catalog.length === 0 ? (
               <Text style={styles.secondary}>{t(EMPTY_PLUGIN_CATALOG_MESSAGE)}</Text>
@@ -622,7 +706,7 @@ export default function Integrations() {
                             disabled ? { opacity: 0.7 } : null,
                           ]}
                         >
-                          <ConnectorLogo label={tile.label} styles={styles} />
+                          <ConnectorIcon logo={item?.logo} name={tile.label} size={LOGO_SIZE} />
                           <View style={styles.grow}>
                             <Text numberOfLines={1} style={styles.title}>
                               {tile.label}
@@ -833,24 +917,23 @@ function createIntegrationsStyles() {
       alignItems: "center",
       gap: 10,
     },
-    logo: {
+    logoPlaceholder: {
       width: LOGO_SIZE,
       height: LOGO_SIZE,
       borderRadius: 10,
       backgroundColor: native.fillPressed,
     },
-    logoFallback: {
-      width: LOGO_SIZE,
-      height: LOGO_SIZE,
-      borderRadius: 10,
+    titlePlaceholder: {
+      width: "65%",
+      height: 14,
+      borderRadius: 4,
       backgroundColor: native.fillPressed,
-      alignItems: "center",
-      justifyContent: "center",
     },
-    logoInitial: {
-      color: native.label,
-      fontSize: 14,
-      fontWeight: "600",
+    pillPlaceholder: {
+      width: 52,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: native.fillPressed,
     },
     grow: { flex: 1, gap: 3, minWidth: 0 },
     title: { color: native.label, fontSize: 15, fontWeight: "600" },

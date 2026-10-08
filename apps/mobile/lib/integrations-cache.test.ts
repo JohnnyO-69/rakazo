@@ -1,0 +1,154 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { IntegrationsCacheScope } from "./integrations-cache";
+import {
+  integrationsCacheScope,
+  isIntegrationsScopeCurrent,
+  readIntegrationsCache,
+  writeIntegrationsCache,
+} from "./integrations-cache";
+
+const state = vi.hoisted(() => ({
+  files: new Map<string, string>(),
+  base: "https://api.example.test",
+  space: "space-a",
+  generation: 0,
+  rpc: vi.fn(),
+  broken: false,
+}));
+vi.mock("./api", () => ({
+  currentApiBase: () => state.base,
+  selectedSpaceId: () => state.space,
+  rpc: state.rpc,
+}));
+vi.mock("./session", () => ({ currentSessionGeneration: () => state.generation }));
+vi.mock("expo-file-system", () => {
+  class Directory {
+    uri: string;
+    get exists() {
+      return true;
+    }
+    constructor(...parts: Array<string | { uri: string }>) {
+      this.uri = parts.map((part) => (typeof part === "string" ? part : part.uri)).join("/");
+    }
+    create() {}
+  }
+  class File extends Directory {
+    override get exists() {
+      return state.files.has(this.uri);
+    }
+    override create() {
+      if (state.broken) throw new Error("disk unavailable");
+    }
+    textSync() {
+      return state.files.get(this.uri);
+    }
+    write(value: string) {
+      state.files.set(this.uri, value);
+    }
+  }
+  return { Directory, File, Paths: { cache: "cache" } };
+});
+const scope: IntegrationsCacheScope = {
+  apiBase: "https://api.example.test",
+  userId: "user-a",
+  spaceId: "space-a",
+  sessionGeneration: 0,
+  selectionId: "space-a",
+};
+const snapshot = {
+  catalog: [
+    {
+      connectorId: "test",
+      slug: "example",
+      name: "Example",
+      logo: "https://example.test/logo.svg",
+      connected: true,
+      noAuth: false,
+    },
+  ],
+  connections: [
+    {
+      id: "connection-a",
+      connectorId: "test",
+      provider: "example",
+      displayName: "Example",
+      status: "connected" as const,
+      capabilities: [],
+      createdAt: "2026-01-01",
+    },
+  ],
+};
+
+beforeEach(() => {
+  state.files.clear();
+  state.base = scope.apiBase;
+  state.space = scope.spaceId;
+  state.generation += 1;
+  state.broken = false;
+  state.rpc.mockReset().mockResolvedValue({ userId: "user-a", spaceId: "space-a" });
+});
+
+describe("integration disk cache", () => {
+  it("round trips catalog artwork and Added accounts, including local mutations", () => {
+    expect(readIntegrationsCache(scope)).toBeNull();
+    writeIntegrationsCache(scope, snapshot);
+    expect(readIntegrationsCache(scope)).toEqual(snapshot);
+    const next = {
+      ...snapshot,
+      connections: [
+        { ...snapshot.connections[0]!, displayName: "Renamed", status: "revoked" as const },
+      ],
+    };
+    writeIntegrationsCache(scope, next);
+    expect(readIntegrationsCache(scope)).toEqual(next);
+  });
+  it.each([
+    { userId: "user-b" },
+    { spaceId: "space-b" },
+    { apiBase: "https://other.example.test" },
+  ])("never reads another scope %j", (change) => {
+    writeIntegrationsCache(scope, snapshot);
+    expect(readIntegrationsCache({ ...scope, ...change })).toBeNull();
+  });
+  it("treats corrupt files, mismatched keys, invalid rows, and disk failures as misses", () => {
+    writeIntegrationsCache(scope, snapshot);
+    const path = [...state.files.keys()][0]!;
+    for (const value of [
+      "{",
+      JSON.stringify({ key: "wrong", ...snapshot }),
+      JSON.stringify({
+        key: JSON.stringify([scope.apiBase, scope.userId, scope.spaceId]),
+        catalog: [{}],
+        connections: [],
+      }),
+    ]) {
+      state.files.set(path, value);
+      expect(readIntegrationsCache(scope)).toBeNull();
+    }
+    state.broken = true;
+    expect(() => writeIntegrationsCache(scope, snapshot)).not.toThrow();
+  });
+  it("reuses verified identity until the session changes", async () => {
+    const first = await integrationsCacheScope();
+    state.space = "space-b";
+    expect((await integrationsCacheScope()).spaceId).toBe("space-b");
+    expect(state.rpc).toHaveBeenCalledTimes(1);
+    expect(isIntegrationsScopeCurrent(first)).toBe(false);
+    state.generation += 1;
+    state.rpc.mockResolvedValue({ userId: "user-b", spaceId: "space-b" });
+    expect((await integrationsCacheScope()).userId).toBe("user-b");
+    expect(state.rpc).toHaveBeenCalledTimes(2);
+  });
+  it("rejects identity that returns after sign-out or space switch", async () => {
+    let resolve!: (value: unknown) => void;
+    state.rpc.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const pending = integrationsCacheScope();
+    state.generation += 1;
+    resolve({ userId: "user-a", spaceId: "space-a" });
+    await expect(pending).rejects.toThrow("scope changed");
+  });
+});
