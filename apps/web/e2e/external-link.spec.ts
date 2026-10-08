@@ -4,9 +4,11 @@ import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 const destination = "https://docs.example.test/guide?from=chat";
 
 test("opening a bot reply link asks before leaving the app", async ({ page }, testInfo) => {
-  await page.route("https://docs.example.test/**", (route) =>
-    route.fulfill({ body: "Docs", contentType: "text/plain" }),
-  );
+  await page
+    .context()
+    .route("https://docs.example.test/**", (route) =>
+      route.fulfill({ body: "Docs", contentType: "text/plain" }),
+    );
   const stamp = Date.now();
   await signup(page, `external-link-${stamp}@rakazo.test`, "password12", "External Link");
   await completeOnboarding(page);

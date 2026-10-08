@@ -1,22 +1,20 @@
 import type { ReactNode } from "react";
 import { createContext, useContext } from "react";
 
-export type MarkdownLinkCopy = {
+type MarkdownLinkCopy = {
   title: string;
   cancel: string;
   open: string;
 };
 
-export const defaultMarkdownLinkCopy: MarkdownLinkCopy = {
+const defaultMarkdownLinkCopy: MarkdownLinkCopy = {
   title: "Open external link?",
   cancel: "Cancel",
   open: "Open",
 };
 
-export type MarkdownLinkAppOrigin = string | null | (() => string | null);
-
 const CopyContext = createContext<MarkdownLinkCopy>(defaultMarkdownLinkCopy);
-const OriginContext = createContext<MarkdownLinkAppOrigin>(null);
+const OriginContext = createContext<string | null>(null);
 
 export function MarkdownLinkPromptProvider({
   copy = defaultMarkdownLinkCopy,
@@ -24,7 +22,7 @@ export function MarkdownLinkPromptProvider({
   children,
 }: {
   copy?: MarkdownLinkCopy;
-  appOrigin?: MarkdownLinkAppOrigin;
+  appOrigin?: string | null;
   children: ReactNode;
 }) {
   return (
@@ -40,9 +38,4 @@ export function useMarkdownLinkCopy() {
 
 export function useMarkdownLinkAppOrigin() {
   return useContext(OriginContext);
-}
-
-export function resolveMarkdownLinkAppOrigin(appOrigin: MarkdownLinkAppOrigin) {
-  const value = typeof appOrigin === "function" ? appOrigin() : appOrigin;
-  return value || null;
 }
