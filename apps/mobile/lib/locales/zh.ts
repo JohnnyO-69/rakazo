@@ -693,7 +693,7 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Withdraw all permissions": "撤销所有权限",
   "Withdraw all permissions?": "撤销所有权限？",
   "New mobile actions won't send data to these services. Runs already in progress and routines keep going until you stop them.":
-    "新的手机端操作不会向这些服务发送数据。正在进行的运行和例行任务会继续，直到你将其停止。",
+    "新的手机端操作不会向这些服务发送数据。正在执行的任务和例行任务会继续，直到你将其停止。",
   Withdraw: "撤销",
   "Share data with {name}?": "与 {name} 分享数据？",
   "You can turn this off in Account → AI data sharing.": "你可以在账户 → AI 数据共享中关闭此功能。",
@@ -703,7 +703,7 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Your recordings are sent for transcription, and text you play is sent to generate speech.":
     "你的录音会被发送用于转录，你播放的文本会被发送用于生成语音。",
   "Conversation summaries, memories, searches and bot and Space IDs are sent to store and recall context.":
-    "对话摘要、记忆、搜索及 Bot 和空间 ID 会被发送，用于存储和回忆上下文。",
+    "对话摘要、记忆、搜索请求及 Bot 和空间 ID 会被发送，用于存储和检索上下文。",
   "AI data sharing": "AI 数据共享",
   "Allow {name} on mobile": "在手机上允许 {name}",
   "Could not load permissions.": "无法加载权限。",

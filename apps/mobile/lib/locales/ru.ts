@@ -714,14 +714,14 @@ export const RU_MESSAGES: Record<string, string> = {
   "Withdraw all permissions": "Отозвать все разрешения",
   "Withdraw all permissions?": "Отозвать все разрешения?",
   "New mobile actions won't send data to these services. Runs already in progress and routines keep going until you stop them.":
-    "Новые действия на мобильном устройстве не будут отправлять данные этим сервисам. Текущие запуски и процедуры продолжатся, пока вы их не остановите.",
+    "Новые действия на мобильном устройстве не будут отправлять данные этим сервисам. Текущие запуски и задачи продолжат выполняться, пока вы их не остановите.",
   Withdraw: "Отозвать",
   "Share data with {name}?": "Поделиться данными с {name}?",
   "You can turn this off in Account → AI data sharing.":
     "Это можно отключить в разделе Аккаунт → Передача данных ИИ.",
   Allow: "Разрешить",
   "Messages, chat history, bot instructions, memories, attachments, screenshots and connected-app content are sent to run your bots, including routines.":
-    "Сообщения, история чата, инструкции ботов, воспоминания, вложения, снимки экрана и содержимое подключённых приложений отправляются для работы ваших ботов, включая процедуры.",
+    "Сообщения, история чата, инструкции ботов, воспоминания, вложения, снимки экрана и содержимое подключённых приложений отправляются для работы ваших ботов, включая задачи.",
   "Your recordings are sent for transcription, and text you play is sent to generate speech.":
     "Ваши записи отправляются для расшифровки, а воспроизводимый вами текст — для генерации речи.",
   "Conversation summaries, memories, searches and bot and Space IDs are sent to store and recall context.":
