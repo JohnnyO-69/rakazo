@@ -31,6 +31,8 @@ export const BUILTIN_TOOL_NAMES = [
   "cloud_agent_status",
   "cloud_agent_reply",
   "cloud_agent_cancel",
+  "search_history",
+  "read_history",
   "save_memory",
   "recall_memory",
   "forget_memory",
