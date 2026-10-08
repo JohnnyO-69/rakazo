@@ -160,8 +160,12 @@ export function markdownLinkDisplayParts(url: string): MarkdownLinkDisplayParts 
   }
   if (!httpUrlProtocols.has(parsed.protocol)) return undefined;
   const href = parsed.href;
-  const hostAt = href.indexOf(parsed.host);
-  if (hostAt < 0) return { before: "", host: href, after: "" };
+  const authorityAt = href.indexOf("//") + 2;
+  const userinfoLength =
+    parsed.username || parsed.password
+      ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ""}@`.length
+      : 0;
+  const hostAt = authorityAt + userinfoLength;
   return {
     before: href.slice(0, hostAt),
     host: parsed.host,

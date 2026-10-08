@@ -331,3 +331,16 @@ describe("link labels", () => {
     }
   });
 });
+
+it("highlights the destination host after userinfo containing the same host text", () => {
+  expect(markdownLinkDisplayParts("https://docs.example.test@docs.example/a")).toEqual({
+    before: "https://docs.example.test@",
+    host: "docs.example",
+    after: "/a",
+  });
+  expect(markdownLinkDisplayParts("https://docs.example:docs.example@docs.example/a")).toEqual({
+    before: "https://docs.example:docs.example@",
+    host: "docs.example",
+    after: "/a",
+  });
+});
