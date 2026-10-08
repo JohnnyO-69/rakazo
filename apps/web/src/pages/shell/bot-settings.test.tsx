@@ -136,11 +136,11 @@ async function submitToolName(input: HTMLInputElement, value: string) {
   await flush();
 }
 
-async function renderSettings(onSave: (patch: SavePatch) => Promise<void>) {
+async function renderSettings(onSave: (patch: SavePatch) => Promise<void>, currentBot = bot) {
   await act(async () => {
     root.render(
       <BotSettings
-        bot={bot}
+        bot={currentBot}
         memoryProviderConfigured={false}
         onSkillsChange={() => undefined}
         onSave={onSave}
@@ -182,6 +182,97 @@ describe("BotSettings disabled tools", () => {
     await flush();
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ disabledBuiltinTools: [] }));
+  });
+
+  it("uses a refreshed server list for the next addition and removal", async () => {
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async () => undefined);
+    await renderSettings(onSave);
+    await renderSettings(onSave, { ...bot, disabledBuiltinTools: ["web_fetch"] });
+    expect(container.querySelector('[id$="-disabled-remember"]')).toBeNull();
+    const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]')!;
+    await submitToolName(input, "web_search");
+    expect(onSave.mock.calls[0]?.[0].disabledBuiltinTools).toEqual(["web_fetch", "web_search"]);
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[id$="-disabled-web_fetch"]')!.click();
+    });
+    expect(onSave.mock.calls[1]?.[0].disabledBuiltinTools).toEqual(["web_search"]);
+  });
+
+  it.each([false, true])(
+    "rebases a refresh during an in-flight save (reject: %s)",
+    async (reject) => {
+      let release: (() => void) | undefined;
+      const onSave = vi
+        .fn<(patch: SavePatch) => Promise<void>>()
+        .mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          if (reject) throw new Error("Network failed");
+        })
+        .mockResolvedValue(undefined);
+      await renderSettings(onSave);
+      const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]')!;
+      await submitToolName(input, "web_search");
+      await renderSettings(onSave, { ...bot, disabledBuiltinTools: ["web_fetch"] });
+      await act(async () => {
+        release?.();
+      });
+      await flush();
+      expect(container.querySelector('[id$="-disabled-remember"]')).toBeNull();
+      expect(container.querySelector('[id$="-disabled-web_fetch"]')).not.toBeNull();
+      if (reject) {
+        expect(container.querySelector('[id$="-disabled-web_search"]')).toBeNull();
+        await submitToolName(input, "web_search");
+      }
+      expect(onSave.mock.calls[1]?.[0].disabledBuiltinTools).toEqual(["web_fetch", "web_search"]);
+      expect(container.querySelector('[id$="-disabled-web_search"]')).not.toBeNull();
+    },
+  );
+
+  it("rebases queued edits and a removal on a refresh during a save", async () => {
+    let release: (() => void) | undefined;
+    const onSave = vi
+      .fn<(patch: SavePatch) => Promise<void>>()
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      })
+      .mockResolvedValue(undefined);
+    await renderSettings(onSave);
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[id$="-disabled-remember"]')!.click();
+    });
+    const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]')!;
+    await submitToolName(input, "web_search");
+    await renderSettings(onSave, { ...bot, disabledBuiltinTools: ["remember", "web_fetch"] });
+    await act(async () => {
+      release?.();
+    });
+    await flush();
+    expect(onSave.mock.calls.map(([patch]) => patch.disabledBuiltinTools)).toEqual([
+      [],
+      ["web_fetch"],
+      ["web_fetch", "web_search"],
+    ]);
+    expect(container.querySelector('[id$="-disabled-remember"]')).toBeNull();
+    expect(container.querySelector('[id$="-disabled-web_fetch"]')).not.toBeNull();
+    expect(container.querySelector('[id$="-disabled-web_search"]')).not.toBeNull();
+  });
+
+  it("reconciles a fresh server list even when it matches the opening value", async () => {
+    const onSave = vi.fn<(patch: SavePatch) => Promise<void>>(async () => undefined);
+    await renderSettings(onSave);
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[id$="-disabled-remember"]')!.click();
+    });
+    expect(container.querySelector('[id$="-disabled-remember"]')).toBeNull();
+    await renderSettings(onSave, { ...bot, disabledBuiltinTools: ["remember"] });
+    expect(container.querySelector('[id$="-disabled-remember"]')).not.toBeNull();
+    const input = container.querySelector<HTMLInputElement>('[id$="-disabled-tools"]')!;
+    await submitToolName(input, "web_search");
+    expect(onSave.mock.calls[1]?.[0].disabledBuiltinTools).toEqual(["remember", "web_search"]);
   });
 
   it("drops a failed disable so the same name can be saved again", async () => {

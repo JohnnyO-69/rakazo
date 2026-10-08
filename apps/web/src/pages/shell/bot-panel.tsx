@@ -255,6 +255,15 @@ export function BotSettings({
   // The list on screen is updated before the save returns. This stays on the
   // last list the server accepted so a rejection can undo that preview.
   const persistedDisabledToolsRef = useRef(disabledBuiltinTools);
+  const serverDisabledToolsRef = useRef(disabledBuiltinTools);
+  const pendingSavesRef = useRef(0);
+  useEffect(() => {
+    const next = bot.disabledBuiltinTools ?? [];
+    if (serverDisabledToolsRef.current === next) return;
+    serverDisabledToolsRef.current = next;
+    persistedDisabledToolsRef.current = next;
+    if (pendingSavesRef.current === 0) setDisabledBuiltinTools(next);
+  }, [bot.disabledBuiltinTools]);
   const [toolNameDraft, setToolNameDraft] = useState("");
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
@@ -271,6 +280,7 @@ export function BotSettings({
       color?: string;
       notifyOnFinish?: boolean;
       disabledBuiltinTools?: string[];
+      baseDisabledBuiltinTools?: string[];
     }) => Promise<void>
   >(async () => undefined);
   useEffect(() => {
@@ -329,6 +339,7 @@ export function BotSettings({
     color?: string;
     notifyOnFinish?: boolean;
     disabledBuiltinTools?: string[];
+    baseDisabledBuiltinTools?: string[];
   }) {
     const selected = selectedModel;
     const nextName = (patchOverrides?.name !== undefined ? patchOverrides.name : name).trim();
@@ -347,7 +358,7 @@ export function BotSettings({
     try {
       setSaving(true);
       setError(null);
-      await onSave({
+      const patch = {
         name: nextName || bot.name,
         title: nextTitle,
         // One field feeds both, so it only goes on the wire when it changed: a
@@ -370,29 +381,48 @@ export function BotSettings({
                 : null,
             }
           : {}),
-        // Only the disabled-tool edits send this list. An unrelated save must
-        // not replace a newer list from another session with this panel's copy.
-        ...(patchOverrides?.disabledBuiltinTools !== undefined
-          ? { disabledBuiltinTools: patchOverrides.disabledBuiltinTools }
-          : {}),
-      });
-      savedDescriptionRef.current = nextDescription;
-      if (patchOverrides?.disabledBuiltinTools !== undefined) {
-        persistedDisabledToolsRef.current = [...patchOverrides.disabledBuiltinTools];
+      };
+      const requestedTools = patchOverrides?.disabledBuiltinTools;
+      const baseTools = patchOverrides?.baseDisabledBuiltinTools ?? [];
+      // Preserve this edit's additions/removals against any refreshed server list.
+      // Retry if a refresh arrives while the request is in flight.
+      for (;;) {
+        const serverTools = serverDisabledToolsRef.current;
+        const nextTools =
+          requestedTools === undefined
+            ? undefined
+            : [
+                ...persistedDisabledToolsRef.current.filter(
+                  (name) => !baseTools.includes(name) || requestedTools.includes(name),
+                ),
+                ...requestedTools.filter(
+                  (name) =>
+                    !baseTools.includes(name) && !persistedDisabledToolsRef.current.includes(name),
+                ),
+              ];
+        // Unrelated saves omit the list, preserving changes from other sessions.
+        await onSave({
+          ...patch,
+          ...(nextTools !== undefined ? { disabledBuiltinTools: nextTools } : {}),
+        });
+        if (nextTools === undefined) break;
+        if (
+          serverTools !== serverDisabledToolsRef.current &&
+          !sameStringList(nextTools, serverDisabledToolsRef.current)
+        )
+          continue;
+        persistedDisabledToolsRef.current = nextTools;
+        break;
       }
+      savedDescriptionRef.current = nextDescription;
     } catch (err) {
       setError(errorText(err, t`Could not save`));
-      // Leaving the rejected name in the list makes the next attempt a no-op,
-      // so the tool stays enabled on the server and looks disabled here.
-      // A newer edit is left alone; its own save still has the latest list.
-      const rejectedTools = patchOverrides?.disabledBuiltinTools;
-      if (rejectedTools !== undefined) {
-        setDisabledBuiltinTools((current) =>
-          sameStringList(current, rejectedTools) ? [...persistedDisabledToolsRef.current] : current,
-        );
-      }
     } finally {
-      setSaving(false);
+      pendingSavesRef.current -= 1;
+      if (pendingSavesRef.current === 0) {
+        setDisabledBuiltinTools([...persistedDisabledToolsRef.current]);
+      }
+      setSaving(pendingSavesRef.current > 0);
     }
   }
   executeSaveRef.current = executeSave;
@@ -423,9 +453,17 @@ export function BotSettings({
     // Serialize full-object auto-saves so an older in-flight request cannot
     // finish after a newer one and clobber fields. Always call through a ref so
     // queued work reads the latest field values, not a stale render closure.
+    pendingSavesRef.current += 1;
+    const queuedPatch =
+      patchOverrides?.disabledBuiltinTools === undefined
+        ? patchOverrides
+        : {
+            ...patchOverrides,
+            baseDisabledBuiltinTools: [...persistedDisabledToolsRef.current],
+          };
     saveQueueRef.current = saveQueueRef.current
       .catch(() => undefined)
-      .then(() => executeSaveRef.current(patchOverrides));
+      .then(() => executeSaveRef.current(queuedPatch));
     return saveQueueRef.current;
   }
 

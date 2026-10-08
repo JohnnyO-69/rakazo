@@ -386,8 +386,14 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "cloud_agent_status",
 ]);
 /** Added to the turn prompt when the user spoke this message on a live voice call. */
-export const VOICE_CALL_INSTRUCTION =
-  "You are on a live voice call. Reply in one to three short spoken sentences. No markdown, lists, links, or option cards; do not use ask_user unless you truly cannot proceed. Answer directly from what you already know when you can; use tools or subagents only when the answer requires them. If the user asks to end the call or hang up, or the conversation is finished, call end_call with a short title and a one-sentence farewell instead of saying goodbye in text, then do any remaining work as a normal chat reply.";
+const VOICE_CALL_BASE_INSTRUCTION =
+  "You are on a live voice call. Reply in one to three short spoken sentences. No markdown, lists, links, or option cards; do not use ask_user unless you truly cannot proceed. Answer directly from what you already know when you can; use tools or subagents only when the answer requires them.";
+export const VOICE_CALL_INSTRUCTION = `${VOICE_CALL_BASE_INSTRUCTION} If the user asks to end the call or hang up, or the conversation is finished, call end_call with a short title and a one-sentence farewell instead of saying goodbye in text, then do any remaining work as a normal chat reply.`;
+export function voiceCallInstruction(disabled?: ReadonlySet<string>): string {
+  return builtinOffered(disabled, "end_call")
+    ? VOICE_CALL_INSTRUCTION
+    : VOICE_CALL_BASE_INSTRUCTION;
+}
 const MAX_MODEL_FILE_BYTES = 250_000;
 const TURN_ATTACHMENT_UNAVAILABLE =
   "An attachment in this message could not be loaded. Tell the user the attachment was unavailable and do not guess its contents.";
@@ -6202,7 +6208,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           takeoverResume?.promptNote,
           approvalContinuation,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
-          voiceCall && !callEndRun ? VOICE_CALL_INSTRUCTION : undefined,
+          voiceCall && !callEndRun ? voiceCallInstruction(disabledBuiltinTools) : undefined,
           // Per-turn, not in the system prompt: the timestamp changes every call and would break the cacheable prefix.
           formatCurrentTimeInstruction(),
         ]
@@ -7354,10 +7360,11 @@ export function persistentComputerInstruction(options: {
   }
   const useTools = fileAndShellClause(disabled);
   const toolSentence = useTools ? ` ${useTools}` : "";
+  const capabilities = files ? " filesystem" : shell ? " shell" : "";
   if (options.graphical) {
-    return `You have a persistent computer filesystem and shell. ${MODEL_CANNOT_SEE_MESSAGE} Desktop observe and act tools are unavailable until a vision-capable model is selected.${toolSentence}`;
+    return `You have a persistent computer${capabilities}. ${MODEL_CANNOT_SEE_MESSAGE} Desktop observe and act tools are unavailable until a vision-capable model is selected.${toolSentence}`;
   }
-  return `You have a persistent sandbox filesystem and shell. This backend does not provide model-visible graphical control.${toolSentence}`;
+  return `You have a persistent sandbox${capabilities}. This backend does not provide model-visible graphical control.${toolSentence}`;
 }
 
 export function dockerComputerToolInstruction(

@@ -20,6 +20,8 @@ import {
   toolCompletionAuditPayload,
   toolCompletionFromResult,
   userTurnInstructions,
+  VOICE_CALL_INSTRUCTION,
+  voiceCallInstruction,
   withRecentTurnImages,
 } from "./executor.js";
 import { UnavailableModelForAuthError } from "./model-selection.js";
@@ -1329,7 +1331,54 @@ describe("dockerComputerToolInstruction", () => {
   });
 });
 
+describe("voiceCallInstruction", () => {
+  it("preserves live-call guidance when end_call is offered", () => {
+    expect(voiceCallInstruction()).toBe(
+      "You are on a live voice call. Reply in one to three short spoken sentences. No markdown, lists, links, or option cards; do not use ask_user unless you truly cannot proceed. Answer directly from what you already know when you can; use tools or subagents only when the answer requires them. If the user asks to end the call or hang up, or the conversation is finished, call end_call with a short title and a one-sentence farewell instead of saying goodbye in text, then do any remaining work as a normal chat reply.",
+    );
+    expect(voiceCallInstruction(new Set())).toBe(VOICE_CALL_INSTRUCTION);
+    expect(voiceCallInstruction(new Set(["shell"]))).toBe(VOICE_CALL_INSTRUCTION);
+  });
+
+  it("keeps spoken guidance without prescribing an unavailable hang-up tool", () => {
+    const instruction = voiceCallInstruction(new Set(["end_call"]));
+    expect(instruction).toContain("Reply in one to three short spoken sentences.");
+    expect(instruction).not.toContain("end_call");
+  });
+});
+
 describe("persistentComputerInstruction", () => {
+  it("preserves the default sandbox guidance byte for byte", () => {
+    expect(
+      persistentComputerInstruction({
+        heldForTakeover: false,
+        graphicalToolsAllowed: false,
+        graphical: false,
+      }),
+    ).toBe(
+      "You have a persistent sandbox filesystem and shell. This backend does not provide model-visible graphical control, so use the file tools and shell.",
+    );
+  });
+
+  it.each([false, true])(
+    "names only available non-graphical capabilities (graphical: %s)",
+    (graphical) => {
+      const instruction = (disabled: string[]) =>
+        persistentComputerInstruction({
+          heldForTakeover: false,
+          graphicalToolsAllowed: false,
+          graphical,
+          disabled: new Set(disabled),
+        });
+      const filesOff = ["list_files", "read_file", "write_file", "attach_file"];
+      expect(instruction(["shell"])).not.toContain("shell");
+      expect(instruction(["shell"])).toContain("filesystem");
+      expect(instruction(filesOff)).not.toContain("filesystem");
+      expect(instruction(filesOff)).toContain("shell");
+      expect(instruction([...filesOff, "shell"])).not.toMatch(/filesystem|shell|file tools/);
+    },
+  );
+
   it("keeps the desktop guidance when every desktop tool is offered", () => {
     const instruction = persistentComputerInstruction({
       heldForTakeover: false,
