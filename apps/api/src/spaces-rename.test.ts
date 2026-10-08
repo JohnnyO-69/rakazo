@@ -131,21 +131,24 @@ describe("spaces.rename", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("rejects a blank name before touching the space", async () => {
-    const { transaction, handler } = renameHarness({
-      organizationId: "org-1",
-      role: "owner",
-      deletingAt: null,
-    });
+  it.each(["   ", "x".repeat(61)])(
+    "rejects an invalid name before touching the space",
+    async (name) => {
+      const { transaction, handler } = renameHarness({
+        organizationId: "org-1",
+        role: "owner",
+        deletingAt: null,
+      });
 
-    const { response } = await handler.handle(renameRequest("   "), {
-      prefix: "/rpc",
-      context: { actor },
-    });
+      const { response } = await handler.handle(renameRequest(name), {
+        prefix: "/rpc",
+        context: { actor },
+      });
 
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(transaction).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(transaction).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects rename while deletion is in progress", async () => {
     const { update, handler } = renameHarness({

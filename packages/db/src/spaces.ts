@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Prisma, type PrismaClient } from "./client.js";
+import type { PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
 import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -245,7 +246,7 @@ export async function createSpaceForMember(
   return { id: spaceId, name };
 }
 
-type EmptySpaceDeleteInput = {
+type SpaceMemberTargetInput = {
   currentSpaceId: string;
   userId: string;
   spaceId: string;
@@ -277,11 +278,14 @@ async function lockSpaceDeletion(tx: Prisma.TransactionClient, spaceId: string):
   `);
 }
 
-type ClaimedSpaceDeleteInput = EmptySpaceDeleteInput & { claimId: string };
+type ClaimedSpaceDeleteInput = SpaceMemberTargetInput & { claimId: string };
 
 type SpaceDeleteDb = Pick<PrismaClient, "spaceMember" | "bot" | "chatGroup" | "computer">;
 
-async function loadActorSpace(db: Pick<PrismaClient, "spaceMember">, input: EmptySpaceDeleteInput) {
+async function loadActorSpace(
+  db: Pick<PrismaClient, "spaceMember">,
+  input: SpaceMemberTargetInput,
+) {
   const currentMembership = await db.spaceMember.findUnique({
     where: {
       spaceId_userId: {
@@ -318,7 +322,7 @@ async function loadActorSpace(db: Pick<PrismaClient, "spaceMember">, input: Empt
 
 async function assertEmptySpaceDeletable(
   db: SpaceDeleteDb,
-  input: EmptySpaceDeleteInput,
+  input: SpaceMemberTargetInput,
 ): Promise<{
   organizationId: string;
   memberships: Array<{
@@ -376,7 +380,7 @@ async function assertEmptySpaceDeletable(
  * while an old destroy may still be in flight. */
 export async function claimEmptySpaceDeletionForMember(
   prisma: PrismaClient,
-  input: EmptySpaceDeleteInput,
+  input: SpaceMemberTargetInput,
 ): Promise<{
   claimId: string;
   recovered: boolean;
@@ -489,7 +493,7 @@ export async function deleteEmptySpaceForMember(
 /** Rename a space the caller owns in the active organization. */
 export async function renameSpaceForMember(
   prisma: PrismaClient,
-  input: EmptySpaceDeleteInput & { name: string },
+  input: SpaceMemberTargetInput & { name: string },
 ): Promise<{ id: string; name: string }> {
   const name = normalizeSpaceName(input.name);
   return withTransactionRetry(() =>

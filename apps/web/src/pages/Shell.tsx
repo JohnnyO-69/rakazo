@@ -2942,13 +2942,13 @@ export function ShellPage() {
                   nestedRows.flatMap((row) =>
                     row.item.kind === "bot" && row.parentId === parentId ? [row.item.chat.id] : [],
                   );
-                const spaceActionsOpen = group.canRenameSpace || group.canDeleteSpace;
+                const hasSpaceActions = group.canRenameSpace || group.canDeleteSpace;
                 return (
                   <div key={group.key} data-sidebar-group={group.key}>
-                    {group.title || spaceActionsOpen ? (
+                    {group.title || hasSpaceActions ? (
                       <div
                         className={
-                          group.title && spaceActionsOpen
+                          group.title && hasSpaceActions
                             ? "grid pt-3 pb-0.5"
                             : `flex items-center pt-3 pb-0.5${group.title ? "" : " justify-end"}`
                         }
@@ -2956,7 +2956,7 @@ export function ShellPage() {
                         {group.title ? (
                           <button
                             type="button"
-                            className={`flex min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring ${group.title && spaceActionsOpen ? "col-start-1 row-start-1 w-full pe-8" : "flex-1"}`}
+                            className={`flex min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring ${hasSpaceActions ? "col-start-1 row-start-1 w-full pe-8" : "flex-1"}`}
                             onClick={() => {
                               if (group.emptySpaceId) {
                                 openSpaceChat(group.emptySpaceId, "/onboarding");
@@ -2986,7 +2986,7 @@ export function ShellPage() {
                                       position: { x: event.clientX, y: event.clientY },
                                     });
                                   }
-                                : spaceActionsOpen
+                                : hasSpaceActions
                                   ? (event) => {
                                       event.preventDefault();
                                       spaceMenuAnchor.current = event.currentTarget;
@@ -3026,7 +3026,7 @@ export function ShellPage() {
                             )}
                           </button>
                         ) : null}
-                        {spaceActionsOpen ? (
+                        {hasSpaceActions ? (
                           <Button
                             variant="ghost"
                             size="icon-sm"

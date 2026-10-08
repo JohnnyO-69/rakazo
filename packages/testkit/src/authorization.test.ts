@@ -661,10 +661,23 @@ describeWithDatabase("API authorization and resource isolation", () => {
           spaceId: otherWorkspaceId,
           organizationId: otherOrganizationId,
           userId: original.userId,
+          role: "owner",
           createdAt: new Date(),
         },
       }),
     ]);
+
+    // Owning a target in a different organization does not authorize a rename
+    // from the active organization.
+    await expect(
+      raw(app, cookie, "spaces/rename", { spaceId: otherWorkspaceId, name: "Wrong organization" }),
+    ).resolves.toMatchObject({ status: 404 });
+    await expect(
+      handles.prisma.space.findUniqueOrThrow({
+        where: { id: otherWorkspaceId },
+        select: { name: true },
+      }),
+    ).resolves.toEqual({ name: "Other company space" });
 
     const supportMe = await rpc<Actor>(app, cookie, "me", {}, support.id);
     expect(supportMe.spaceId).toBe(support.id);
@@ -1171,6 +1184,9 @@ describeWithDatabase("API authorization and resource isolation", () => {
       canDelete: false,
       canRename: false,
     });
+    await expect(
+      raw(app, cookie, "spaces/rename", { spaceId: space.id, name: "Blocked" }, space.id),
+    ).resolves.toMatchObject({ status: 409 });
     const blockedCreate = await raw(app, cookie, "bots/create", botInput("Racing bot"), space.id);
     expect(blockedCreate.ok).toBe(false);
     expect(blockedCreate.status).toBe(409);
@@ -1191,6 +1207,12 @@ describeWithDatabase("API authorization and resource isolation", () => {
       canDelete: true,
       canRename: false,
     });
+    await expect(
+      raw(app, cookie, "spaces/rename", { spaceId: space.id, name: "Still blocked" }, space.id),
+    ).resolves.toMatchObject({ status: 409 });
+    await expect(
+      handles.prisma.space.findUniqueOrThrow({ where: { id: space.id }, select: { name: true } }),
+    ).resolves.toEqual({ name: "Concurrent" });
     const replacementClaim = await claimEmptySpaceDeletionForMember(handles.prisma, deleteInput);
     expect(replacementClaim.recovered).toBe(true);
     await expect(
