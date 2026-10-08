@@ -110,3 +110,22 @@ it("allows retrying a failed download after its consumers leave", async () => {
   expect(container.querySelector("img")).not.toBeNull();
   expect(rpc.artifacts.get).toHaveBeenCalledTimes(2);
 });
+
+it("retries a failed download while its original consumer stays mounted", async () => {
+  vi.mocked(rpc.artifacts.get).mockRejectedValueOnce(new Error("unavailable"));
+  await act(async () => root.render(<Image key="first" target={{ botId: "bot" }} />));
+  expect(container.querySelector("img")).toBeNull();
+  expect(rpc.artifacts.get).toHaveBeenCalledOnce();
+
+  await act(async () =>
+    root.render(
+      <>
+        <Image key="first" target={{ botId: "bot" }} />
+        <Image key="second" target={{ botId: "bot" }} />
+      </>,
+    ),
+  );
+  expect(rpc.artifacts.get).toHaveBeenCalledTimes(2);
+  expect(container.querySelectorAll("img")).toHaveLength(1);
+  expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:photo");
+});

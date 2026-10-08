@@ -40,6 +40,10 @@ function acquireDownload(target: ArtifactTarget, artifactId: string) {
           );
           return entry.objectUrl;
         })
+        .catch((error) => {
+          if (downloads.get(key) === entry) downloads.delete(key);
+          throw error;
+        })
         .finally(() => {
           entry.settled = true;
           releaseUnusedDownload(key, entry);
