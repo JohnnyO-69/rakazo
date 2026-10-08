@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, TextInput, View } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ComputerKeyboardCommand, ComputerKeyName } from "../lib/computer-keyboard";
@@ -11,7 +11,7 @@ import {
 } from "../lib/computer-keyboard";
 import { useI18n } from "../lib/i18n";
 import { useMobileTokens, useResolvedAppearance } from "../lib/native";
-import { NativeSymbol } from "./native-symbol";
+import { NativeActionButton } from "./native-action-button";
 
 function keySpecs(t: (message: string) => string): Array<{
   name: ComputerKeyName;
@@ -84,8 +84,6 @@ export function ComputerKeyboardBar({
   }
 
   const keys = keySpecs(t);
-  const keyChrome = { borderColor: tokens.border, backgroundColor: tokens.muted };
-  const labelColor = { color: tokens.foreground };
 
   return (
     <View
@@ -119,72 +117,49 @@ export function ComputerKeyboardBar({
         accessibilityLabel={t("Computer keyboard")}
         style={styles.input}
       />
-      <Pressable
-        accessibilityRole="button"
+      <NativeActionButton
         accessibilityLabel={open ? t("Hide keyboard") : t("Show keyboard")}
-        accessibilityState={{ selected: open }}
+        icon={{ ios: "keyboard", android: "keypad-outline" }}
+        size="compact"
+        prominence="secondary"
+        fill
+        selected={open}
         onPress={() => (open ? inputRef.current?.blur() : inputRef.current?.focus())}
-        hitSlop={4}
-        style={[
-          styles.toggle,
-          open ? { borderColor: tokens.primary, backgroundColor: tokens.primary } : keyChrome,
-        ]}
-      >
-        <NativeSymbol
-          ios="keyboard"
-          android="keypad-outline"
-          size={18}
-          color={open ? tokens.primaryForeground : tokens.foreground}
-        />
-      </Pressable>
+        style={styles.toggle}
+      />
       {keys.slice(0, 2).map((key) => (
-        <Pressable
+        <NativeActionButton
           key={key.name}
-          accessibilityRole="button"
+          label={key.label}
           accessibilityLabel={key.accessibilityLabel}
+          size="compact"
+          prominence="secondary"
+          fill
           onPress={() => press(key.name)}
-          hitSlop={4}
-          style={[styles.key, keyChrome]}
-        >
-          <Text numberOfLines={1} style={[styles.keyLabel, labelColor]}>
-            {key.label}
-          </Text>
-        </Pressable>
+          style={styles.key}
+        />
       ))}
-      <Pressable
-        accessibilityRole="button"
+      <NativeActionButton
+        label="Ctrl"
         accessibilityLabel={t("Control")}
-        accessibilityState={{ selected: control }}
+        size="compact"
+        prominence="secondary"
+        fill
+        selected={control}
         onPress={() => setControl((value) => !value)}
-        hitSlop={4}
-        style={[
-          styles.key,
-          control ? { borderColor: tokens.primary, backgroundColor: tokens.primary } : keyChrome,
-        ]}
-      >
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.keyLabel,
-            { color: control ? tokens.primaryForeground : tokens.foreground },
-          ]}
-        >
-          Ctrl
-        </Text>
-      </Pressable>
+        style={styles.key}
+      />
       {keys.slice(2).map((key) => (
-        <Pressable
+        <NativeActionButton
           key={key.name}
-          accessibilityRole="button"
+          label={key.label}
           accessibilityLabel={key.accessibilityLabel}
+          size="compact"
+          prominence="secondary"
+          fill
           onPress={() => press(key.name)}
-          hitSlop={4}
-          style={[styles.key, keyChrome]}
-        >
-          <Text numberOfLines={1} style={[styles.arrowLabel, labelColor]}>
-            {key.label}
-          </Text>
-        </Pressable>
+          style={styles.key}
+        />
       ))}
     </View>
   );
@@ -207,24 +182,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
   },
-  toggle: {
-    width: 40,
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  key: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 2,
-  },
-  keyLabel: { fontSize: 13, fontWeight: "600" },
-  arrowLabel: { fontSize: 16 },
+  toggle: { width: 40 },
+  key: { flex: 1, minWidth: 0 },
 });

@@ -141,6 +141,8 @@ test("touch users can open and dismiss the remote computer keyboard", async ({
       [99, undefined, false],
       [0xffe3, "ControlLeft", false],
     ]);
+  await page.getByRole("button", { name: "Ctrl" }).click();
+  await expect(page.getByRole("button", { name: "Ctrl" })).toHaveAttribute("aria-pressed", "true");
   await captureScreenshot(page, testInfo, "mobile-computer-keyboard-open");
 
   await page.getByRole("button", { name: "Hide keyboard" }).click();

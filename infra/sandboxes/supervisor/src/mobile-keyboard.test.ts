@@ -164,7 +164,6 @@ function keyboardFixture(
     focus: () => {},
     blur: () => {},
     setSelectionRange: () => {},
-    setAttribute: () => {},
   };
   const documentTarget = {
     activeElement: input as unknown,

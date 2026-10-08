@@ -9,6 +9,8 @@ import { NativeActionButton as IosButton } from "../components/native-action-but
 
 const platform = vi.hoisted(() => ({ OS: "ios", Version: 26 }));
 const swiftButton = vi.hoisted(() => vi.fn());
+const swiftLabel = vi.hoisted(() => vi.fn());
+const swiftHost = vi.hoisted(() => vi.fn());
 
 vi.mock("react-native", () => ({
   Platform: platform,
@@ -16,11 +18,21 @@ vi.mock("react-native", () => ({
   Pressable: ({
     children,
     style,
+    accessibilityState,
+    accessibilityLabel,
   }: {
     children: ReactNode;
+    accessibilityState?: { selected?: boolean; disabled?: boolean };
+    accessibilityLabel?: string;
     style: (state: { pressed: boolean }) => CSSProperties[];
   }) => (
-    <button type="button" style={Object.assign({}, ...style({ pressed: false }))}>
+    <button
+      type="button"
+      aria-label={accessibilityLabel}
+      aria-pressed={accessibilityState?.selected}
+      disabled={accessibilityState?.disabled}
+      style={Object.assign({}, ...style({ pressed: false }))}
+    >
       {children}
     </button>
   ),
@@ -28,15 +40,23 @@ vi.mock("react-native", () => ({
     <span style={style}>{children}</span>
   ),
 }));
+vi.mock("../components/native-symbol", () => ({ NativeSymbol: () => <i /> }));
 vi.mock("./native", () => ({
   useMobileTokens: () => tokensForAppearance("light"),
   useResolvedAppearance: () => "light",
   native: { label: tokensForAppearance("light").foreground },
 }));
 vi.mock("@expo/ui/swift-ui", () => ({
-  Host: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  Button: (props: unknown) => {
+  Host: (props: { children: ReactNode }) => {
+    swiftHost(props);
+    return <div>{props.children}</div>;
+  },
+  Button: (props: { children?: ReactNode }) => {
     swiftButton(props);
+    return props.children;
+  },
+  Label: (props: unknown) => {
+    swiftLabel(props);
     return null;
   },
   ProgressView: () => null,
@@ -47,6 +67,9 @@ vi.mock("@expo/ui/swift-ui/modifiers", () => {
   return Object.fromEntries(
     [
       "accessibilityLabel",
+      "accessibilityAddTraits",
+      "accessibilityRemoveTraits",
+      "labelStyle",
       "buttonStyle",
       "controlSize",
       "disabled",
@@ -59,7 +82,11 @@ vi.mock("@expo/ui/swift-ui/modifiers", () => {
   );
 });
 
-beforeEach(() => swiftButton.mockClear());
+beforeEach(() => {
+  swiftButton.mockClear();
+  swiftLabel.mockClear();
+  swiftHost.mockClear();
+});
 
 describe("iOS action styling", () => {
   it.each([18, 26])("keeps quiet actions small and muted on iOS %s", (version) => {
@@ -122,5 +149,87 @@ describe("fallback action styling", () => {
         ? tokensForAppearance("light").mutedForeground
         : tokensForAppearance("light").foreground;
     expect(label.style.color).toBe(expected.style.color);
+  });
+});
+
+describe("compact native actions", () => {
+  it.each([18, 26])("uses a small system icon and selected style on iOS %s", (version) => {
+    platform.Version = version;
+    renderToStaticMarkup(
+      <IosButton
+        accessibilityLabel="Keyboard"
+        icon={{ ios: "keyboard", android: "keypad-outline" }}
+        size="compact"
+        prominence="secondary"
+        fill
+        selected
+        onPress={() => {}}
+      />,
+    );
+    expect(swiftButton.mock.lastCall?.[0]).toMatchObject({
+      systemImage: "keyboard",
+      modifiers: expect.arrayContaining([
+        { name: "controlSize", value: "small" },
+        { name: "labelStyle", value: "iconOnly" },
+        { name: "buttonStyle", value: version >= 26 ? "glassProminent" : "borderedProminent" },
+        { name: "accessibilityAddTraits", value: ["isSelected"] },
+        { name: "accessibilityLabel", value: "Keyboard" },
+      ]),
+    });
+    expect(swiftLabel.mock.lastCall?.[0]).toMatchObject({
+      title: "Keyboard",
+      systemImage: "keyboard",
+      modifiers: [{ name: "frame", value: { maxWidth: Infinity } }],
+    });
+    expect(swiftHost.mock.lastCall?.[0].style[0].minHeight).toBeUndefined();
+    renderToStaticMarkup(
+      <IosButton
+        accessibilityLabel="Keyboard"
+        icon={{ ios: "keyboard", android: "keypad-outline" }}
+        size="compact"
+        fill={false}
+        onPress={() => {}}
+      />,
+    );
+    expect(swiftButton.mock.lastCall?.[0]).toMatchObject({
+      label: "Keyboard",
+      systemImage: "keyboard",
+    });
+    renderToStaticMarkup(
+      <IosButton label="Ctrl" size="compact" fill selected={false} onPress={() => {}} />,
+    );
+    expect(swiftButton.mock.lastCall?.[0].modifiers).toEqual(
+      expect.arrayContaining([
+        { name: "buttonStyle", value: version >= 26 ? "glass" : "bordered" },
+        { name: "accessibilityRemoveTraits", value: ["isSelected"] },
+      ]),
+    );
+  });
+  it("shows a selected fallback without a minimum height", () => {
+    const host = document.createElement("div");
+    host.innerHTML = renderToStaticMarkup(
+      <FallbackButton label="Ctrl" size="compact" selected onPress={() => {}} />,
+    );
+    const button = host.querySelector("button")!;
+    expect(button.style.minHeight).toBe("");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    const expected = document.createElement("div");
+    expected.style.backgroundColor = tokensForAppearance("light").primary;
+    expect(button.style.backgroundColor).toBe(expected.style.backgroundColor);
+    host.innerHTML = renderToStaticMarkup(
+      <FallbackButton
+        accessibilityLabel="Keyboard"
+        icon={{ ios: "keyboard", android: "keypad-outline" }}
+        size="compact"
+        prominence="secondary"
+        fill={false}
+        selected={false}
+        onPress={() => {}}
+      />,
+    );
+    expect(host.querySelector("button")?.getAttribute("aria-pressed")).toBe("false");
+    expect(host.querySelector("button")?.getAttribute("aria-label")).toBe("Keyboard");
+    expect(host.querySelector("button")?.style.backgroundColor).toBe("transparent");
+    expect(host.querySelector("i")).not.toBeNull();
   });
 });
