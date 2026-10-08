@@ -3685,14 +3685,19 @@ const MessageBubble = memo(function MessageBubble({
           </Text>
         ) : null}
         {caption ? (
-          <Text
-            style={{
-              color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
-              fontSize: 15,
-            }}
-          >
-            {caption}
-          </Text>
+          message.role === "user" ? (
+            <LinkifiedText color={tokens.secondaryForeground} linkColor={tokens.link}>
+              {caption}
+            </LinkifiedText>
+          ) : (
+            <ChatMarkdown
+              palette={tokens}
+              colorScheme={colorScheme}
+              streaming={message.id.startsWith("progress:")}
+            >
+              {caption}
+            </ChatMarkdown>
+          )
         ) : null}
         {attachments.map((attachment, index) =>
           attachment.kind === "image" ? (
