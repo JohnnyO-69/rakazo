@@ -11,7 +11,7 @@ import Markdown, {
   MarkdownStream,
 } from "@ronradtke/react-native-markdown-display";
 import type { ReactNode } from "react";
-import { createContext, memo, useContext, useMemo, useState } from "react";
+import { createContext, memo, useCallback, useContext, useMemo, useState } from "react";
 import type {
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -20,6 +20,8 @@ import type {
   ViewStyle,
 } from "react-native";
 import {
+  Alert,
+  I18nManager,
   Image,
   Linking,
   Platform,
@@ -37,6 +39,7 @@ import {
   linkFaviconOrigin,
   linkifyExplicitUrls,
   linkLabel,
+  markdownLinkRequiresConfirmation,
   markRemoteImageLoaded,
   plainTextLinkParts,
   RemoteImagesContext,
@@ -45,6 +48,8 @@ import {
   sanitizeMarkdownUrl,
   useLinkFavicon,
 } from "./markdown";
+
+import { useMarkdownLinkAppOrigin, useMarkdownLinkCopy } from "./markdown-link-prompt";
 
 function keepMarkdownLinkToken(_url: string) {
   return true;
@@ -64,6 +69,18 @@ const POP_ISOLATE = "\u2069";
 const markdownParser = createMarkdownIt();
 markdownParser.validateLink = keepMarkdownLinkToken;
 linkifyExplicitUrls(markdownParser);
+
+// Hebrew, Arabic and the other right-to-left scripts, with their presentation forms.
+const RTL_LETTER =
+  /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+
+// iOS shapes each paragraph by its first letter but aligns it, and orders rows, by the app's
+// direction. Returns the text's direction when it differs from the app's.
+function contraryDirection(text: string) {
+  const rtl = RTL_LETTER.test(/\p{L}/u.exec(text)?.[0] ?? "");
+  if (rtl === I18nManager.isRTL) return undefined;
+  return rtl ? "rtl" : "ltr";
+}
 
 function markdownStyles(palette: ColorTokens) {
   return StyleSheet.create({
@@ -223,9 +240,69 @@ async function openSafeLink(url: string) {
   if (await Linking.canOpenURL(safeUrl)) await Linking.openURL(safeUrl);
 }
 
-function openMarkdownLink(href: string, event: { defaultPrevented: boolean }) {
-  if (event.defaultPrevented) return;
-  void openSafeLink(href);
+const OpenLinkContext = createContext<(url: string) => void>(() => undefined);
+
+function useNativeLinkConfirm() {
+  const appOrigin = useMarkdownLinkAppOrigin();
+  const copy = useMarkdownLinkCopy();
+  return useCallback(
+    (raw: string) => {
+      const url = sanitizeMarkdownUrl(raw);
+      if (!url) return;
+      if (!markdownLinkRequiresConfirmation(url, appOrigin)) {
+        void openSafeLink(url);
+        return;
+      }
+      // Keep the actual host visible even when userinfo or the path is very long.
+      Alert.alert(
+        copy.title,
+        `${new URL(url).host}\n\n${url}`,
+        [
+          { text: copy.cancel, style: "cancel" },
+          {
+            text: copy.open,
+            onPress: () => {
+              void openSafeLink(url);
+            },
+          },
+        ],
+        { cancelable: true },
+      );
+    },
+    [appOrigin, copy],
+  );
+}
+
+function NativeLink({
+  block = false,
+  href,
+  ...props
+}: {
+  block?: boolean;
+  href: string;
+  children?: ReactNode;
+  style?: StyleProp<TextStyle> | StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
+}) {
+  const open = useContext(OpenLinkContext);
+  const onPress = (event: { defaultPrevented: boolean }) => {
+    if (!event.defaultPrevented) open(href);
+  };
+  return block ? (
+    <Pressable
+      {...props}
+      style={props.style as StyleProp<ViewStyle>}
+      accessibilityRole="link"
+      onPress={onPress}
+    />
+  ) : (
+    <Text
+      {...props}
+      style={props.style as StyleProp<TextStyle>}
+      accessibilityRole="link"
+      onPress={onPress}
+    />
+  );
 }
 
 function linkHost(href: string): string {
@@ -575,10 +652,14 @@ function listItemRule(
   styleMap: Parameters<RenderRule>[3],
 ): ReactNode {
   const body = StyleSheet.flatten(styleMap.body) as TextStyle | undefined;
+  // An item written against the app's direction puts its marker on the far side, read its way.
+  const direction = contraryDirection(cellPlainText(node));
+  const row = [styleMap._VIEW_SAFE_list_item, direction && layout.reversedRow];
   const marker: TextStyle = {
     color: body?.color,
     fontSize: body?.fontSize,
     lineHeight: body?.lineHeight,
+    writingDirection: direction,
   };
   // `parent` lists ancestors nearest first; the nearest list decides the marker, so an ordered
   // list nested in a bulleted one is numbered.
@@ -587,7 +668,7 @@ function listItemRule(
   );
   if (list?.type === "bullet_list") {
     return (
-      <View key={node.key} style={styleMap._VIEW_SAFE_list_item}>
+      <View key={node.key} style={row}>
         <Text style={[marker, styleMap.bullet_list_icon]} accessible={false}>
           {Platform.select({ android: "\u2022", ios: "\u00B7", default: "\u2022" })}
         </Text>
@@ -599,7 +680,7 @@ function listItemRule(
     const start = Number(list.attributes?.start);
     const number = Number.isFinite(start) ? start + node.index : node.index + 1;
     return (
-      <View key={node.key} style={styleMap._VIEW_SAFE_list_item}>
+      <View key={node.key} style={row}>
         <Text style={[marker, styleMap.ordered_list_icon]}>
           {number}
           {node.markup}
@@ -619,6 +700,14 @@ function listItemRule(
 // outside the text flow and collapses the bubble height, overlapping later messages.
 const renderRules: RenderRules = {
   list_item: listItemRule,
+  textgroup: (node, children, _parent, styleMap) => (
+    <Text
+      key={node.key}
+      style={[styleMap.textgroup, contraryDirection(cellPlainText(node)) && layout.farSideBlock]}
+    >
+      {children}
+    </Text>
+  ),
   text: (node, _children, parents, styleMap, inherited) => (
     <Text key={node.key} style={textStyleForParents(inherited, parents, styleMap)}>
       {node.content}
@@ -714,12 +803,11 @@ function renderMarkdownLink(
   if (!block && isWebsiteLink(node)) {
     const text = astText(node);
     return (
-      <Text
-        accessibilityRole="link"
+      <NativeLink
+        href={href}
         accessibilityLabel={text === undefined ? undefined : linkLabel(text, href)}
         key={node.key}
         style={styleMap.website_link}
-        onPress={(event) => openMarkdownLink(href, event)}
       >
         <LinkFavicon href={href} plate={styleMap.link_favicon_plate} />
         {WORD_JOINER}
@@ -730,30 +818,20 @@ function renderMarkdownLink(
           <Text style={styleMap.website_link_label}>{linkLabel(text, href)}</Text>
         )}
         {POP_ISOLATE}
-      </Text>
+      </NativeLink>
     );
   }
   if (!block) {
     return (
-      <Text
-        accessibilityRole="link"
-        key={node.key}
-        style={styleMap.link}
-        onPress={(event) => openMarkdownLink(href, event)}
-      >
+      <NativeLink href={href} key={node.key} style={styleMap.link}>
         {children}
-      </Text>
+      </NativeLink>
     );
   }
   return (
-    <Pressable
-      accessibilityRole="link"
-      key={node.key}
-      onPress={(event) => openMarkdownLink(href, event)}
-      style={styleMap.blocklink}
-    >
+    <NativeLink block href={href} key={node.key} style={styleMap.blocklink}>
       <View style={styleMap.image}>{children}</View>
-    </Pressable>
+    </NativeLink>
   );
 }
 
@@ -774,13 +852,7 @@ function LinkedRemoteImage({
   const [, setRevision] = useState(0);
   if (remoteImageRenders(image.href, loadRemote, false)) {
     return (
-      <Pressable
-        accessibilityRole="link"
-        onPress={() => {
-          void openSafeLink(href);
-        }}
-        style={styleMap.blocklink}
-      >
+      <NativeLink block href={href} style={styleMap.blocklink}>
         <View style={styleMap.image}>
           <FitImage
             indicator
@@ -790,7 +862,7 @@ function LinkedRemoteImage({
             accessibilityLabel={alt}
           />
         </View>
-      </Pressable>
+      </NativeLink>
     );
   }
   return (
@@ -804,15 +876,9 @@ function LinkedRemoteImage({
         styleMap={styleMap}
         onLoad={() => setRevision((revision) => revision + 1)}
       />
-      <Text
-        accessibilityRole="link"
-        style={styleMap.link}
-        onPress={() => {
-          void openSafeLink(href);
-        }}
-      >
+      <NativeLink href={href} style={styleMap.link}>
         {linkHost(href)}
-      </Text>
+      </NativeLink>
     </View>
   );
 }
@@ -893,6 +959,7 @@ export const LinkifiedText = memo(function LinkifiedText({
   linkColor,
   palette,
 }: LinkifiedTextProps) {
+  const openLink = useNativeLinkConfirm();
   const labelStyle: TextStyle = {
     color,
     fontWeight: "500",
@@ -900,11 +967,16 @@ export const LinkifiedText = memo(function LinkifiedText({
     textDecorationColor: palette.mutedForeground,
   };
   return (
-    <Text style={{ color, fontSize: BODY_FONT_SIZE, lineHeight: 23 }}>
+    <Text
+      style={[
+        { color, fontSize: BODY_FONT_SIZE, lineHeight: 23 },
+        contraryDirection(children) && layout.farSideText,
+      ]}
+    >
       {plainTextLinkParts(children).map((part, index) => {
         if (part.type === "text") return part.value;
         const open = () => {
-          void openSafeLink(part.href);
+          openLink(part.href);
         };
         if (!linkFaviconOrigin(part.href)) {
           return (
@@ -948,6 +1020,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   palette = darkTokens,
   colorScheme = "dark",
 }: ChatMarkdownProps & { palette?: ColorTokens; colorScheme?: ResolvedAppearance }) {
+  const openLink = useNativeLinkConfirm();
   const styles = useMemo(() => markdownStyles(palette), [palette]);
   const sharedProps = {
     colorScheme,
@@ -955,23 +1028,25 @@ export const ChatMarkdown = memo(function ChatMarkdown({
     style: styles,
     rules: renderRules,
     onLinkPress: (url: string) => {
-      void openSafeLink(url);
+      openLink(url);
       return false;
     },
   };
 
   return (
-    <View style={layout.wrap}>
-      <LinkFaviconsPausedContext.Provider value={streaming}>
-        {streaming ? (
-          <MarkdownStream {...sharedProps} cursorColor={palette.mutedForeground} streaming>
-            {children}
-          </MarkdownStream>
-        ) : (
-          <Markdown {...sharedProps}>{children}</Markdown>
-        )}
-      </LinkFaviconsPausedContext.Provider>
-    </View>
+    <OpenLinkContext.Provider value={openLink}>
+      <View style={layout.wrap}>
+        <LinkFaviconsPausedContext.Provider value={streaming}>
+          {streaming ? (
+            <MarkdownStream {...sharedProps} cursorColor={palette.mutedForeground} streaming>
+              {children}
+            </MarkdownStream>
+          ) : (
+            <Markdown {...sharedProps}>{children}</Markdown>
+          )}
+        </LinkFaviconsPausedContext.Provider>
+      </View>
+    </OpenLinkContext.Provider>
   );
 });
 
@@ -986,6 +1061,18 @@ const layout = StyleSheet.create({
     flexGrow: 1,
     flexShrink: 1,
     minWidth: 0,
+  },
+  reversedRow: {
+    flexDirection: "row-reverse",
+  },
+  // React Native mirrors `right` in a right-to-left app, so it is always the far side.
+  farSideText: {
+    textAlign: "right",
+  },
+  // A text group sits in a row; filling it lets a short line reach the far side too.
+  farSideBlock: {
+    textAlign: "right",
+    width: "100%",
   },
   // An inline view sits on the baseline; this drops it so it centres on the capitals. The gap
   // before the label is part of the view, since inline views do not keep their margins.
@@ -1011,3 +1098,5 @@ const layout = StyleSheet.create({
 
 export type { ChatMarkdownProps, LinkFavicons } from "./markdown";
 export { LinkFaviconsContext, RemoteImagesContext } from "./markdown";
+
+export { MarkdownLinkPromptProvider } from "./markdown-link-prompt";

@@ -4,10 +4,14 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+const alert = vi.hoisted(() => vi.fn());
+
 const linking = vi.hoisted(() => ({
   canOpenURL: vi.fn(async () => true),
   openURL: vi.fn(async () => undefined),
 }));
+
+const i18n = vi.hoisted(() => ({ isRTL: false }));
 
 // The load handler of each rendered Image, so a test can report its decoded size.
 const imageLoads = vi.hoisted(
@@ -100,6 +104,7 @@ vi.mock("react-native", async () => {
       "flexShrink",
       "flex",
       "flexGrow",
+      "flexDirection",
       "overflow",
       "accessibilityElementsHidden",
       "importantForAccessibility",
@@ -110,6 +115,9 @@ vi.mock("react-native", async () => {
       "textDecorationLine",
       "color",
       "fontWeight",
+      "textAlign",
+      "writingDirection",
+      "width",
     ]),
     ScrollView: mockComponent("rn-scroll-view", ["horizontal", "borderColor", "borderWidth"]),
     Pressable: mockComponent("rn-pressable", [
@@ -141,6 +149,8 @@ vi.mock("react-native", async () => {
         options.ios ?? options.default ?? options.android,
     },
     Linking: linking,
+    Alert: { alert },
+    I18nManager: i18n,
   };
 });
 
@@ -153,6 +163,7 @@ import {
   ChatMarkdown,
   LinkFaviconsContext,
   LinkifiedText,
+  MarkdownLinkPromptProvider,
   RemoteImagesContext,
   RemoteMarkdownImage,
 } from "./markdown.native";
@@ -389,6 +400,10 @@ describe("user message links", () => {
     await act(async () => {
       link?.click();
     });
+    expect(linking.openURL).not.toHaveBeenCalled();
+    await act(async () => {
+      alert.mock.calls.at(-1)?.[2][1].onPress();
+    });
     await vi.waitFor(() => {
       expect(linking.openURL).toHaveBeenCalledWith("https://example.com/docs");
     });
@@ -563,6 +578,10 @@ describe("native markdown images", () => {
     await act(async () => {
       liveLink?.click();
     });
+    expect(linking.openURL).not.toHaveBeenCalled();
+    await act(async () => {
+      alert.mock.calls.at(-1)?.[2][1].onPress();
+    });
     await vi.waitFor(() => {
       expect(linking.openURL).toHaveBeenCalledWith("https://ci.example.test/tap-linked");
     });
@@ -653,6 +672,158 @@ describe("native markdown images", () => {
     // The image component is a stub under test; a link would mean it fell back.
     expect(html).toContain("<rn-stub");
     expect(html).not.toContain("data-accessibility-role");
+  });
+});
+
+describe("message direction", () => {
+  const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
+  const directionAttributes =
+    /data-text-align|data-writing-direction|data-flex-direction="row-reverse"/;
+
+  function userBubble(text: string) {
+    const html = renderToStaticMarkup(
+      <LinkifiedText color={darkTokens.foreground} linkColor={darkTokens.link} palette={darkTokens}>
+        {text}
+      </LinkifiedText>,
+    );
+    return { html, root: parse(html).querySelector("rn-text") };
+  }
+
+  function botTextGroups(markdown: string) {
+    const document = parse(renderToStaticMarkup(<ChatMarkdown>{markdown}</ChatMarkdown>));
+    // A text group is the outermost text of a block; its leaves are nested texts.
+    const groups = [...document.querySelectorAll("rn-text")].filter(
+      (text) => text.parentElement?.tagName.toLowerCase() !== "rn-text",
+    );
+    return { document, groups };
+  }
+
+  function textOf(element: Element | null | undefined) {
+    return element?.textContent ?? "";
+  }
+
+  it("right-aligns a user message whose first letter is Hebrew or Arabic", () => {
+    for (const text of [
+      "שלום! זה מבחן של טקסט בעברית בלבד, עם סימני פיסוק בסוף.",
+      "2026: مرحبا بالعالم، هذه رسالة طويلة بما يكفي لتلتف.",
+      "«שלום», see the CHANGELOG sentence.",
+    ]) {
+      const { root } = userBubble(text);
+      expect(root?.getAttribute("data-text-align")).toBe("right");
+      // iOS already shapes each paragraph by its own first letter.
+      expect(root?.hasAttribute("data-writing-direction")).toBe(false);
+    }
+  });
+
+  it("leaves Latin, CJK and messages that start in English as they were", () => {
+    for (const text of ["Hello there.", "你好，世界。", "Translate: שלום", "😀 123 !!", ""]) {
+      expect(userBubble(text).html).not.toMatch(directionAttributes);
+    }
+  });
+
+  it("aligns each bot block by its own first letter", () => {
+    const { groups } = botTextGroups(
+      [
+        "Fake reply 9. You said:",
+        "",
+        "## כותרת",
+        "",
+        "רשימה קצרה.",
+        "",
+        "See README.md.",
+        "",
+        "> ציטוט",
+      ].join("\n"),
+    );
+    const alignment = Object.fromEntries(
+      groups.map((group) => [
+        textOf(group),
+        [group.getAttribute("data-text-align"), group.getAttribute("data-width")],
+      ]),
+    );
+    expect(alignment).toEqual({
+      "Fake reply 9. You said:": [null, null],
+      כותרת: ["right", "100%"],
+      "רשימה קצרה.": ["right", "100%"],
+      "See README.md.": [null, null],
+      ציטוט: ["right", "100%"],
+    });
+  });
+
+  it("puts each list item's marker on its own side", () => {
+    const { document } = botTextGroups(
+      "- פריט ראשון\n- Install the CLI.\n\n1. אחד\n2. second\n3. שלוש",
+    );
+    const items = [...document.querySelectorAll("rn-view")].filter((view) => {
+      const marker = view.firstElementChild;
+      return marker?.tagName.toLowerCase() === "rn-text" && /^(\u00B7|\d\.)$/.test(textOf(marker));
+    });
+    expect(
+      items.map((item) => [
+        textOf(item.lastElementChild),
+        item.getAttribute("data-flex-direction"),
+        item.firstElementChild?.getAttribute("data-writing-direction") ?? null,
+      ]),
+    ).toEqual([
+      ["פריט ראשון", "row-reverse", "rtl"],
+      ["Install the CLI.", "row", null],
+      ["אחד", "row-reverse", "rtl"],
+      ["second", "row", null],
+      ["שלוש", "row-reverse", "rtl"],
+    ]);
+  });
+
+  it("renders an English block in a Hebrew-first reply the same as on its own", () => {
+    const englishItem = (markdown: string) =>
+      [...botTextGroups(markdown).document.querySelectorAll("rn-view")]
+        .filter(
+          (view) =>
+            textOf(view.firstElementChild) === "\u00B7" &&
+            textOf(view.lastElementChild) === "Install the CLI.",
+        )
+        .map((view) => view.outerHTML);
+    const englishParagraph = (markdown: string) =>
+      botTextGroups(markdown)
+        .groups.filter((group) => textOf(group) === "See README.md.")
+        .map((group) => group.outerHTML);
+    const mixed = "שלום רב.\n\n- פריט ראשון\n- Install the CLI.\n\nSee README.md.";
+    expect(englishItem(mixed)).toEqual(englishItem("- Install the CLI."));
+    expect(englishParagraph(mixed)).toEqual(englishParagraph("See README.md."));
+    expect(englishItem(mixed)).toHaveLength(1);
+  });
+
+  it("keeps code in a right-to-left message as it was", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown>{"שלום\n\n    indented();\n\n```\nfenced();\n```"}</ChatMarkdown>,
+    );
+    const code = [...parse(html).querySelectorAll("rn-text")].filter((text) =>
+      /indented|fenced/.test(textOf(text)),
+    );
+    expect(code.length).toBeGreaterThan(0);
+    for (const text of code) expect(text.outerHTML).not.toMatch(directionAttributes);
+  });
+
+  it("keeps a left-to-right bot message laid out as before", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown>
+        {"## Heading\n\nIntro שלום.\n\n- one\n- two\n\n1. first\n2. second"}
+      </ChatMarkdown>,
+    );
+    expect(html).not.toMatch(directionAttributes);
+  });
+
+  it("aligns an English message to the far side in a right-to-left app", () => {
+    i18n.isRTL = true;
+    try {
+      // React Native mirrors `right` in a right-to-left layout, so it lands on the left.
+      expect(userBubble("Hello there.").root?.getAttribute("data-text-align")).toBe("right");
+      expect(userBubble("שלום").html).not.toMatch(directionAttributes);
+      const { document } = botTextGroups("- Install the CLI.");
+      expect(document.querySelector('rn-view[data-flex-direction="row-reverse"]')).not.toBeNull();
+      expect(document.querySelector('rn-text[data-writing-direction="ltr"]')).not.toBeNull();
+    } finally {
+      i18n.isRTL = false;
+    }
   });
 });
 
@@ -898,5 +1069,113 @@ describe("native website links", () => {
     expect(mail?.querySelector("rn-view")).toBeNull();
     expect(mail?.getAttribute("data-color")).toBe(lightTokens.link);
     await view.cleanup();
+  });
+});
+
+describe("native external link confirmation", () => {
+  async function renderMarkdown(markdown: string, appOrigin?: string) {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    linking.openURL.mockClear();
+    alert.mockClear();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const body = <ChatMarkdown>{markdown}</ChatMarkdown>;
+    await act(async () => {
+      root.render(
+        appOrigin ? (
+          <MarkdownLinkPromptProvider appOrigin={appOrigin}>{body}</MarkdownLinkPromptProvider>
+        ) : (
+          body
+        ),
+      );
+    });
+    return {
+      container,
+      async cleanup() {
+        await act(async () => {
+          root.unmount();
+        });
+        container.remove();
+      },
+    };
+  }
+
+  it("asks before an external link and leaves it closed on cancel", async () => {
+    const view = await renderMarkdown("[Docs](https://example.test/docs?x=1)");
+    await act(async () => {
+      view.container.querySelector<HTMLElement>("[data-accessibility-role='link']")?.click();
+    });
+    expect(alert).toHaveBeenCalledWith(
+      "Open external link?",
+      "example.test\n\nhttps://example.test/docs?x=1",
+      expect.any(Array),
+      { cancelable: true },
+    );
+    expect(alert.mock.calls.at(-1)?.[2][0]).toMatchObject({ text: "Cancel", style: "cancel" });
+    expect(linking.openURL).not.toHaveBeenCalled();
+    expect(view.container.textContent).not.toContain("Open external link?");
+    await view.cleanup();
+  });
+
+  it("opens mailto and tel without asking", async () => {
+    const view = await renderMarkdown("[mail](mailto:user@example.test) [call](tel:+15551212)");
+    const links = view.container.querySelectorAll<HTMLElement>("[data-accessibility-role='link']");
+    expect(links).toHaveLength(2);
+    await act(async () => {
+      links[0]?.click();
+    });
+    await act(async () => {
+      links[1]?.click();
+    });
+    expect(view.container.textContent).not.toContain("Open external link?");
+    await vi.waitFor(() => {
+      expect(linking.openURL).toHaveBeenCalledWith("mailto:user@example.test");
+      expect(linking.openURL).toHaveBeenCalledWith("tel:+15551212");
+    });
+    await view.cleanup();
+  });
+
+  it("opens a same-origin link without asking", async () => {
+    const view = await renderMarkdown(
+      "[thread](https://app.example.test/threads/1)",
+      "https://app.example.test",
+    );
+    await act(async () => {
+      view.container.querySelector<HTMLElement>("[data-accessibility-role='link']")?.click();
+    });
+    expect(view.container.textContent).not.toContain("Open external link?");
+    await vi.waitFor(() => {
+      expect(linking.openURL).toHaveBeenCalledWith("https://app.example.test/threads/1");
+    });
+    await view.cleanup();
+  });
+});
+
+it("shows a full long native URL and opens it only on confirmation", async () => {
+  const url = `https://example.test/${"a".repeat(10000)}`;
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  alert.mockClear();
+  linking.openURL.mockClear();
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(<ChatMarkdown>{`[Docs](${url})`}</ChatMarkdown>);
+  });
+  await act(async () => {
+    container.querySelector<HTMLElement>("[data-accessibility-role='link']")?.click();
+  });
+  const [title, message, buttons, options] = alert.mock.calls.at(-1)!;
+  expect(title).toBe("Open external link?");
+  expect(message).toBe(`example.test\n\n${url}`);
+  expect(buttons.map((button: { text: string }) => button.text)).toEqual(["Cancel", "Open"]);
+  expect(options).toEqual({ cancelable: true });
+  expect(linking.openURL).not.toHaveBeenCalled();
+  await act(async () => {
+    buttons[1].onPress();
+  });
+  expect(linking.openURL).toHaveBeenCalledWith(url);
+  await act(async () => {
+    root.unmount();
   });
 });

@@ -63,6 +63,7 @@ import {
   expireComputerControl,
   forgetBotSecret,
   hasActiveComputerControl,
+  hostCredentialSource,
   isAutoReviewCheckerConfigured,
   isComputerScreenUnavailable,
   isSandboxGoneError,
@@ -86,6 +87,7 @@ import {
   prepareGraphqlInstall,
   prepareManagedConnectorForTransaction,
   prepareStoredModelAuth,
+  probeCatalogProviderModels,
   probeOpenAiCompatibleModels,
   provisionComputer,
   queueComputerUpdate,
@@ -109,6 +111,7 @@ import {
   toComputerRef,
   touchRunningComputer,
   UNAVAILABLE_MODEL_FOR_AUTH_MESSAGE,
+  validateConnectedModelChoice,
   validateModelAuthAvailability,
   validateStoredModelAuth,
   verifyMcpInstall,
@@ -173,6 +176,7 @@ import {
   InvalidSpaceNameError,
   IsolationError,
   issueMessagingLinkCode,
+  listSpaceBackupModels,
   lockOwnedGroup,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
@@ -182,6 +186,7 @@ import {
   releaseSpaceDeletionClaim,
   renameSpaceForMember,
   renewSpaceDeletionClaim,
+  replaceSpaceBackupModels,
   restoreBotUnderComputerQuota,
   SPACE_DELETION_CLAIM_TIMEOUT_MS,
   SpaceDeletionInProgressError,
@@ -562,7 +567,8 @@ export interface RouterDeps {
     teamChatJudgeModel?: string;
     defaultProvider: string;
     defaultModel: string;
-    deploymentModelKey?: string;
+    deploymentModelConfigured?: boolean;
+    deploymentModelHostCredentials?: boolean;
     webOrigin: string;
     privacyPolicyUrl?: string;
     screenProxySecret: string;
@@ -1123,6 +1129,63 @@ export function createRouter(deps: RouterDeps) {
           }),
         );
       }),
+      backups: authed.models.backups.handler(async ({ context }) =>
+        listSpaceBackupModels(deps.prisma, context.actor),
+      ),
+      setBackups: authed.models.setBackups.handler(async ({ context, input }) => {
+        if (input.length > 0) {
+          const auth = await modelCredentialAuthKindsForSpace(
+            deps.prisma,
+            deps.secrets,
+            context.actor,
+          );
+          const available = listAvailablePiCatalog(auth.byProvider, auth.byModel);
+          const live = await codexLiveCatalogsForSpace(
+            deps.prisma,
+            deps.secrets,
+            context.actor,
+            auth,
+            codexCatalog,
+            {
+              onExpiredToken: (secretId) =>
+                refreshExpiredCredential(context.actor, secretId, CHATGPT_OAUTH_PROVIDER),
+            },
+          );
+          const catalog = live.size > 0 ? applyCodexLiveCatalog(available, auth, live) : available;
+          for (const choice of input) {
+            const credential = await findModelCredential(
+              deps.prisma,
+              context.actor,
+              choice.provider,
+              choice.modelId,
+            );
+            if (!credential) {
+              throw new ORPCError("BAD_REQUEST", {
+                message: "Connect that model provider first",
+              });
+            }
+            if (
+              catalog.some(
+                (entry) => entry.provider === choice.provider && entry.id === choice.modelId,
+              )
+            )
+              continue;
+            const error = await validateConnectedModelChoice(
+              deps.prisma,
+              context.actor,
+              choice.provider,
+              choice.modelId,
+            );
+            if (error || choice.provider !== OPENAI_COMPATIBLE_PROVIDER_ID) {
+              throw new ORPCError("BAD_REQUEST", {
+                message: error ?? "That model is not available for this connection",
+              });
+            }
+          }
+        }
+        await replaceSpaceBackupModels(deps.prisma, context.actor, input);
+        return { ok: true as const };
+      }),
       connect: authed.models.connect.handler(async ({ context, input }) => {
         let plaintext: string;
         try {
@@ -1188,6 +1251,20 @@ export function createRouter(deps: RouterDeps) {
           }
         },
       ),
+      probeCatalog: authed.models.probeCatalog.handler(async ({ context, input }) => {
+        try {
+          const models = await probeCatalogProviderModels(
+            { provider: input.provider, apiKey: input.apiKey },
+            undefined,
+            context.signal,
+          );
+          return { models };
+        } catch (error) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: error instanceof Error ? error.message : "Could not list models",
+          });
+        }
+      }),
       beginOAuth: authed.models.beginOAuth.handler(async ({ context, input }) => {
         return deps.oauthLogins.begin({
           userId: context.actor.userId,
@@ -1412,6 +1489,9 @@ export function createRouter(deps: RouterDeps) {
         await withSerializableRetry(() =>
           deps.prisma.$transaction(
             async (tx) => {
+              await tx.spaceBackupModel.deleteMany({
+                where: { userId: context.actor.userId, provider: input.provider },
+              });
               const existing = await tx.userModelCredential.findMany({
                 where: { userId: context.actor.userId, provider: input.provider },
               });
@@ -5934,6 +6014,12 @@ async function loadAutoReviewSettings(deps: RouterDeps, actor: Actor) {
   return { enabled, checkerAvailable };
 }
 
+function hostCredentials(active: boolean, provider: string) {
+  return active
+    ? { hostCredentialProvider: provider, hostCredentialSource: hostCredentialSource(provider) }
+    : { hostCredentialProvider: null, hostCredentialSource: null };
+}
+
 async function meDto(deps: RouterDeps, actor: Actor): Promise<Me> {
   const [user, setup] = await Promise.all([
     deps.prisma.user.findUniqueOrThrow({ where: { id: actor.userId } }),
@@ -5952,6 +6038,13 @@ async function meDto(deps: RouterDeps, actor: Actor): Promise<Me> {
       deps.env.defaultProvider,
     defaultModel:
       setup.credential?.defaultModel ?? setup.settings?.defaultModelId ?? deps.env.defaultModel,
+    // Set only while the active default is the deployment's own, running on host credentials.
+    ...hostCredentials(
+      !setup.credential &&
+        !setup.settings?.defaultModelProvider &&
+        Boolean(deps.env.deploymentModelHostCredentials),
+      deps.env.defaultProvider,
+    ),
     computerHost: computerHostFor(setup.settings?.computerHost, deps.env.sandboxProvider),
     canChooseHostComputer: actor.isDeploymentOwner && deps.env.sandboxProvider === "docker",
     sandboxProvider: deps.env.sandboxProvider,
@@ -5970,7 +6063,7 @@ async function modelSetup(deps: RouterDeps, actor: Actor) {
     findDefaultModelCredential(deps.prisma, actor),
     deps.prisma.deploymentSettings.findUnique({ where: { id: "default" } }),
   ]);
-  const hasDeployment = Boolean(deps.env.deploymentModelKey);
+  const hasDeployment = Boolean(deps.env.deploymentModelConfigured);
   return {
     credential,
     settings,

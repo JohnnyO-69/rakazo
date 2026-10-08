@@ -275,8 +275,14 @@ export function attachMobileKeyboard(
     button.setAttribute("title", label);
     button.classList.toggle("active", open);
     viewportRoot.classList.toggle("mobile-keyboard-open", open);
-    if (open) updateVisibleViewport();
-    else clearVisibleViewport();
+    // The capture field is invisible; screen readers only meet it while it takes typing.
+    if (open) {
+      input.removeAttribute("aria-hidden");
+      updateVisibleViewport();
+    } else {
+      input.setAttribute("aria-hidden", "true");
+      clearVisibleViewport();
+    }
     rfb.focusOnClick = !open;
   };
   const namedKey = (name) => {

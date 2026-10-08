@@ -1,4 +1,6 @@
 export const DE_MESSAGES: Record<string, string> = {
+  "Try Again": "Erneut versuchen",
+  "Not sent · Tap to retry": "Nicht gesendet · Zum Wiederholen tippen",
   Photo: "Foto",
   Today: "Heute",
   Yesterday: "Gestern",
@@ -120,6 +122,7 @@ export const DE_MESSAGES: Record<string, string> = {
   "Clear conversation?": "Unterhaltung leeren?",
   "Cloud agent": "Cloud-Agent",
   Code: "Code",
+  "Command variable": "Befehlsvariable",
   Completed: "Abgeschlossen",
   Copy: "Kopieren",
   "Could not archive bot": "Bot konnte nicht archiviert werden",
@@ -313,6 +316,9 @@ export const DE_MESSAGES: Record<string, string> = {
   "Active model": "Aktives Modell",
   "Authorization code": "Autorisierungscode",
   "Configured by deployment": "Durch die Bereitstellung konfiguriert",
+  "Use your own key": "Eigenen Schlüssel verwenden",
+  "Uses this server's own {source} credentials to access {provider}.":
+    "Verwendet die eigenen {source}-Zugangsdaten dieses Servers für den Zugriff auf {provider}.",
   "Connect API key": "API-Schlüssel verbinden",
   "Connect MCP server {name}": "MCP-Server „{name}“ verbinden",
   "Connected and using {label}.": "Verbunden, {label} ist aktiv.",
@@ -531,7 +537,6 @@ export const DE_MESSAGES: Record<string, string> = {
   "Confirm password": "Passwort bestätigen",
   "Could not change password": "Passwort konnte nicht geändert werden",
   "New password": "Neues Passwort",
-  "Password updated": "Passwort aktualisiert",
   "Passwords do not match": "Die Passwörter stimmen nicht überein",
   // components/AskActions.tsx
   "Allow once": "Einmal erlauben",
@@ -679,6 +684,23 @@ export const DE_MESSAGES: Record<string, string> = {
   // lib/voice.ts
   "Could not play that clip.": "Dieser Clip konnte nicht abgespielt werden.",
   // app/models.tsx
+  "Add connected model": "Verbundenes Modell hinzufügen",
+  "Add connected models to use them as backups.":
+    "Füge verbundene Modelle hinzu, um sie als Backups zu verwenden.",
+  "Backup models": "Backup-Modelle",
+  "Backup models saved.": "Backup-Modelle gespeichert.",
+  "Connect a provider to add backups.": "Verbinde einen Anbieter, um Backups hinzuzufügen.",
+  "Could not load backup models": "Backup-Modelle konnten nicht geladen werden.",
+  "Could not save backup models": "Backup-Modelle konnten nicht gespeichert werden.",
+  "Maximum of 10 backup models.": "Maximal 10 Backup-Modelle.",
+  "Move {model} down": "{model} nach unten verschieben",
+  "Move {model} up": "{model} nach oben verschieben",
+  "Remove {model}": "{model} entfernen",
+  "Save backups": "Backups speichern",
+  "Space changed. Reload Models to refresh backup models.":
+    "Der Space wurde gewechselt. Lade Modelle neu, um die Backups zu aktualisieren.",
+  "Space changed. Reload Models before saving backups.":
+    "Der Space wurde gewechselt. Lade Modelle neu, bevor du Backups speicherst.",
   "A sign-in page opened — enter this code there:":
     "Eine Anmeldeseite wurde geöffnet — gib dort diesen Code ein:",
   "All providers": "Alle Anbieter",
@@ -712,16 +734,33 @@ export const DE_MESSAGES: Record<string, string> = {
   Transcript: "Transkript",
   Unmute: "Stummschaltung aufheben",
   "Voice chat": "Sprachchat",
+  "Open external link?": "Externen Link öffnen?",
+  Open: "Öffnen",
   // ai-data-sharing
+  "AI models": "KI-Modelle",
+  Memory: "Gedächtnis",
+  "Privacy policies": "Datenschutzerklärungen",
+  Rakazo: "Rakazo",
+  "Withdraw all permissions": "Alle Berechtigungen widerrufen",
+  "Withdraw all permissions?": "Alle Berechtigungen widerrufen?",
+  "New mobile actions won't send data to these services. Runs already in progress and routines keep going until you stop them.":
+    "Neue mobile Aktionen senden keine Daten an diese Dienste. Laufende Ausführungen und Routinen laufen weiter, bis du sie stoppst.",
+  Withdraw: "Widerrufen",
+  "Share data with {name}?": "Daten mit {name} teilen?",
+  "You can turn this off in Account → AI data sharing.":
+    "Du kannst dies unter Konto → KI-Datenfreigabe ausschalten.",
+  Allow: "Erlauben",
+  "Messages, chat history, bot instructions, memories, attachments, screenshots and connected-app content are sent to run your bots, including routines.":
+    "Nachrichten, Chatverlauf, Bot-Anweisungen, Erinnerungen, Anhänge, Screenshots und Inhalte verbundener Apps werden gesendet, um deine Bots auszuführen, einschließlich Routinen.",
+  "Your recordings are sent for transcription, and text you play is sent to generate speech.":
+    "Deine Aufnahmen werden zur Transkription gesendet, und Text, den du abspielst, wird zur Spracherzeugung gesendet.",
+  "Conversation summaries, memories, searches and bot and Space IDs are sent to store and recall context.":
+    "Gesprächszusammenfassungen, Erinnerungen, Suchanfragen sowie Bot- und Space-IDs werden gesendet, um Kontext zu speichern und abzurufen.",
   "AI data sharing": "KI-Datenfreigabe",
   "Allow {name} on mobile": "{name} auf dem Handy erlauben",
   "Could not load permissions.": "Berechtigungen konnten nicht geladen werden.",
   "No AI services configured.": "Keine KI-Dienste eingerichtet.",
   "Privacy policy": "Datenschutzerklärung",
-  "Provider privacy policy": "Datenschutzerklärung des Anbieters",
-  "Withdraw all mobile permissions": "Alle mobilen Berechtigungen widerrufen",
-  "Withdrawal applies to new mobile actions. Stop existing runs and disable routines separately.":
-    "Der Widerruf gilt für neue mobile Aktionen. Beende laufende Ausführungen und deaktiviere Routinen separat.",
   "Continue with {name}": "Mit {name} fortfahren",
   "Could not load sign-in options": "Anmeldeoptionen konnten nicht geladen werden",
   "Deletion code": "Löschcode",

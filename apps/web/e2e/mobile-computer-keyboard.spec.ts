@@ -8,7 +8,7 @@ const computerRoot = path.resolve(import.meta.dirname, "../../../infra/sandboxes
 
 async function openComputerEmbed(
   page: Page,
-  options: { touch?: boolean; clipboardText?: string | null } = {},
+  options: { touch?: boolean; clipboardText?: string | null; viewOnly?: boolean } = {},
 ) {
   const touch = options.touch ?? true;
   const assets = new Map([
@@ -79,7 +79,7 @@ async function openComputerEmbed(
       body,
     });
   });
-  await page.goto("http://keyboard.test/embed.html");
+  await page.goto(`http://keyboard.test/embed.html${options.viewOnly ? "?view_only=true" : ""}`);
 }
 
 test("touch users can open and dismiss the remote computer keyboard", async ({
@@ -90,11 +90,13 @@ test("touch users can open and dismiss the remote computer keyboard", async ({
   const trackpadButton = page.getByRole("button", { name: "Use trackpad" });
   const pasteButton = page.getByRole("button", { name: "Paste" });
   const keyboardInput = page.getByRole("textbox", { name: "Remote computer keyboard input" });
+  const keyboardField = page.locator("#mobile-keyboard-input");
   await expect(keyboardButton).toBeVisible();
   await expect(trackpadButton).toBeVisible();
   await expect(pasteButton).toBeVisible();
   await expect(page.getByRole("button", { name: "Escape" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ctrl" })).toBeVisible();
+  await expect(keyboardInput).toHaveCount(0);
 
   await trackpadButton.click();
   await expect(page.getByRole("button", { name: "Use direct touch" })).toBeVisible();
@@ -143,7 +145,8 @@ test("touch users can open and dismiss the remote computer keyboard", async ({
 
   await page.getByRole("button", { name: "Hide keyboard" }).click();
   await expect(keyboardButton).toBeVisible();
-  await expect(keyboardInput).not.toBeFocused();
+  await expect(keyboardField).not.toBeFocused();
+  await expect(keyboardField).toHaveAttribute("aria-hidden", "true");
   await expect(page.locator("html")).not.toHaveClass(/mobile-keyboard-open/);
   await expect
     .poll(() =>
@@ -165,9 +168,7 @@ test("touch users can paste clipboard text without a keyboard chord", async ({
   await expect
     .poll(() => page.evaluate(() => Reflect.get(globalThis, "__rfbClipboard")))
     .toEqual(["from-phone"]);
-  await expect(
-    page.getByRole("textbox", { name: "Remote computer keyboard input" }),
-  ).not.toBeFocused();
+  await expect(page.locator("#mobile-keyboard-input")).not.toBeFocused();
 });
 
 test("Paste focuses the keyboard when the clipboard API is denied", async ({ page }) => {
@@ -198,4 +199,15 @@ test("desktop embed hides touch computer chrome", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Show keyboard" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Use trackpad" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Escape" })).toHaveCount(0);
+});
+
+test("view-only previews expose no keyboard or touch controls", async ({ page }) => {
+  await openComputerEmbed(page, { viewOnly: true });
+  for (const name of ["Show keyboard", "Paste", "Use trackpad", "Escape", "Ctrl"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole("textbox", { name: "Remote computer keyboard input" })).toHaveCount(
+    0,
+  );
+  expect(await page.evaluate(() => Reflect.get(globalThis, "__rfbKeys"))).toEqual([]);
 });

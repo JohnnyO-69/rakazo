@@ -51,6 +51,8 @@ import {
   MessagingChannelMembershipSchema,
   MessagingLinkedIdentitySchema,
   MessagingStatusSchema,
+  ModelBackupChoiceSchema,
+  ModelBackupListSchema,
   ModelCatalogEntrySchema,
   ModelConnectInputSchema,
   ModelCredentialSchema,
@@ -214,12 +216,22 @@ export const appContract = {
   models: {
     list: oc.output(z.array(ModelCatalogEntrySchema)),
     credentials: oc.output(z.array(ModelCredentialSchema)),
+    backups: oc.output(z.array(ModelBackupChoiceSchema)),
+    setBackups: oc.input(ModelBackupListSchema).output(z.object({ ok: z.literal(true) })),
     connect: oc.input(ModelConnectInputSchema).output(ModelCredentialSchema),
     probeOpenAiCompatible: oc
       .input(
         z.object({
           baseUrl: z.string(),
           apiKey: z.string().optional(),
+        }),
+      )
+      .output(z.object({ models: z.array(z.string()) })),
+    probeCatalog: oc
+      .input(
+        z.object({
+          provider: z.string().trim().min(1),
+          apiKey: z.string().trim().min(8),
         }),
       )
       .output(z.object({ models: z.array(z.string()) })),
