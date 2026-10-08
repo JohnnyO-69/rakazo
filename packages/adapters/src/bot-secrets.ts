@@ -125,6 +125,7 @@ export async function loadBotCommandEnvironment(
   prisma: PrismaClient,
   secretStore: Pick<SecretStore, "load">,
   scope: BotSecretScope,
+  unsetVariables?: Set<string>,
 ): Promise<Record<string, string>> {
   const rows = await prisma.botSecret.findMany({
     where: scopeFields(scope),
@@ -142,6 +143,7 @@ export async function loadBotCommandEnvironment(
       value = await secretStore.load(row.ciphertext, row.id);
     } catch {
       // One unreadable value must not stop every shell command; the variable is left unset.
+      unsetVariables?.add(variable);
       continue;
     }
     if (value && !value.includes("\0")) environment[variable] = value;
@@ -161,15 +163,20 @@ export async function shellCommandEnvironment(input: {
   spaceEnvironment: Record<string, string>;
   registerRedactions: (values: string[]) => void;
 }): Promise<Record<string, string>> {
+  const unsetVariables = new Set<string>();
   const botEnvironment = await loadBotCommandEnvironment(
     input.prisma,
     input.secretStore,
     input.scope,
+    unsetVariables,
   );
   // Encoded forms too, as secret_request does, so an accidental `base64` or URL-encoding of a
   // value is still redacted from command output.
   input.registerRedactions(commandCredentialRedactions(botEnvironment));
-  return { ...input.spaceEnvironment, ...botEnvironment };
+  const environment = { ...input.spaceEnvironment, ...botEnvironment };
+  // A failed bot credential still shadows the space credential with the same name.
+  for (const variable of unsetVariables) delete environment[variable];
+  return environment;
 }
 
 /** Another command credential of this bot that is exported as the same variable. */

@@ -352,6 +352,34 @@ describe("shell command environment", () => {
     );
   });
 
+  it("leaves an unreadable bot variable unset instead of using the space credential", async () => {
+    const db = fakeDatabase();
+    await save(db, "cli-token", "fake-bot-token");
+    await save(db, "good-token", "fake-good-token");
+    const spaceEnvironment = { CLI_TOKEN: "fake-space-token", SPACE_ONLY: "fake-space-only" };
+    const registerRedactions = vi.fn();
+    const env = await shellCommandEnvironment({
+      prisma: db.prisma,
+      secretStore: {
+        async load(ciphertext, recordId) {
+          if (recordId === db.rows().find((row) => row.name === "cli-token")!.id) {
+            throw new Error("Cannot decrypt fake-bot-token");
+          }
+          return secretStore.load(ciphertext, recordId);
+        },
+      },
+      scope,
+      spaceEnvironment,
+      registerRedactions,
+    });
+    expect(env).toEqual({ SPACE_ONLY: "fake-space-only", GOOD_TOKEN: "fake-good-token" });
+    expect(Object.hasOwn(env, "CLI_TOKEN")).toBe(false);
+    expect(spaceEnvironment.CLI_TOKEN).toBe("fake-space-token");
+    expect(registerRedactions).toHaveBeenCalledExactlyOnceWith(
+      commandCredentialRedactions({ GOOD_TOKEN: "fake-good-token" }),
+    );
+  });
+
   it("redacts encoded command credentials before any shell command registers them", async () => {
     const db = fakeDatabase();
     const value = "fake token/with+chars=";
