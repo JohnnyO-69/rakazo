@@ -2,20 +2,47 @@ import { useLingui } from "@lingui/react/macro";
 import type { ReplyPreview, ThreadMessage } from "@rakazo/contracts";
 import { formatTimeSeparator, isPeerReceiptBlocks, replyLabel } from "@rakazo/core";
 import { X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { useArtifactImage } from "../../lib/use-artifact-image";
 
 function ReplyThumbnail({
   attachment,
   target,
+  lazy = false,
 }: {
+  lazy?: boolean;
   attachment: NonNullable<ReplyPreview["attachment"]>;
   target: ArtifactTarget;
 }) {
-  const src = useArtifactImage(target, attachment.artifactId);
+  const [visible, setVisible] = useState(!lazy);
+  const container = useRef<HTMLSpanElement>(null);
+  const src = useArtifactImage(target, attachment.artifactId, visible);
+  useEffect(() => {
+    if (!lazy) return;
+    const element = container.current;
+    if (!element || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "320px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [lazy]);
   return (
-    <span aria-hidden="true" className="size-8 shrink-0 overflow-hidden rounded-md bg-muted">
+    <span
+      ref={container}
+      aria-hidden="true"
+      className="size-8 shrink-0 overflow-hidden rounded-md bg-muted"
+    >
       {src ? (
         <img
           src={src}
@@ -138,7 +165,7 @@ export function ReplyLine({
     >
       <span aria-hidden="true">↩ </span>
       {attachment?.kind === "image" && target ? (
-        <ReplyThumbnail attachment={attachment} target={target} />
+        <ReplyThumbnail attachment={attachment} target={target} lazy />
       ) : null}
       <span className="min-w-0 truncate">
         {author}: {text}

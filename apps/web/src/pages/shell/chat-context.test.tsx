@@ -200,3 +200,69 @@ it("prefers a selected excerpt over the photo caption in the composer", () => {
   );
   expect(container.textContent).toBe("You: selected text");
 });
+
+it("defers transcript thumbnails until near the viewport while the composer loads immediately", async () => {
+  vi.mocked(rpc.artifacts.get)
+    .mockClear()
+    .mockResolvedValue({
+      contentBase64: "AA==",
+      mimeType: "image/png",
+    } as never);
+  vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:photo"), revokeObjectURL: vi.fn() });
+  let onIntersection!: IntersectionObserverCallback;
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  const observer = vi.fn(
+    class {
+      constructor(callback: IntersectionObserverCallback) {
+        onIntersection = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    },
+  );
+  vi.stubGlobal("IntersectionObserver", observer);
+  await act(async () =>
+    root.render(
+      <ReplyLine
+        message={{ ...message, replyPreview: { role: "user", text: "", attachment: photo } }}
+        author="You"
+        target={{ botId: "bot" }}
+      />,
+    ),
+  );
+  expect(rpc.artifacts.get).not.toHaveBeenCalled();
+  expect(observer).toHaveBeenCalledWith(expect.any(Function), { rootMargin: "320px" });
+  expect(observe).toHaveBeenCalledOnce();
+  act(() =>
+    onIntersection(
+      [{ isIntersecting: false }] as IntersectionObserverEntry[],
+      {} as IntersectionObserver,
+    ),
+  );
+  expect(rpc.artifacts.get).not.toHaveBeenCalled();
+  await act(async () =>
+    onIntersection(
+      [{ isIntersecting: true }] as IntersectionObserverEntry[],
+      {} as IntersectionObserver,
+    ),
+  );
+  expect(rpc.artifacts.get).toHaveBeenCalledOnce();
+  expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:photo");
+  expect(disconnect).toHaveBeenCalled();
+  vi.mocked(rpc.artifacts.get).mockClear();
+  observer.mockClear();
+  await act(async () =>
+    root.render(
+      <ComposerReplyPreview
+        author="You"
+        text=""
+        attachment={photo}
+        target={{ groupId: "group" }}
+        onDismiss={vi.fn()}
+      />,
+    ),
+  );
+  expect(rpc.artifacts.get).toHaveBeenCalledOnce();
+  expect(observer).not.toHaveBeenCalled();
+});
