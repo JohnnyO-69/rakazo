@@ -30,6 +30,7 @@ import type { IntegrationsCacheScope, IntegrationsSnapshot } from "../lib/integr
 import {
   integrationsCacheScope,
   isIntegrationsScopeCurrent,
+  persistedIntegrationsCacheScope,
   readIntegrationsCache,
   writeIntegrationsCache,
 } from "../lib/integrations-cache";
@@ -79,6 +80,7 @@ export default function Integrations() {
   const snapshot = useRef<IntegrationsSnapshot>({ catalog: [], connections: [] });
   const mounted = useRef(false);
   const refreshGeneration = useRef(0);
+  const sourcesGeneration = useRef(0);
 
   function applySnapshot(next: IntegrationsSnapshot) {
     snapshot.current = next;
@@ -140,15 +142,69 @@ export default function Integrations() {
     );
   }, [catalog, detailKey]);
 
+  function clearStaleScope() {
+    if (!cacheScope.current || isIntegrationsScopeCurrent(cacheScope.current)) return;
+    cacheScope.current = null;
+    refreshGeneration.current += 1;
+    sourcesGeneration.current += 1;
+    applySnapshot({ catalog: [], connections: [] });
+    setCatalogReady(false);
+    setSources([]);
+    setDetailKey(null);
+    setLabelDrafts({});
+  }
+
   async function refresh() {
-    const scope = cacheScope.current ?? (await integrationsCacheScope());
-    if (!mounted.current || !isIntegrationsScopeCurrent(scope)) return;
-    if (!cacheScope.current) {
-      cacheScope.current = scope;
+    clearStaleScope();
+    let scope: IntegrationsCacheScope;
+    try {
+      scope = await integrationsCacheScope();
+    } catch (reason) {
+      if (
+        mounted.current &&
+        cacheScope.current &&
+        !isIntegrationsScopeCurrent(cacheScope.current)
+      ) {
+        clearStaleScope();
+        return refresh();
+      }
+      throw reason;
+    }
+    if (!mounted.current) return;
+    if (!isIntegrationsScopeCurrent(scope)) {
+      clearStaleScope();
+      return refresh();
+    }
+    const previous = cacheScope.current;
+    if (previous && (previous.userId !== scope.userId || previous.spaceId !== scope.spaceId)) {
+      applySnapshot({ catalog: [], connections: [] });
+      setCatalogReady(false);
+      setSources([]);
+      setDetailKey(null);
+      setLabelDrafts({});
+    }
+    cacheScope.current = scope;
+    if (!previous || previous.userId !== scope.userId || previous.spaceId !== scope.spaceId) {
       const cached = readIntegrationsCache(scope);
       if (cached) applySnapshot(cached);
     }
     const generation = ++refreshGeneration.current;
+    const sourceGeneration = ++sourcesGeneration.current;
+    void rpc<CapabilityInstall[]>("capabilities/list")
+      .then((installs) => {
+        if (
+          mounted.current &&
+          isIntegrationsScopeCurrent(scope) &&
+          sourceGeneration === sourcesGeneration.current
+        ) {
+          setSources(
+            installs.filter(
+              (item) => item.kind === "mcp" || item.kind === "api" || item.kind === "graphql",
+            ),
+          );
+        }
+      })
+      .catch(() => undefined);
     setCatalogError(null);
     let next: IntegrationsSnapshot;
     try {
@@ -164,8 +220,10 @@ export default function Integrations() {
         generation === refreshGeneration.current
       )
         throw reason;
+      if (mounted.current && !isIntegrationsScopeCurrent(scope)) return refresh();
       return;
     }
+    if (mounted.current && !isIntegrationsScopeCurrent(scope)) return refresh();
     if (
       !mounted.current ||
       !isIntegrationsScopeCurrent(scope) ||
@@ -174,22 +232,6 @@ export default function Integrations() {
       return;
     applySnapshot(next);
     writeIntegrationsCache(scope, next);
-    try {
-      const installs = await rpc<CapabilityInstall[]>("capabilities/list");
-      if (
-        mounted.current &&
-        isIntegrationsScopeCurrent(scope) &&
-        generation === refreshGeneration.current
-      ) {
-        setSources(
-          installs.filter(
-            (item) => item.kind === "mcp" || item.kind === "api" || item.kind === "graphql",
-          ),
-        );
-      }
-    } catch {
-      // Tool sources are optional; keep featured/catalog usable if this fails.
-    }
   }
 
   async function retryRefresh() {
@@ -207,11 +249,21 @@ export default function Integrations() {
 
   useEffect(() => {
     mounted.current = true;
-    void retryRefresh();
+    void (async () => {
+      const scope = await persistedIntegrationsCacheScope();
+      if (!mounted.current) return;
+      if (scope && isIntegrationsScopeCurrent(scope)) {
+        cacheScope.current = scope;
+        const cached = readIntegrationsCache(scope);
+        if (cached) applySnapshot(cached);
+      }
+      await retryRefresh();
+    })();
     void loadLastBotId().then(setLastBotId);
     return () => {
       mounted.current = false;
       refreshGeneration.current += 1;
+      sourcesGeneration.current += 1;
       connectionAttempt.current?.abort();
     };
   }, []);

@@ -3,7 +3,11 @@ import { ConnectionCatalogItemSchema, ConnectionSchema } from "@rakazo/contracts
 import { Directory, File, Paths } from "expo-file-system";
 import { currentApiBase, rpc, selectedSpaceId } from "./api";
 import { t } from "./i18n";
-import { currentSessionGeneration } from "./session";
+import {
+  currentSessionGeneration,
+  loadVerifiedIntegrationsScope,
+  saveVerifiedIntegrationsScope,
+} from "./session";
 
 export type IntegrationsSnapshot = {
   catalog: ConnectionCatalogItem[];
@@ -19,16 +23,34 @@ export type IntegrationsCacheScope = {
 
 // Reuse verified identity within this session, never across sign-out or server changes.
 let identity:
-  | { apiBase: string; generation: number; user: Promise<Pick<Me, "userId" | "spaceId">> }
+  | {
+      apiBase: string;
+      generation: number;
+      selectionId: string | null;
+      user: Promise<Pick<Me, "userId" | "spaceId">>;
+    }
   | undefined;
+
+export async function persistedIntegrationsCacheScope(): Promise<IntegrationsCacheScope | null> {
+  const generation = currentSessionGeneration();
+  const saved = await loadVerifiedIntegrationsScope();
+  if (!saved) return null;
+  const scope = { ...saved, sessionGeneration: generation };
+  return isIntegrationsScopeCurrent(scope) ? scope : null;
+}
 
 export async function integrationsCacheScope(): Promise<IntegrationsCacheScope> {
   const apiBase = currentApiBase();
   const generation = currentSessionGeneration();
   const spaceId = selectedSpaceId();
-  if (!identity || identity.apiBase !== apiBase || identity.generation !== generation) {
+  if (
+    !identity ||
+    identity.apiBase !== apiBase ||
+    identity.generation !== generation ||
+    identity.selectionId !== spaceId
+  ) {
     const user = rpc<Pick<Me, "userId" | "spaceId">>("me");
-    const entry = { apiBase, generation, user };
+    const entry = { apiBase, generation, selectionId: spaceId, user };
     identity = entry;
     void user.catch(() => {
       if (identity === entry) identity = undefined;
@@ -42,13 +64,15 @@ export async function integrationsCacheScope(): Promise<IntegrationsCacheScope> 
   )
     throw new Error(t("Could not load integrations"));
   if (!me.userId || !(spaceId || me.spaceId)) throw new Error(t("Could not load integrations"));
-  return {
+  const scope = {
     apiBase,
     userId: me.userId,
     spaceId: spaceId || me.spaceId,
     sessionGeneration: generation,
     selectionId: spaceId,
   };
+  void saveVerifiedIntegrationsScope(generation, scope);
+  return scope;
 }
 
 export function isIntegrationsScopeCurrent(scope: IntegrationsCacheScope): boolean {

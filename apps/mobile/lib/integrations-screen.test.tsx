@@ -7,10 +7,18 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import Integrations from "../app/integrations";
 import { ConnectorIcon } from "../components/connector-icon";
 
-const state = vi.hoisted(() => ({ rpc: vi.fn(), read: vi.fn(), write: vi.fn(), current: true }));
+const state = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  read: vi.fn(),
+  write: vi.fn(),
+  current: true,
+  scope: vi.fn(),
+  persisted: vi.fn(),
+}));
 vi.mock("./api", () => ({ rpc: state.rpc }));
 vi.mock("./integrations-cache", () => ({
-  integrationsCacheScope: async () => ({ userId: "user-a", spaceId: "space-a" }),
+  integrationsCacheScope: state.scope,
+  persistedIntegrationsCacheScope: state.persisted,
   isIntegrationsScopeCurrent: () => state.current,
   readIntegrationsCache: state.read,
   writeIntegrationsCache: state.write,
@@ -109,6 +117,8 @@ let rejectCatalog: (error: Error) => void;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   state.current = true;
+  state.scope.mockReset().mockResolvedValue({ userId: "user-a", spaceId: "space-a" });
+  state.persisted.mockReset().mockResolvedValue(null);
   state.read.mockReset().mockReturnValue(null);
   state.write.mockReset();
   const pending = new Promise<(typeof item)[]>((resolve, reject) => {
@@ -180,6 +190,7 @@ it("offers Retry on a cold failure without leaving a loading placeholder", async
 it("ignores a refresh after its scope changes", async () => {
   await render();
   state.current = false;
+  state.scope.mockRejectedValue(new Error("session changed"));
   await act(async () => resolveCatalog([item]));
   expect(container.textContent).not.toContain("Example app");
   expect(state.write).not.toHaveBeenCalled();
@@ -285,4 +296,95 @@ it("persists a completed connection before refreshing", async () => {
     connections: [account],
   });
   expect(container.textContent).toContain("Example appAdded");
+});
+
+it("paints persisted cached rows while identity is pending or offline", async () => {
+  state.persisted.mockResolvedValue({ userId: "user-a", spaceId: "space-a" });
+  state.read.mockReturnValue({ catalog: [item], connections: [account] });
+  let rejectIdentity!: (error: Error) => void;
+  state.scope.mockReturnValue(
+    new Promise((_, reject) => {
+      rejectIdentity = reject;
+    }),
+  );
+  await render();
+  expect(container.textContent).toContain("Example appAdded");
+  expect(state.rpc).not.toHaveBeenCalled();
+  await act(async () => rejectIdentity(new Error("offline")));
+  expect(container.textContent).toContain("Example appAdded");
+  expect(container.textContent).toContain("Retry");
+});
+
+it("rebuilds a stale space and continues refreshing while the screen stays open", async () => {
+  state.read.mockReturnValue({ catalog: [item], connections: [account] });
+  await render();
+  state.current = false;
+  state.scope.mockImplementation(async () => {
+    state.current = true;
+    return { userId: "user-a", spaceId: "space-b" };
+  });
+  state.read.mockReturnValue(null);
+  state.rpc.mockImplementation((proc: string) =>
+    Promise.resolve(
+      proc === "connections/catalog" ? [{ ...item, name: "Recovered app", connected: false }] : [],
+    ),
+  );
+  await act(async () => resolveCatalog([item]));
+  expect(state.scope).toHaveBeenCalledTimes(2);
+  expect(container.textContent).not.toContain("Example app");
+  expect(container.textContent).toContain("Recovered appAdd");
+  expect(state.write).toHaveBeenLastCalledWith(
+    { userId: "user-a", spaceId: "space-b" },
+    {
+      catalog: [{ ...item, name: "Recovered app", connected: false }],
+      connections: [],
+    },
+  );
+});
+
+it("keeps sources loading when a rename cancels the catalog refresh", async () => {
+  state.read.mockReturnValue({ catalog: [item], connections: [account] });
+  let resolveSources!: (value: unknown[]) => void;
+  const sources = new Promise<unknown[]>((resolve) => {
+    resolveSources = resolve;
+  });
+  const original = state.rpc.getMockImplementation()!;
+  state.rpc.mockImplementation((proc: string) =>
+    proc === "capabilities/list" ? sources : original(proc),
+  );
+  await render();
+  await act(async () =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "Added")?.click(),
+  );
+  const input = container.querySelector("input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "Renamed",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  state.rpc.mockImplementation((proc: string) =>
+    proc === "connections/rename"
+      ? Promise.resolve({ ...account, displayName: "Renamed" })
+      : original(proc),
+  );
+  await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+  await act(async () => resolveCatalog([item]));
+  await act(async () =>
+    resolveSources([
+      { id: "source-a", name: "Installed source", kind: "mcp", source: "https://example.test/mcp" },
+    ]),
+  );
+  await act(async () =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "Back")?.click(),
+  );
+  await act(async () =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === "Advanced")?.click(),
+  );
+  expect(container.textContent).toContain("Installed source");
+  expect(container.textContent).not.toContain("No custom sources installed.");
+  expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Remove")).toBe(
+    true,
+  );
 });
