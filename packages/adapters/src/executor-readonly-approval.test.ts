@@ -7,7 +7,7 @@ import type {
 import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isApprovalPausedResult } from "./approval-effect.js";
 import { MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
@@ -58,10 +58,12 @@ function fixture({
   },
   shutdownSignal,
   builtin = false,
+  botId = "bot-1",
   existingSharedMemory,
   advanceRevisionAfterRead = false,
 }: {
   builtin?: boolean;
+  botId?: string;
   existingSharedMemory?: string;
   /** Simulates another writer landing between the save's read and its commit. */
   advanceRevisionAfterRead?: boolean;
@@ -113,7 +115,7 @@ function fixture({
   );
   const run = {
     id: "run-1",
-    botId: "bot-1",
+    botId,
     threadId: "thread-1",
     taskId: "task-1",
     spaceId: "space-1",
@@ -251,7 +253,10 @@ function fixture({
         catalog ? resolveCatalogCall(call, catalogEntries([tool])) : undefined,
       execute,
     },
-    sandbox: { describe: () => ({ capabilities: { graphical: false } }) },
+    sandbox: {
+      describe: () => ({ capabilities: { graphical: false } }),
+      execute: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
+    },
     memory: {
       read: async (request: { scope: string; path?: string }) => {
         const documents =
@@ -299,6 +304,10 @@ function fixture({
       expect(runtimeRun).toHaveBeenCalled();
       expect(prisma.attempt.update).not.toHaveBeenCalled();
       expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
+    },
+    async runThroughApprovalGate() {
+      run.status = "queued";
+      await executor.continueRun(run.id, "worker-1");
     },
   };
 }
@@ -673,5 +682,93 @@ describe("connector read-only metadata and approval enforcement", () => {
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.pauseRunForInput).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("trusted webhook bot allowlist", () => {
+  const envKey = "RAKAZO_TRUSTED_WEBHOOK_BOTS";
+  const previous = process.env[envKey];
+
+  beforeEach(() => {
+    delete process.env[envKey];
+  });
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+
+  it.each(["shell", "message_bot"])(
+    "still forces owner approval for webhook-triggered %s when the allowlist is unset",
+    async (name) => {
+      const f = fixture({
+        name,
+        builtin: name === "message_bot",
+        trigger: "webhook",
+        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: name }],
+      });
+      await f.run();
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      expect(isApprovalPausedResult(f.results[0])).toBe(true);
+    },
+  );
+
+  it.each(["shell", "message_bot"])(
+    "follows space rules for webhook-triggered %s when the bot is trusted",
+    async (name) => {
+      process.env[envKey] = "bot-1";
+      const f = fixture({
+        name,
+        builtin: name === "message_bot",
+        trigger: "webhook",
+        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: name }],
+      });
+      await f.runThroughApprovalGate();
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still asks when a trusted webhook bot hits a require_approval rule", async () => {
+    process.env[envKey] = "bot-1";
+    const f = fixture({
+      name: "shell",
+      trigger: "webhook",
+      rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "shell" }],
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(isApprovalPausedResult(f.results[0])).toBe(true);
+  });
+
+  it("allows a trusted webhook tool when no rules apply and auto review is off", async () => {
+    process.env[envKey] = "bot-1";
+    const f = fixture({ name: "shell", trigger: "webhook" });
+    await f.runThroughApprovalGate();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+
+  it("still forces approval for create_space on a trusted webhook bot", async () => {
+    process.env[envKey] = "bot-1";
+    const f = fixture({
+      name: "create_space",
+      builtin: true,
+      trigger: "webhook",
+      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "create_space" }],
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(isApprovalPausedResult(f.results[0])).toBe(true);
+  });
+
+  it("still forces approval for a webhook bot that is not on the allowlist", async () => {
+    process.env[envKey] = "other-bot";
+    const f = fixture({
+      name: "shell",
+      trigger: "webhook",
+      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "shell" }],
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(isApprovalPausedResult(f.results[0])).toBe(true);
   });
 });

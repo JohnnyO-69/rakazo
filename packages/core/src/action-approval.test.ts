@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   type ActionApprovalRule,
   applyJudgeDecision,
@@ -11,6 +11,8 @@ import {
   resolveActionApprovalDetail,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
+  isTrustedWebhookBot,
+  parseTrustedWebhookBotIds,
   unattendedTriggerToolRequiresApproval,
 } from "./action-approval.js";
 
@@ -91,6 +93,36 @@ describe("resolveActionApprovalDetail", () => {
     const base = { toolName: "gmail_read_thread", connectorKind: "gmail", rules };
     expect(resolveActionApprovalDetail(base).decision).toBe("allow");
     expect(resolveActionApprovalDetail({ ...base, readOnly: false }).decision).toBe("ask");
+  });
+});
+
+describe("parseTrustedWebhookBotIds", () => {
+  const previous = process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS;
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS;
+    else process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS = previous;
+  });
+
+  it("returns empty when unset or blank", () => {
+    delete process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS;
+    expect(parseTrustedWebhookBotIds()).toEqual(new Set());
+    expect(parseTrustedWebhookBotIds("")).toEqual(new Set());
+    expect(parseTrustedWebhookBotIds("   ")).toEqual(new Set());
+  });
+
+  it("parses comma- and whitespace-separated ids", () => {
+    expect(parseTrustedWebhookBotIds("a,b  c")).toEqual(new Set(["a", "b", "c"]));
+    expect(parseTrustedWebhookBotIds("a,a,b")).toEqual(new Set(["a", "b"]));
+  });
+});
+
+describe("isTrustedWebhookBot", () => {
+  it("matches only listed bot ids", () => {
+    const env = { RAKAZO_TRUSTED_WEBHOOK_BOTS: "bot-a, bot-b" };
+    expect(isTrustedWebhookBot("bot-a", env)).toBe(true);
+    expect(isTrustedWebhookBot("bot-b", env)).toBe(true);
+    expect(isTrustedWebhookBot("bot-c", env)).toBe(false);
   });
 });
 
