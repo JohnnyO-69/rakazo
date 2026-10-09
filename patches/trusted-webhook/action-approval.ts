@@ -122,6 +122,65 @@ export function isTrustedWebhookBot(botId: string, env: NodeJS.ProcessEnv = proc
   return parseTrustedWebhookBotIds(env.RAKAZO_TRUSTED_WEBHOOK_BOTS).has(botId);
 }
 
+export type TrustedSecretPostEntry = {
+  botId: string;
+  credentialName: string;
+  url: string;
+};
+
+/** Scheme, host, and path only — query and fragment are ignored for matching. */
+export function normalizeTrustedSecretPostUrl(raw: string): string | undefined {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseTrustedSecretPosts(
+  raw = process.env.RAKAZO_TRUSTED_SECRET_POSTS,
+): readonly TrustedSecretPostEntry[] {
+  if (raw === undefined || raw === "") return [];
+  const entries: TrustedSecretPostEntry[] = [];
+  for (const segment of raw.split(",")) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    const pieces = trimmed.split("|");
+    if (pieces.length !== 3) continue;
+    const botId = pieces[0]!.trim();
+    const credentialName = pieces[1]!.trim();
+    const url = normalizeTrustedSecretPostUrl(pieces[2]!.trim());
+    if (!botId || !credentialName || !url) continue;
+    entries.push({ botId, credentialName, url });
+  }
+  return entries;
+}
+
+export function isTrustedSecretPost(
+  botId: string,
+  request: { name?: unknown; url?: unknown; method?: unknown },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const method = request.method === undefined ? "GET" : String(request.method);
+  if (method !== "POST") return false;
+  const credentialName = typeof request.name === "string" ? request.name : "";
+  const requestUrl =
+    typeof request.url === "string" ? normalizeTrustedSecretPostUrl(request.url) : undefined;
+  if (!credentialName || !requestUrl) return false;
+  for (const entry of parseTrustedSecretPosts(env.RAKAZO_TRUSTED_SECRET_POSTS)) {
+    if (
+      entry.botId === botId &&
+      entry.credentialName === credentialName &&
+      entry.url === requestUrl
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** External webhook runs may inspect state unattended, but side effects always need the owner. */
 export function unattendedTriggerToolRequiresApproval(
   trigger: string,

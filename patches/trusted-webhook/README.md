@@ -14,6 +14,31 @@ When a webhook-triggered run’s bot id is listed, the executor skips the forced
 
 Inbound messaging routines also use trigger `"webhook"`; listed bots get the same bypass there.
 
+## Trusted `secret_request` POSTs (`RAKAZO_TRUSTED_SECRET_POSTS`)
+
+Auto Review can flag specific outbound `secret_request` calls (for example a webhook pong) even when they are expected. This optional list skips approval and Auto Review for matching calls on **any** run trigger (`user`, `bot_message`, `webhook`).
+
+```bash
+RAKAZO_TRUSTED_SECRET_POSTS=<botId>|<credentialName>|<exact URL>,...
+```
+
+A call is allowed only when **all** of the following hold:
+
+- Bot id matches exactly.
+- Saved credential name (`secret_request` `name`) matches exactly.
+- Request URL matches exactly on scheme, host, and path (query and fragment on the request are ignored for matching; no prefix or wildcard).
+- HTTP method is `POST`.
+
+Space `require_approval` rules still win. `create_space` is unchanged. Unset or empty means stock behaviour. Each allowed call logs one info line with `botId`, `runId`, and credential name only (never URL, query, or body).
+
+Example (EZ Postmaster pong):
+
+```bash
+RAKAZO_TRUSTED_SECRET_POSTS=cmuysyz07007a31pl8jaxorgv|grok_postmaster|https://api2.cursor.sh/automations/webhook/5a8dfae7-13d6-54f3-adb6-4e91088885b4
+```
+
+Add the line to `.env` and recreate api/worker like the webhook-bot list above.
+
 ## Modified files (Apache-2.0)
 
 This patch modifies upstream Rakazo files from commit `df708491af0e53dec9c4cf9aad1907317db835d0` (image digest `sha256:1cc31cfdc67a5bc78d770ae0320686ce4621daa7588ec6b8a1a1d3138200a6a2`). Upstream is licensed under Apache-2.0; these copies are derivative modifications. Keep Rakazo’s `LICENSE` and treat `action-approval.ts` and `executor.ts` in this folder as patched sources for the overlay image.
@@ -35,7 +60,7 @@ Only **api** and **worker** need this image. Supervisor and web stay on your exi
 
 ## Switch on / change the list
 
-Edit `RAKAZO_TRUSTED_WEBHOOK_BOTS` in `.env` (back up `.env` first). Both api and worker load `env_file: .env`. Recreate api and worker:
+Edit `RAKAZO_TRUSTED_WEBHOOK_BOTS` and/or `RAKAZO_TRUSTED_SECRET_POSTS` in `.env` (back up `.env` first). Both api and worker load `env_file: .env`. Recreate api and worker:
 
 ```bash
 cd ~/rakazo
@@ -50,7 +75,7 @@ RAKAZO_TRUSTED_WEBHOOK_BOTS=bot-id-one,bot-id-two
 
 ## Switch off (keep patched image)
 
-Clear or remove `RAKAZO_TRUSTED_WEBHOOK_BOTS` in `.env`, then run the same `up -d api worker` command above. Behaviour returns to stock webhook gating.
+Clear or remove `RAKAZO_TRUSTED_WEBHOOK_BOTS` and/or `RAKAZO_TRUSTED_SECRET_POSTS` in `.env`, then run the same `up -d api worker` command above. Behaviour returns to stock gating.
 
 ## Rollback to stock image
 

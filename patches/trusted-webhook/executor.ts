@@ -82,6 +82,7 @@ import {
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   truncatedPlainText,
+  isTrustedSecretPost,
   isTrustedWebhookBot,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
@@ -2079,6 +2080,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined;
           const trustedWebhookBot =
             run.trigger === "webhook" && isTrustedWebhookBot(bot.id);
+          const trustedSecretPost =
+            name === "secret_request" && isTrustedSecretPost(bot.id, args);
           if (trustedWebhookBot && !trustedWebhookBypassLogged) {
             trustedWebhookBypassLogged = true;
             getLogger().info("webhook run uses normal approval rules: trusted bot", {
@@ -2086,8 +2089,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               runId,
             });
           }
+          if (trustedSecretPost) {
+            getLogger().info("secret_request allowed by trusted post list", {
+              botId: bot.id,
+              runId,
+              credential: typeof args.name === "string" ? args.name : undefined,
+            });
+          }
           const requiresUnattendedApproval =
             !trustedWebhookBot &&
+            !trustedSecretPost &&
             unattendedTriggerToolRequiresApproval(
               run.trigger,
               name,
@@ -2129,14 +2140,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ),
                   )
                 : false));
-          const plan = requiresMandatoryApproval
-            ? "ask"
-            : planActionGate({
-                resolved: approvalResolved,
-                consequential: requiresApprovalByDefault,
-                autoReviewEnabled: autoReviewPref,
-                checkerConfigured,
-              });
+          const plan =
+            trustedSecretPost && approvalResolved.decision !== "ask"
+              ? "allow"
+              : requiresMandatoryApproval
+                ? "ask"
+                : planActionGate({
+                    resolved: approvalResolved,
+                    consequential: requiresApprovalByDefault,
+                    autoReviewEnabled: autoReviewPref,
+                    checkerConfigured,
+                  });
           let reviewReason: string | undefined;
           let gateDecision: "ask" | "allow" = plan === "ask" ? "ask" : "allow";
           const needsApprovalEarly = plan === "ask" || plan === "judge";

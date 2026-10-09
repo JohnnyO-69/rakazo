@@ -772,3 +772,82 @@ describe("trusted webhook bot allowlist", () => {
     expect(isApprovalPausedResult(f.results[0])).toBe(true);
   });
 });
+
+describe("trusted secret_request posts", () => {
+  const postsKey = "RAKAZO_TRUSTED_SECRET_POSTS";
+  const previous = process.env[postsKey];
+  const postmasterBotId = "cmuysyz07007a31pl8jaxorgv";
+  const credential = "grok_postmaster";
+  const pongUrl =
+    "https://api2.cursor.sh/automations/webhook/5a8dfae7-13d6-54f3-adb6-4e91088885b4";
+  const trustedEntry = `${postmasterBotId}|${credential}|${pongUrl}`;
+  const postArgs = { name: credential, url: pongUrl, method: "POST" };
+
+  beforeEach(() => {
+    delete process.env[postsKey];
+    reviewMock.mockReset();
+    reviewMock.mockResolvedValue({ decision: "ask", reason: "Risky", model: "mock" });
+  });
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env[postsKey];
+    else process.env[postsKey] = previous;
+  });
+
+  function secretFixture(overrides: Parameters<typeof fixture>[0] = {}) {
+    const f = fixture({
+      name: "secret_request",
+      builtin: true,
+      autoReview: true,
+      trigger: "bot_message",
+      botId: postmasterBotId,
+      ...overrides,
+    });
+    f.setCalls([{ args: postArgs, executionId: "call-1" }]);
+    return f;
+  }
+
+  it("skips auto review for an exact trusted POST match", async () => {
+    process.env[postsKey] = trustedEntry;
+    const f = secretFixture();
+    await f.runThroughApprovalGate();
+    expect(reviewMock).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+
+  it("still runs auto review when the env var is unset", async () => {
+    const f = secretFixture();
+    await f.runThroughApprovalGate();
+    expect(reviewMock).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["url", { ...postArgs, url: `${pongUrl}/extra` }],
+    ["credential", { ...postArgs, name: "other_cred" }],
+    ["method", { ...postArgs, method: "GET" }],
+  ])("still runs auto review when the %s does not match", async (_label, args) => {
+    process.env[postsKey] = trustedEntry;
+    const f = secretFixture({ botId: postmasterBotId });
+    f.setCalls([{ args, executionId: "call-1" }]);
+    await f.runThroughApprovalGate();
+    expect(reviewMock).toHaveBeenCalledOnce();
+  });
+
+  it("still runs auto review for a different bot id", async () => {
+    process.env[postsKey] = trustedEntry;
+    const f = secretFixture({ botId: "bot-1" });
+    await f.runThroughApprovalGate();
+    expect(reviewMock).toHaveBeenCalledOnce();
+  });
+
+  it("still asks when a require_approval rule matches despite a trusted entry", async () => {
+    process.env[postsKey] = trustedEntry;
+    const f = secretFixture({
+      rules: [{ effect: "require_approval", matchKind: "tool", matchValue: "secret_request" }],
+    });
+    await f.runThroughApprovalGate();
+    expect(reviewMock).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(isApprovalPausedResult(f.results[0])).toBe(true);
+  });
+});
