@@ -1,0 +1,5 @@
+services:
+  api:
+    image: rakazo-app:trusted-webhook-df708491
+  worker:
+    image: rakazo-app:trusted-webhook-df708491

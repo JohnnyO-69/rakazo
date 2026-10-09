@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   type ActionApprovalRule,
   applyJudgeDecision,
@@ -11,6 +11,11 @@ import {
   resolveActionApprovalDetail,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
+  isTrustedSecretPost,
+  isTrustedWebhookBot,
+  normalizeTrustedSecretPostUrl,
+  parseTrustedSecretPosts,
+  parseTrustedWebhookBotIds,
   unattendedTriggerToolRequiresApproval,
 } from "./action-approval.js";
 
@@ -91,6 +96,86 @@ describe("resolveActionApprovalDetail", () => {
     const base = { toolName: "gmail_read_thread", connectorKind: "gmail", rules };
     expect(resolveActionApprovalDetail(base).decision).toBe("allow");
     expect(resolveActionApprovalDetail({ ...base, readOnly: false }).decision).toBe("ask");
+  });
+});
+
+describe("parseTrustedWebhookBotIds", () => {
+  const previous = process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS;
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS;
+    else process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS = previous;
+  });
+
+  it("returns empty when unset or blank", () => {
+    delete process.env.RAKAZO_TRUSTED_WEBHOOK_BOTS;
+    expect(parseTrustedWebhookBotIds()).toEqual(new Set());
+    expect(parseTrustedWebhookBotIds("")).toEqual(new Set());
+    expect(parseTrustedWebhookBotIds("   ")).toEqual(new Set());
+  });
+
+  it("parses comma- and whitespace-separated ids", () => {
+    expect(parseTrustedWebhookBotIds("a,b  c")).toEqual(new Set(["a", "b", "c"]));
+    expect(parseTrustedWebhookBotIds("a,a,b")).toEqual(new Set(["a", "b"]));
+  });
+});
+
+describe("isTrustedWebhookBot", () => {
+  it("matches only listed bot ids", () => {
+    const env = { RAKAZO_TRUSTED_WEBHOOK_BOTS: "bot-a, bot-b" };
+    expect(isTrustedWebhookBot("bot-a", env)).toBe(true);
+    expect(isTrustedWebhookBot("bot-b", env)).toBe(true);
+    expect(isTrustedWebhookBot("bot-c", env)).toBe(false);
+  });
+});
+
+describe("parseTrustedSecretPosts", () => {
+  it("returns empty when unset", () => {
+    expect(parseTrustedSecretPosts(undefined)).toEqual([]);
+    expect(parseTrustedSecretPosts("")).toEqual([]);
+  });
+
+  it("parses pipe-delimited entries", () => {
+    const url = "https://api.example.test/hook";
+    expect(
+      parseTrustedSecretPosts(`bot-1|cred-a|${url}, bot-2 | cred-b | ${url}/other`),
+    ).toEqual([
+      { botId: "bot-1", credentialName: "cred-a", url: "https://api.example.test/hook" },
+      { botId: "bot-2", credentialName: "cred-b", url: "https://api.example.test/hook/other" },
+    ]);
+  });
+});
+
+describe("isTrustedSecretPost", () => {
+  const botId = "cmuysyz07007a31pl8jaxorgv";
+  const credential = "grok_postmaster";
+  const url = "https://api2.cursor.sh/automations/webhook/5a8dfae7-13d6-54f3-adb6-4e91088885b4";
+  const env = {
+    RAKAZO_TRUSTED_SECRET_POSTS: `${botId}|${credential}|${url}`,
+  };
+
+  it("allows an exact POST match and ignores query on the request url", () => {
+    expect(
+      isTrustedSecretPost(
+        botId,
+        { name: credential, url: `${url}?ping=1`, method: "POST" },
+        env,
+      ),
+    ).toBe(true);
+    expect(normalizeTrustedSecretPostUrl(`${url}?ping=1`)).toBe(
+      normalizeTrustedSecretPostUrl(url),
+    );
+  });
+
+  it("rejects mismatched bot, credential, url, or method", () => {
+    const request = { name: credential, url, method: "POST" };
+    expect(isTrustedSecretPost("other-bot", request, env)).toBe(false);
+    expect(isTrustedSecretPost(botId, { ...request, name: "other_cred" }, env)).toBe(false);
+    expect(
+      isTrustedSecretPost(botId, { ...request, url: "https://api2.cursor.sh/other" }, env),
+    ).toBe(false);
+    expect(isTrustedSecretPost(botId, { ...request, method: "GET" }, env)).toBe(false);
+    expect(isTrustedSecretPost(botId, { name: credential, url, method: "POST" }, {})).toBe(false);
   });
 });
 
